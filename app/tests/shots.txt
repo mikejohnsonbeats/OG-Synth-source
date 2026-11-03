@@ -1,0 +1,37 @@
+# zrzuty ekranów do sprawdzenia wyglądu (CI: app/build/host/*.png w artefakcie)
+wait 600
+tap GLO
+wait 100
+shot glo.png
+tap HOME
+wait 100
+tap SEQ
+wait 100
+shot seq.png
+tap HOME
+wait 100
+# SEQ NOTES: nuty, zaznaczenie SEL + K2, karta na zakresie, PLAY od kursora
+tap SEQ
+wait 100
+turn K2 1
+wait 50
+spin SELECT 1
+turn K2 1
+wait 50
+spin SELECT -1
+press SEL
+spin K2 2
+wait 50
+release SEL
+wait 50
+shot seq_sel.png
+tap SEL
+wait 100
+shot seq_card.png
+tap HOME
+wait 50
+tap PLAY
+wait 300
+tap PLAY
+wait 50
+shot seq_play.png

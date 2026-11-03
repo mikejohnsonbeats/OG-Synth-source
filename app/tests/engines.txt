@@ -1,0 +1,187 @@
+# OG Synth: wspólny RAM silników — po zmianie silnika nowy gra od zera, stary milknie, nic nie wisi
+#   python3 fm1-base/tools/build.py app --host, potem: app/build/host/ogs_host app/tests/engines.txt app/build/host
+wait 600
+expect eng 0
+peakreset
+midi 90 3C 64
+wait 300
+expect held 1
+expect peak_db_min -50
+midi 80 3C 00
+wait 1500
+# okno ENGINE (HOME na HOME), SELECT o jeden: SEM (v0.35: kolejność VA MINI SEM VCO DCO ALPHA WEST, DIGI FM6 PHASE WAVE BIT), nuta trzymana przy zmianie
+midi 90 3C 64
+wait 100
+tap HOME
+wait 50
+spin SELECT 1
+wait 100
+expect eng 5
+expect held 0
+midi 80 3C 00
+wait 100
+peakreset
+midi 90 40 64
+wait 300
+expect held 1
+expect peak_db_min -50
+midi 80 40 00
+wait 1500
+spin SELECT 1
+wait 100
+expect eng 4
+peakreset
+midi 90 43 64
+wait 300
+expect held 1
+expect peak_db_min -50
+midi 80 43 00
+wait 1500
+spin SELECT 1
+wait 100
+expect eng 6
+peakreset
+midi 90 48 64
+wait 300
+expect held 1
+expect peak_db_min -50
+midi 80 48 00
+wait 1500
+# v0.49: ALPHA (VA, za DCO; kod DCO — z DCO do ALPHA: wspólny RAM od zera)
+spin SELECT 1
+wait 100
+expect eng 9
+peakreset
+midi 90 48 64
+wait 300
+expect held 1
+expect peak_db_min -50
+midi 80 48 00
+wait 1500
+# v0.44: WEST (VA, za ALPHA)
+spin SELECT 1
+wait 100
+expect eng 8
+peakreset
+midi 90 48 64
+wait 300
+expect held 1
+expect peak_db_min -50
+midi 80 48 00
+wait 1500
+spin SELECT 1
+wait 100
+expect eng 1
+peakreset
+midi 90 45 64
+wait 300
+expect held 1
+expect peak_db_min -50
+midi 80 45 00
+wait 1500
+spin SELECT 1
+wait 100
+expect eng 3
+peakreset
+midi 90 4A 64
+wait 300
+expect held 1
+expect peak_db_min -50
+midi 80 4A 00
+wait 1500
+spin SELECT 1
+wait 100
+expect eng 2
+peakreset
+midi 90 45 64
+wait 300
+expect held 1
+expect peak_db_min -50
+midi 80 45 00
+wait 1500
+# v0.42: BIT (DIGI, za WAVE)
+spin SELECT 1
+wait 100
+expect eng 7
+peakreset
+midi 90 48 64
+wait 300
+expect held 1
+expect peak_db_min -50
+midi 80 48 00
+wait 1500
+# v0.78: PHYS (DIGI, za BIT; szarpnięta struna)
+spin SELECT 1
+wait 100
+expect eng 14
+peakreset
+midi 90 48 64
+wait 300
+expect held 1
+expect peak_db_min -50
+midi 80 48 00
+wait 1500
+# FORMANT (v0.84, DIGI, za PHYS: głos)
+spin SELECT 1
+wait 100
+expect eng 15
+peakreset
+midi 90 48 64
+wait 300
+expect held 1
+expect peak_db_min -50
+midi 80 48 00
+wait 1500
+# DRUM: 88 (v0.52-v0.54: grupa DRUM za BIT — 88, 99, MORPH, DUAL; klawisz C4 = biały: gra)
+spin SELECT 1
+wait 100
+expect eng 11
+peakreset
+midi 90 3C 64
+wait 300
+expect peak_db_min -50
+midi 80 3C 00
+wait 1500
+# DRUM: 99 (v0.52-v0.54: grupa DRUM za BIT — 88, 99, MORPH, DUAL; klawisz C4 = biały: gra)
+spin SELECT 1
+wait 100
+expect eng 12
+peakreset
+midi 90 3C 64
+wait 300
+expect peak_db_min -50
+midi 80 3C 00
+wait 1500
+# DRUM: MORPH (v0.52-v0.54: grupa DRUM za BIT — 88, 99, MORPH, DUAL; klawisz C4 = biały: gra)
+spin SELECT 1
+wait 100
+expect eng 10
+peakreset
+midi 90 3C 64
+wait 300
+expect peak_db_min -50
+midi 80 3C 00
+wait 1500
+# DRUM: DUAL (v0.52-v0.54: grupa DRUM za BIT — 88, 99, MORPH, DUAL; klawisz C4 = biały: gra)
+spin SELECT 1
+wait 100
+expect eng 13
+peakreset
+midi 90 3C 64
+wait 300
+expect peak_db_min -50
+midi 80 3C 00
+wait 1500
+# (v0.86) okno w kółko, bez pozycji MULTI: z powrotem do MINI: znów gra (stan od zera, nie resztki MORPH)
+spin SELECT 1
+wait 100
+expect eng 0
+peakreset
+midi 90 3C 64
+wait 300
+expect held 1
+expect peak_db_min -50
+midi 80 3C 00
+wait 300
+expect held 0
+shot engines.png

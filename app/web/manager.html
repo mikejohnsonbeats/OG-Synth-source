@@ -1,0 +1,397 @@
+<!doctype html>
+<!-- SPDX-License-Identifier: MPL-2.0 -->
+<!-- OG SYNTH MANAGER: brzmienia i banki DX7 (.syx) oraz brzmienia Casio CZ (do PHASE) do FM1 z firmware OGS, przez
+     USB MIDI. Bank DX7 (4104 B) jest za długi na jeden SysEx dla FM1, więc idzie w kawałkach po 512 B (te same ramki co
+     przycisk w symulatorze). Plik CZ z wieloma brzmieniami: wysyłamy jedno, wybrane. -->
+<html lang="pl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>OG Synth Manager</title>
+<style>
+  :root { --bg: #1d1b19; --fg: #ece6df; --dim: #a59c92; --acc: #f28a5a; --card: #2a2724; }
+  @media (prefers-color-scheme: light) { :root:not([data-theme="dark"]) { --bg: #f6f2ee; --fg: #1d1b19; --dim: #6b625a; --card: #fff; } }
+  body { margin: 0; background: var(--bg); color: var(--fg); font: 16px/1.5 system-ui, sans-serif; }
+  main { max-width: 640px; margin: 0 auto; padding: 24px 16px; }
+  h1 { font-size: 1.4rem; margin: 0 0 4px; }
+  p { color: var(--dim); margin: 0 0 16px; }
+  .card { background: var(--card); border-radius: 12px; padding: 16px; margin-bottom: 16px; }
+  label { display: block; margin-bottom: 12px; }
+  select, button { font: inherit; padding: 6px 10px; border-radius: 8px; }
+  button { background: var(--acc); color: #1d1b19; border: 0; font-weight: 600; cursor: pointer; }
+  button:disabled { opacity: .5; cursor: default; }
+  [hidden] { display: none !important; }
+  #log { white-space: pre-wrap; font-family: ui-monospace, monospace; font-size: 14px; color: var(--dim); }
+  canvas.ed { display: block; width: 100%; background: #151311; border-radius: 8px; margin-bottom: 8px; touch-action: none; cursor: crosshair; }
+  .row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-top: 8px; }
+  .row label { margin: 0; }
+  input[type=number] { font: inherit; width: 4em; padding: 4px; border-radius: 8px; }
+</style>
+</head>
+<body>
+<main>
+  <h1>OG Synth Manager</h1>
+  <p>Wysyła brzmienia i banki DX7 (.syx) do FM1 z firmware OGS. Na FM1 pojawi się okno DX7 BANK: SELECT wybiera miejsce
+    1–8, SEL zapisuje, HOME anuluje. Pojedyncze brzmienie gra od razu (zapis: SAVE).</p>
+  <p>Casio CZ (.syx z CZ-101 / 1000 / 3000 / 5000): brzmienie trafia do silnika PHASE i gra od razu (zapis: SAVE).
+    Plik z bankiem CZ: cały bank do pamięci FM1 (okno CZ BANK: SELECT miejsce 1–16, SEL zapisuje) albo jedno brzmienie.</p>
+  <p>Tablice WAVE (.wav z Serum, Vital itp.): do jednego z trzech miejsc USER 1–3 silnika WAVE (do 63 ramek). Po
+    wysłaniu gra od razu w OSC A (zapis brzmienia: SAVE; sama tablica zostaje w pamięci FM1).</p>
+  <p><a href="backup.html"><b>BACKUP</b></a> — kopia zapasowa presetów i ustawień FM1 na komputer i z powrotem.</p>
+  <div class="card">
+    <label>Wyjście MIDI (FM1): <select id="out"><option value="">(brak)</option></select></label>
+    <label>Plik .syx: <input type="file" id="file" accept=".syx"></label>
+    <label id="czrow" hidden>Brzmienie CZ nr: <select id="cz"></select></label>
+    <button id="send" disabled>Wyślij do FM1</button>
+  </div>
+  <div class="card">
+    <p style="margin:0 0 12px">Brzmienia FM1 (128 oryginalnych, sekcje PIANO, ORGAN … FX): od OG Synth 0.53 leżą w bankach DX7 1–4
+      (miejsca 5–8 wolne). Ten przycisk wgrywa je do miejsc 1–4 od razu, bez okna na FM1 — to, co tam było, zostanie zastąpione.</p>
+    <button id="fm1send" disabled>Wgraj brzmienia FM1 (banki DX7 1–4)</button>
+  </div>
+  <div class="card">
+    <label>Usuń bank DX7 z miejsca: <select id="delslot"><option>1</option><option>2</option><option>3</option><option>4</option>
+      <option>5</option><option>6</option><option>7</option><option>8</option></select></label>
+    <button id="delbank" disabled>Usuń bank</button>
+  </div>
+  <div class="card">
+    <label>Tablica WAVE (.wav): <input type="file" id="wav" accept=".wav"></label>
+    <label>Miejsce: <select id="slot"><option value="0">USER 1</option><option value="1">USER 2</option>
+      <option value="2">USER 3</option></select></label>
+    <button id="wsend" disabled>Wyślij tablicę do FM1</button>
+  </div>
+  <div class="card">
+    <b>Edytor tablic WAVE</b>
+    <p style="margin:4px 0 8px">Rysuj ramkę myszką albo palcem. Słupki = harmoniczne 1–32 (przeciągnij w górę / w dół; faza
+      reszty zostaje). Pasek u dołu = ramki tablicy (klik = wybór, do 63). Przejście: ramki pośrednie od wybranej do
+      następnej. Wysyłka: do miejsca wybranego wyżej (USER 1–3).</p>
+    <canvas class="ed" id="edw" width="512" height="200"></canvas>
+    <canvas class="ed" id="edh" width="512" height="96"></canvas>
+    <canvas class="ed" id="edf" width="512" height="44"></canvas>
+    <div id="edinfo" style="color:var(--dim)"></div>
+    <div class="row">
+      <button id="edadd">+ ramka</button><button id="eddel">− ramka</button>
+      <button id="edsine">sinus</button><button id="edsaw">piła</button><button id="edsmooth">wygładź</button>
+    </div>
+    <div class="row">
+      <label>ramek pośrednich <input id="edn" type="number" min="1" max="61" value="6"></label>
+      <select id="edm"><option value="x">krzyżowo</option><option value="s">po widmie</option></select>
+      <button id="edmorph">przejście do następnej</button>
+    </div>
+    <div class="row">
+      <button id="edload">wczytaj .wav z pola wyżej</button><button id="edplay">odsłuch ramki</button>
+      <button id="edwav">zapisz .wav</button><button id="edsend" disabled>wyślij edytor do FM1</button>
+    </div>
+  </div>
+  <div id="log"></div>
+</main>
+<script src="wavetable.js"></script>
+<script src="fm1_banks.js"></script>
+<script type="module">
+const $ = (id) => document.getElementById(id);
+const log = (t) => { $("log").textContent += t + "\n"; };
+let access = null;
+
+/* plik .syx -> ramki SysEx dla FM1 (z F0 / F7): bank DX7 w kawałkach po 512 B + koniec z nazwą, Casio CZ: jedno
+   brzmienie nr pick (1..), reszta bez zmian */
+const isCZ = (f) => f[0] === 0x44 && (f.length === 262 || f.length === 261);
+function czList(bytes) {
+  const out = [];
+  for (let i = 0; i < bytes.length; i++) {
+    if (bytes[i] !== 0xF0) continue;
+    let j = i + 1;
+    while (j < bytes.length && bytes[j] !== 0xF7) j++;
+    if (isCZ(bytes.subarray(i + 1, j))) out.push(i);
+    i = j;
+  }
+  return out;
+}
+function frames(bytes, name, pick) {
+  const out = [], cz = [];
+  for (let i = 0; i < bytes.length; i++) {
+    if (bytes[i] !== 0xF0) continue;
+    let j = i + 1;
+    while (j < bytes.length && bytes[j] !== 0xF7) j++;
+    const f = bytes.subarray(i + 1, j);
+    if (f.length === 4102 && f[0] === 0x43 && f[2] === 0x09) {
+      for (let k = 0; k * 512 < f.length; k++) out.push([0xF0, 0x7D, 0x4F, 0x47, 0x53, 0x01, k, ...f.subarray(k * 512, k * 512 + 512), 0xF7]);
+      const nm = name.toUpperCase().replace(/[^ A-Z0-9-]/g, " ").slice(0, 12).trimEnd();
+      out.push([0xF0, 0x7D, 0x4F, 0x47, 0x53, 0x02, ...[...nm].map((c) => c.charCodeAt(0)), 0xF7]);
+    } else if (isCZ(f)) {
+      cz.push([0xF0, ...f, 0xF7]);
+    } else {
+      out.push([0xF0, ...f, 0xF7]);
+    }
+    i = j;
+  }
+  if (cz.length && pick === 0) {                            // cały bank CZ: ramki 03 nr <brzmienie>, na końcu 04 nazwa
+    cz.slice(0, 16).forEach((f, k) => out.push([0xF0, 0x7D, 0x4F, 0x47, 0x53, 0x03, k, ...f.slice(1, -1), 0xF7]));
+    const nm = name.toUpperCase().replace(/[^ A-Z0-9-]/g, " ").slice(0, 12).trimEnd();
+    out.push([0xF0, 0x7D, 0x4F, 0x47, 0x53, 0x04, ...[...nm].map((c) => c.charCodeAt(0)), 0xF7]);
+  } else if (cz.length) {
+    out.push(cz[Math.min(Math.max(pick || 1, 1), cz.length) - 1]);
+  }
+  return out;
+}
+
+function ready() {
+  $("send").disabled = !($("out").value && $("file").files[0]);
+  $("wsend").disabled = !($("out").value && $("wav").files[0]);
+  $("fm1send").disabled = !$("out").value || !window.FM1_BANKS;
+  $("delbank").disabled = !$("out").value;
+  $("edsend").disabled = !$("out").value;
+}
+function fill() {
+  const cur = $("out").value;
+  $("out").length = 1;
+  for (const o of access.outputs.values()) {
+    $("out").add(new Option(o.name, o.id));
+    if (!cur && /FM-?1|OGS|OG Synth/i.test(o.name)) $("out").value = o.id;
+  }
+  if (cur) $("out").value = cur;
+  ready();
+}
+$("out").addEventListener("change", ready);
+$("wav").addEventListener("change", ready);
+
+/* tablica WAVE: FM1 odpowiada F0 7D 4F 47 53 21 nr krok F7 po każdym kroku (kasowanie, ramka, koniec) — czekamy na
+   to (wejście MIDI o tej samej nazwie co wyjście); bez wejścia: stałe przerwy */
+let ackWait = null, bankWait = null;
+function listen() {
+  for (const i of access.inputs.values())
+    i.onmidimessage = (e) => {
+      const d = e.data;
+      if (d[0] !== 0xF0 || d[1] !== 0x7D) return;
+      if (d[5] === 0x21 && ackWait) ackWait();
+      if (d[5] === 0x24 && bankWait) bankWait(d[6], d[7]);
+    };
+}
+function hasInput() {
+  const o = access.outputs.get($("out").value);
+  return o && [...access.inputs.values()].some((i) => i.name === o.name);
+}
+const pause = (ms) => new Promise((r) => setTimeout(r, ms));
+function ack(ms) { return new Promise((r) => { const t = setTimeout(() => { ackWait = null; r(false); }, ms); ackWait = () => { clearTimeout(t); ackWait = null; r(true); }; }); }
+/* ramka banku DX7 / CZ (01-04): FM1 od v0.37 odpowiada F0 7D 4F 47 53 24 cmd nr F7 */
+function bankAck(cmd, nr, ms) {
+  return new Promise((r) => {
+    const t = setTimeout(() => { bankWait = null; r(false); }, ms);
+    bankWait = (c, k) => { if (c === cmd && k === nr) { clearTimeout(t); bankWait = null; r(true); } };
+  });
+}
+/* FM1 czasem gubi ramkę SysEx (ok. 0,4 %, pomiar 2026-10-28): krok bez odpowiedzi wysyłamy jeszcze raz (3 razy) —
+   każdy krok powtórzony robi to samo (FM1 v0.37) */
+async function sendAcked(out, msg, wait, tries = 3) {
+  for (let t = 0; t < tries; t++) {
+    const w = wait();
+    out.send(msg);
+    if (await w) return true;
+  }
+  return false;
+}
+/* ramki Int16 -> FM1 (miejsce slot): z potwierdzeniami, gdy jest wejście MIDI; true = gotowe */
+async function sendFrames(frames, slot, name) {
+  const out = access.outputs.get($("out").value), msgs = ogsWave.sysex(frames, slot, name), acks = hasInput();
+  for (let i = 0; i < msgs.length; i++) {
+    const msg = [0xF0, ...msgs[i], 0xF7];
+    if (!acks) {                                               // bez wejścia MIDI: stałe przerwy
+      const w = pause(i === 0 ? 2500 : 120);
+      out.send(msg);
+      await w;
+    } else if (!(await sendAcked(out, msg, () => ack(i === 0 ? 8000 : 3000)))) {   // pierwszy krok: kasowanie 32 KiB
+      log("FM1 nie odpowiada: sprawdź kabel i spróbuj jeszcze raz."); return false;
+    }
+  }
+  return true;
+}
+$("wsend").addEventListener("click", async () => {
+  const f = $("wav").files[0], slot = parseInt($("slot").value, 10);
+  let fr;
+  try { fr = ogsWave.frames(ogsWave.parse(await f.arrayBuffer())); } catch (e) { log(`${f.name}: ${e.message}`); return; }
+  if (fr.warn && !confirm(`${fr.warn}
+
+Wysłać mimo to? Na FM1 wyjdzie raczej szum zamiast sensownej tablicy.`)) { log(`${f.name}: anulowane.`); return; }
+  $("wsend").disabled = true;
+  log(`${f.name}: ${fr.total} ramek po ${fr.size} próbek -> ${fr.frames.length} ramek na FM1 (USER ${slot + 1})…`);
+  if (await sendFrames(fr.frames, slot, f.name.replace(/\.wav$/i, "")))
+    log(`${f.name}: gotowe — gra w OSC A (TABLE USER ${slot + 1}).`);
+  ready();
+});
+
+/* (v0.74) edytor tablic: ramki Float32 -1..1 (256 próbek), rysowanie, harmoniczne, przejścia, odsłuch, .wav, wysyłka */
+const ED = { fr: [], cur: 0 };
+const sineF = () => Float32Array.from({ length: 256 }, (_, i) => Math.sin(2 * Math.PI * i / 256));
+const sawF = () => ogsWave.synth({ a: new Float64Array(128), b: Float64Array.from({ length: 128 }, (_, h) => h ? 0.6 / h * (h & 1 ? 1 : -1) : 0) });
+ED.fr.push(sineF());
+const acc = () => getComputedStyle(document.documentElement).getPropertyValue("--acc").trim() || "#f28a5a";
+function edDraw() {
+  const f = ED.fr[ED.cur];
+  {                                                            // fala
+    const cv = $("edw"), c = cv.getContext("2d"), W = cv.width, H = cv.height;
+    c.fillStyle = "#151311"; c.fillRect(0, 0, W, H);
+    c.fillStyle = "#3a3632"; c.fillRect(0, H / 2, W, 1);
+    c.strokeStyle = acc(); c.lineWidth = 2; c.beginPath();
+    for (let i = 0; i < 256; i++) { const x = i * W / 255, y = H / 2 - f[i] * (H / 2 - 4); i ? c.lineTo(x, y) : c.moveTo(x, y); }
+    c.stroke();
+  }
+  {                                                            // harmoniczne 1..32
+    const cv = $("edh"), c = cv.getContext("2d"), W = cv.width, H = cv.height, a = ogsWave.amps(f, 32), bw = W / 32;
+    c.fillStyle = "#151311"; c.fillRect(0, 0, W, H);
+    c.fillStyle = acc();
+    for (let h = 0; h < 32; h++) { const v = Math.min(1, a[h]) * (H - 2); c.fillRect(h * bw + 1, H - v, bw - 2, v); }
+  }
+  {                                                            // ramki
+    const cv = $("edf"), c = cv.getContext("2d"), W = cv.width, H = cv.height, n = ED.fr.length, tw = W / Math.max(n, 8);
+    c.fillStyle = "#151311"; c.fillRect(0, 0, W, H);
+    ED.fr.forEach((g, k) => {
+      if (k === ED.cur) { c.fillStyle = "#3a3632"; c.fillRect(k * tw, 0, tw, H); }
+      c.strokeStyle = k === ED.cur ? acc() : "#a59c92"; c.lineWidth = 1; c.beginPath();
+      for (let i = 0; i < 256; i += 4) { const x = k * tw + 2 + i * (tw - 4) / 255, y = H / 2 - g[i] * (H / 2 - 3); i ? c.lineTo(x, y) : c.moveTo(x, y); }
+      c.stroke();
+    });
+  }
+  $("edinfo").textContent = `ramka ${ED.cur + 1} / ${ED.fr.length} (do ${ogsWave.MAXF})`;
+}
+function edPos(cv, e) { const r = cv.getBoundingClientRect(); return [(e.clientX - r.left) / r.width, (e.clientY - r.top) / r.height]; }
+let edLast = -1;
+$("edw").addEventListener("pointerdown", (e) => { $("edw").setPointerCapture(e.pointerId); edLast = -1; edPaint(e); });
+$("edw").addEventListener("pointermove", (e) => { if (e.buttons) edPaint(e); });
+function edPaint(e) {
+  const [u, w] = edPos($("edw"), e), i = Math.max(0, Math.min(255, Math.round(u * 255))), v = Math.max(-1, Math.min(1, 1 - 2 * w));
+  const f = ED.fr[ED.cur], from = edLast < 0 ? i : edLast, a = f[from];
+  for (let k = Math.min(from, i); k <= Math.max(from, i); k++)
+    f[k] = from === i ? v : a + (v - a) * (k - from) / (i - from);
+  edLast = i;
+  edDraw();
+}
+$("edh").addEventListener("pointerdown", (e) => { $("edh").setPointerCapture(e.pointerId); edHarm(e); });
+$("edh").addEventListener("pointermove", (e) => { if (e.buttons) edHarm(e); });
+function edHarm(e) {
+  const [u, w] = edPos($("edh"), e), h = Math.max(1, Math.min(32, Math.floor(u * 32) + 1)), m = Math.max(0, Math.min(1, 1 - w));
+  ED.fr[ED.cur] = ogsWave.setAmp(ED.fr[ED.cur], h, m);
+  edDraw();
+}
+$("edf").addEventListener("click", (e) => {
+  const [u] = edPos($("edf"), e), k = Math.floor(u * Math.max(ED.fr.length, 8));
+  if (k < ED.fr.length) { ED.cur = k; edDraw(); }
+});
+$("edadd").addEventListener("click", () => { if (ED.fr.length < ogsWave.MAXF) { ED.fr.splice(ED.cur + 1, 0, Float32Array.from(ED.fr[ED.cur])); ED.cur++; edDraw(); } });
+$("eddel").addEventListener("click", () => { if (ED.fr.length > 1) { ED.fr.splice(ED.cur, 1); ED.cur = Math.min(ED.cur, ED.fr.length - 1); edDraw(); } });
+$("edsine").addEventListener("click", () => { ED.fr[ED.cur] = sineF(); edDraw(); });
+$("edsaw").addEventListener("click", () => { ED.fr[ED.cur] = sawF(); edDraw(); });
+$("edsmooth").addEventListener("click", () => {
+  const f = ED.fr[ED.cur];
+  ED.fr[ED.cur] = Float32Array.from(f, (v, i) => 0.25 * f[(i + 255) & 255] + 0.5 * v + 0.25 * f[(i + 1) & 255]);
+  edDraw();
+});
+$("edmorph").addEventListener("click", () => {
+  if (ED.cur >= ED.fr.length - 1) { log("Przejście: wybierz ramkę, za którą jest następna (z ostatniej nie ma dokąd)."); return; }
+  const n = Math.max(1, Math.min(parseInt($("edn").value, 10) || 1, ogsWave.MAXF - ED.fr.length));
+  if (ED.fr.length >= ogsWave.MAXF) { log(`Tablica ma już ${ogsWave.MAXF} ramek.`); return; }
+  ED.fr.splice(ED.cur + 1, 0, ...ogsWave.morph(ED.fr[ED.cur], ED.fr[ED.cur + 1], n, $("edm").value));
+  edDraw();
+});
+$("edload").addEventListener("click", async () => {
+  const f = $("wav").files[0];
+  if (!f) { log("Wybierz plik .wav w polu „Tablica WAVE” wyżej."); return; }
+  try {
+    const fr = ogsWave.frames(ogsWave.parse(await f.arrayBuffer()));
+    ED.fr = fr.frames.map((g) => Float32Array.from(g, (v) => v / 32767));
+    ED.cur = 0;
+    log(`${f.name}: ${ED.fr.length} ramek w edytorze.`);
+    edDraw();
+  } catch (e) { log(`${f.name}: ${e.message}`); }
+});
+let edCtx = null;
+$("edplay").addEventListener("click", () => {
+  edCtx = edCtx || new AudioContext();
+  const sp = ogsWave.spectrum(ED.fr[ED.cur]), re = new Float32Array(128), im = new Float32Array(128);
+  for (let h = 1; h < 128; h++) { re[h] = sp.a[h]; im[h] = sp.b[h]; }
+  const o = edCtx.createOscillator(), g = edCtx.createGain(), t = edCtx.currentTime;
+  o.setPeriodicWave(edCtx.createPeriodicWave(re, im));
+  o.frequency.value = 110;
+  g.gain.setValueAtTime(0, t); g.gain.linearRampToValueAtTime(0.25, t + 0.02); g.gain.setValueAtTime(0.25, t + 1.0);
+  g.gain.linearRampToValueAtTime(0, t + 1.2);
+  o.connect(g).connect(edCtx.destination); o.start(t); o.stop(t + 1.25);
+});
+$("edwav").addEventListener("click", () => {
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(new Blob([ogsWave.wav(ED.fr)], { type: "audio/wav" }));
+  a.download = "og-synth-tablica.wav";
+  a.click();
+  setTimeout(() => URL.revokeObjectURL(a.href), 2000);
+});
+$("edsend").addEventListener("click", async () => {
+  const slot = parseInt($("slot").value, 10);
+  $("edsend").disabled = true;
+  log(`Edytor: ${ED.fr.length} ramek na FM1 (USER ${slot + 1})…`);
+  if (await sendFrames(ogsWave.toFm1(ED.fr), slot, "EDITOR"))
+    log(`Edytor: gotowe — gra w OSC A (TABLE USER ${slot + 1}).`);
+  ready();
+});
+edDraw();
+$("file").addEventListener("change", async () => {
+  const f = $("file").files[0], n = f ? czList(new Uint8Array(await f.arrayBuffer())).length : 0;
+  $("cz").length = 0;
+  if (n > 1) $("cz").add(new Option("CAŁY BANK (do pamięci FM1)", "0"));
+  for (let k = 1; k <= n && n > 1; k++) $("cz").add(new Option(`tylko brzmienie ${k} (do PHASE)`, String(k)));
+  $("czrow").hidden = n < 2;
+  ready();
+});
+$("send").addEventListener("click", async () => {
+  const f = $("file").files[0], out = access.outputs.get($("out").value);
+  const fr = frames(new Uint8Array(await f.arrayBuffer()), f.name.replace(/\.syx$/i, ""), parseInt($("cz").value || "1", 10));   // CZ: 0 = cały bank
+  if (!fr.length) { log("To nie jest plik SysEx."); return; }
+  $("send").disabled = true;
+  let acks = hasInput();
+  for (let i = 0; i < fr.length; i++) {
+    const f = fr[i], cmd = f[1] === 0x7D && f[5] >= 0x01 && f[5] <= 0x05 ? f[5] : 0;   // ramka banku (01-05)?
+    if (!acks || !cmd) {
+      out.send(f);
+      await pause(60);                                         // FM1 odbiera po jednej ramce
+    } else if (!(await sendAcked(out, f, () => bankAck(cmd, cmd === 0x01 || cmd === 0x03 || cmd === 0x05 ? f[6] : 0, 1000)))) {
+      if (i > 0) { log("FM1 nie odpowiada: sprawdź kabel i spróbuj jeszcze raz."); ready(); return; }
+      acks = false;                                            // starszy OG Synth nie potwierdza: dalej jak dawniej
+      log("FM1 nie potwierdza ramek (OG Synth starszy niż 0.37?) — wysyłam bez sprawdzania.");
+    }
+  }
+  log(`${f.name}: wysłane (${fr.length} ${fr.length === 1 ? "ramka" : "ramek"}). Dokończ na FM1.`);
+  ready();
+});
+
+/* (v0.53) brzmienia FM1: 4 banki DX7 do miejsc 1-4, każdy: kawałki 01 nr dane, koniec 05 miejsce nazwa (zapis od razu) */
+$("delbank").addEventListener("click", async () => {
+  const b = +$("delslot").value - 1, out = access.outputs.get($("out").value);
+  if (!out || !confirm(`Usunąć bank DX7 z miejsca ${b + 1}? Brzmienia FM1 można wgrać z powrotem przyciskiem wyżej, inny bank — z pliku .syx.`)) return;
+  const m = [0xF0, 0x7D, 0x4F, 0x47, 0x53, 0x06, b, 0xF7];
+  log(await sendAcked(out, m, () => bankAck(0x06, b, 2000)) ? `Bank z miejsca ${b + 1} usunięty.` : "FM1 nie odpowiada (OG Synth starszy niż 0.80?).");
+});
+$("fm1send").addEventListener("click", async () => {
+  const out = access.outputs.get($("out").value);
+  if (!hasInput()) { log("Brak wejścia MIDI z FM1 (potwierdzenia) — podłącz FM1 i wybierz go jako wyjście."); return; }
+  if (!confirm("Wgrać brzmienia FM1 do banków DX7 1–4? To, co jest w tych miejscach, zostanie zastąpione.")) return;
+  $("fm1send").disabled = true;
+  for (let b = 0; b < window.FM1_BANKS.length; b++) {
+    const d = Uint8Array.from(atob(window.FM1_BANKS[b].data), (c) => c.charCodeAt(0));
+    let s = 0; for (const x of d) s += x;
+    const f = new Uint8Array(4102); f.set([0x43, 0x00, 0x09, 0x20, 0x00]); f.set(d, 5); f[4101] = (128 - (s & 127)) & 127;
+    const msgs = [];
+    for (let k = 0; k * 512 < f.length; k++) msgs.push([0xF0, 0x7D, 0x4F, 0x47, 0x53, 0x01, k, ...f.subarray(k * 512, k * 512 + 512), 0xF7]);
+    msgs.push([0xF0, 0x7D, 0x4F, 0x47, 0x53, 0x05, b, ...[...window.FM1_BANKS[b].name].map((c) => c.charCodeAt(0)), 0xF7]);
+    for (const m of msgs)
+      if (!(await sendAcked(out, m, () => bankAck(m[5], m[6], m[5] === 0x05 ? 4000 : 1000)))) { log("FM1 nie odpowiada (OG Synth starszy niż 0.53?)."); ready(); return; }
+    log(`${window.FM1_BANKS[b].name}: zapisany w miejscu ${b + 1}.`);
+  }
+  log("Brzmienia FM1 wgrane (FM6 > PRESETS: sekcja IMPORTED PIANO … FX).");
+  ready();
+});
+
+try {
+  access = await navigator.requestMIDIAccess({ sysex: true });
+  access.onstatechange = () => { fill(); listen(); };
+  fill();
+  listen();
+} catch { log("Brak dostępu do MIDI z SysEx: użyj Edge lub Chrome i zezwól na urządzenia MIDI (ikona kłódki)."); }
+</script>
+</body>
+</html>
