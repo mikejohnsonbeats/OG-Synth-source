@@ -1,0 +1,19 @@
+# The template's build settings (tools/build.py)
+name = "OGS"              # APP_NAME is in app.h; this names the build's files
+id_prefix = "FM-1_11"          # package identity (each firmware its own): dev FM-1_1100, releases FM-1_11XXYYZZ
+usb_manufacturer = "Mike Johnson Beats"
+usb_product = "OG Synth"
+o2 = ["ogs_moog_dsp.c", "ogs_dx7_dsp.c", "ogs_fx.c", "ogs_wt_dsp.c", "ogs_pd_dsp.c", "ogs_va_dsp.c", "ogs_bit_dsp.c", "ogs_west_dsp.c", "ogs_morph_dsp.c", "ogs_dm_dsp.c", "ogs_dual_dsp.c", "ogs_phys_dsp.c", "ogs_formant_dsp.c"]   # DSP na -O2 (reszta -Os): DX7, efekty, WAVE, PHASE, analog (VCO), BIT, WEST, MORPH, 88 / 99, DUAL, PHYS, FORMANT
+words = "words.tsv"
+ble = false                    # Bluetooth MIDI (--no-ble builds without it)
+ble_central = false            # and the FM-1 connects to Bluetooth MIDI devices too
+usb_audio_in = false           # OG Synth: bez USB audio — FM1 nie pojawia się w urządzeniach audio Windows, samo MIDI
+usb_audio_out = false
+cpu2 = true                    # drugi rdzeń: głosy nieparzyste DX7 (ogs_dx7.c dx_render_part)
+backup = true                  # kopia zapasowa przez USB (app.h APP_BACKUP_*; OG Synth Manager > BACKUP)
+cpu2_fallback = true           # gdy drugi rdzeń zawiedzie: dalej na jednym (bez restartu), do wyłączenia zasilania
+# the site (tools/make_site.py, tools/publish_site.sh)
+tagline = "OG Synth by Mike Johnson Beats — sound design instrument for the FM-1"
+repo = "https://github.com/mikejohnsonbeats/OG-Synth"
+licence = "MPL-2.0"
+credits = ""                   # a sentence for the installer's footer: what your firmware is built from

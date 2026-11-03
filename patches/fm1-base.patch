@@ -1,0 +1,926 @@
+diff --git a/device/backup.c b/device/backup.c
+index 79fa057..8a37cf3 100644
+--- a/device/backup.c
++++ b/device/backup.c
+@@ -396,13 +396,13 @@ static int rs_commit(void)
+ static int restore_rx(uint32_t len, uint32_t crc, int *begun_out)
+ {
+     uint8_t hd[BU_HEAD];
+-    uint32_t c, pos, i, k;
++    uint32_t c, pos, i, k, nin;
+     int rc = 0, begun = 0;
+     if (rs_playing()) {
+         rc = RS_E_PLAYING;
+         goto out;
+     }
+-    if (len < BU_HEAD + BU_NOBJ * BU_REC + 4u || len > BU_MAXIMG) {
++    if (len < BU_HEAD + 4u || len > BU_MAXIMG) {
+         rc = RS_E_SIZE;
+         goto out;
+     }
+@@ -410,8 +410,11 @@ static int restore_rx(uint32_t len, uint32_t crc, int *begun_out)
+         rc = RS_E_FETCH;
+         goto out;
+     }
+-    if (bu_rd32(hd) != BU_MAGIC || bu_rd16(hd + 4) != BU_VERSION || bu_rd16(hd + 6) != BU_NOBJ ||
+-        bu_rd32(hd + 12) != bu_crc(0, hd, 12)) {
++    /* OGS: a backup from an older app with fewer objects (the list only grows at its end) restores too: the objects it
++     * lacks are made empty (none), as a factory reset of them would */
++    nin = bu_rd16(hd + 6);
++    if (bu_rd32(hd) != BU_MAGIC || bu_rd16(hd + 4) != BU_VERSION || nin > BU_NOBJ || nin == 0u ||
++        bu_rd32(hd + 12) != bu_crc(0, hd, 12) || len < BU_HEAD + nin * BU_REC + 4u) {
+         rc = RS_E_HEAD;
+         goto out;
+     }
+@@ -423,6 +426,14 @@ static int restore_rx(uint32_t len, uint32_t crc, int *begun_out)
+     for (i = 0; i < BU_NOBJ; i++) {
+         rs_ent_t *e = &rs_rec.e[i];
+         uint8_t r[BU_REC];
++        if (i >= nin) {                               /* not in this backup: empty */
++            e->obj = (uint16_t)bu_obj(i);
++            e->len = 0;
++            e->crc = bu_crc(0, bu_buf, 0);
++            if ((rc = rs_stage(e)) != 0)
++                goto out;
++            continue;
++        }
+         if (rs_fetch(pos, r, BU_REC)) {
+             rc = RS_E_FETCH;
+             goto out;
+diff --git a/device/gfx.c b/device/gfx.c
+index 4d4f45c..b83da6c 100644
+--- a/device/gfx.c
++++ b/device/gfx.c
+@@ -9,9 +9,10 @@ typedef struct {               /* proportional, see tools/gen_font.py */
+     uint8_t pad;               /* bitmap starts this many pixels left of the pen */
+     uint8_t first, last;
+     const uint8_t *adv;        /* advance per glyph */
+-    const uint8_t *bw;         /* bitmap width per glyph (starts FONT_PAD left of the pen) */
++    const uint8_t *bw;         /* cell width per glyph (starts FONT_PAD left of the pen) */
+     const uint16_t *off;       /* byte offset of each glyph */
+     const uint8_t *data;
++    const uint8_t *box;        /* inked box per glyph in its cell: x0, y0, w, h (only this is stored) */
+ } felucca_font_t;
+ #include "felucca_font.h"
+ 
+@@ -149,6 +150,19 @@ static uint32_t glyph(const felucca_font_t *f, uint32_t ch)
+     return ch - f->first;
+ }
+ 
++/* coverage 0..15 of pixel (gx, gy) in glyph gi's cell (0 outside its inked box) */
++static inline uint32_t font_a(const felucca_font_t *f, uint32_t gi, int32_t gx, int32_t gy)
++{
++    const uint8_t *bx = f->box + 4u * gi;
++    uint32_t a;
++    gx -= bx[0];
++    gy -= bx[1];
++    if ((uint32_t)gx >= bx[2] || (uint32_t)gy >= bx[3])
++        return 0;
++    a = f->data[f->off[gi] + (uint32_t)gy * ((bx[2] + 1u) / 2u) + (uint32_t)gx / 2u];
++    return (gx & 1) ? (a & 15u) : (a >> 4);
++}
++
+ /* text in colour c, each pixel's coverage blended over what is already on the canvas (an
+  * anti-aliased face on a coloured box gets no dark fringe); returns the end x */
+ static int32_t cv_text(int32_t x, int32_t y, const felucca_font_t *f, const char *s, uint16_t c)
+@@ -156,14 +170,14 @@ static int32_t cv_text(int32_t x, int32_t y, const felucca_font_t *f, const char
+     uint32_t r = c >> 11, g = (c >> 5) & 63u, b = c & 31u;
+     for (; *s; s++) {
+         uint32_t gi = glyph(f, (uint8_t)*s), gx, gy, w, bpr;
+-        const uint8_t *gd;
+-        w = f->bw[gi];
++        const uint8_t *gd, *bx = f->box + 4u * gi;   /* only the inked box: the rest of the cell is 0 */
++        w = bx[2];
+         bpr = (w + 1u) / 2u;
+         gd = f->data + f->off[gi];
+-        for (gy = 0; gy < f->h; gy++)
++        for (gy = 0; gy < bx[3]; gy++)
+             for (gx = 0; gx < w; gx++) {
+                 uint32_t a = gd[gy * bpr + gx / 2u];
+-                int32_t px = x - f->pad + (int32_t)gx, py = y + (int32_t)gy + cv_oy;
++                int32_t px = x - f->pad + (int32_t)(bx[0] + gx), py = y + (int32_t)(bx[1] + gy) + cv_oy;
+                 a = (gx & 1u) ? (a & 15u) : (a >> 4);
+                 if (!a || (uint32_t)px >= cv_w || py < cv_y0 || py >= cv_y1)
+                     continue;
+diff --git a/device/main_fm1.c b/device/main_fm1.c
+index dd7cde2..dd64a1f 100644
+--- a/device/main_fm1.c
++++ b/device/main_fm1.c
+@@ -937,8 +937,9 @@ static void fm1_main(void)
+                 master_pos = mirror_in_master(remote.master >= 0 ? (uint32_t)remote.master : (uint32_t)(knob / 4));
+             }
+         }
+-        if (!fm1_an.con && !fm1_an.pend && fm1_ms - batt_t >= 100u) {   /* the battery, ten times a second (plat_battery) */
+-            int32_t b = fm1_adc_read(FM1_ADC_BATT);
++        if (fm1_ms - batt_t >= 100u) {              /* the battery, ten times a second (plat_battery); with the keys'
++                                                     * readings on, the scan's battery slot (fm1_an.batt) */
++            int32_t b = fm1_an.con || fm1_an.pend ? (int32_t)fm1_an.batt : fm1_adc_read(FM1_ADC_BATT);
+             batt_t = fm1_ms;
+             if (b > 0)
+                 batt_raw = batt_raw ? batt_raw + (b - batt_raw) / 16 : b;
+diff --git a/device/plat_fm1.c b/device/plat_fm1.c
+index 9d462de..a23dab9 100644
+--- a/device/plat_fm1.c
++++ b/device/plat_fm1.c
+@@ -46,6 +46,7 @@ uint32_t plat_master(void) { return master_pos; }
+  * and dxsloop use them, give 0-3 bars; there is no charger line, so a USB host means power */
+ static int32_t batt_raw;
+ static int8_t batt_bars = -1;
++int plat_battery_raw(void) { return (int)batt_raw; }
+ int plat_battery(void)                           /* (a level moves once the reading is 4 past its threshold) */
+ {
+     static const int16_t AT[3] = {531, 561, 591};
+@@ -177,18 +178,16 @@ const uint8_t *plat_data(uint32_t off)
+ {
+     return flash_ok && PLAT_DATA_OK(off, 1u) ? (const uint8_t *)FL_XIP(off) : 0;
+ }
+-int plat_data_erase(uint32_t off)
++int plat_data_erase(uint32_t off)                 /* (in slices, the scan running: unity.c soft_erase) */
+ {
+-    uint32_t took;
+     if (!flash_ok || (off & 0xFFFu) || !PLAT_DATA_OK(off, 0x1000u))
+         return -1;
+     fm1_wdt_feed();                               /* (a run of erases: tens of ms each) */
+-    audio_silence();
+-    return fl_erase4k(off, &took);
++    return soft_erase(off);
+ }
+ int plat_data_write(uint32_t off, const void *src, uint32_t n)
+ {
+-    return flash_ok && PLAT_DATA_OK(off, n) ? fl_write(off, src, n) : -1;
++    return flash_ok && PLAT_DATA_OK(off, n) ? soft_write(off, src, n) : -1;
+ }
+ /* a pull from the host in the update's framing (ota.c ota_read), and how long it may take */
+ int plat_host_read(uint32_t addr, uint8_t *dst, uint32_t n) { return n > 512u ? -1 : ota_read(addr, dst, n); }
+@@ -314,6 +313,60 @@ int plat_store_load(uint32_t obj, void *dst, uint32_t max) { return flash_ok ? s
+ int plat_store_head(uint32_t obj, void *dst, uint32_t n) { return flash_ok ? st_load_head(obj, dst, n) : -1; }
+ int plat_store_size(uint32_t obj) { return flash_ok ? st_size(obj) : -1; }
+ int plat_store_save(uint32_t obj, const void *src, uint32_t len) { return flash_ok ? st_save(obj, src, len) : -9; }
++int plat_store_patch(uint32_t obj, uint32_t len, uint32_t off, const void *src, uint32_t n)
++{
++    return flash_ok ? st_patch(obj, len, off, src, n) : -9;
++}
++/* OGS: the current copy read in place (plat.h). The same choice as st_current (the valid header with the higher seq, A
++ * on a tie; a payload with a bad CRC hands over to the other copy), the headers read through XIP; a payload's CRC is
++ * checked once per copy, seq and CRC (st_vw): a list of names costs two headers a name */
++static struct {
++    uint32_t seq, crc;
++    uint8_t copy, ok;
++} st_vw[OBJ_NOBJ];
++static const st_hdr_t *st_vhead(uint32_t obj, uint32_t copy)
++{
++    uint32_t base = st_sector(obj, copy);
++    const st_hdr_t *h;
++    if (!PLAT_DATA_OK(base, ST_SECTOR))
++        return 0;
++    h = (const st_hdr_t *)FL_XIP(base);
++    if (h->magic != ST_MAGIC || h->type != obj || h->len > ST_PAYLOAD_MAX || h->hcrc != st_crc32(h, sizeof *h - 4u))
++        return 0;
++    return h;
++}
++static const uint8_t *st_vbody(uint32_t obj, uint32_t copy, const st_hdr_t *h)
++{
++    const uint8_t *p = (const uint8_t *)FL_XIP(st_sector(obj, copy) + ST_PAYLOAD_OFF);
++    if (!(st_vw[obj].ok && st_vw[obj].copy == copy && st_vw[obj].seq == h->seq && st_vw[obj].crc == h->crc)) {
++        if (st_crc32(p, h->len) != h->crc)
++            return 0;
++        st_vw[obj].seq = h->seq;
++        st_vw[obj].crc = h->crc;
++        st_vw[obj].copy = (uint8_t)copy;
++        st_vw[obj].ok = 1;
++    }
++    return p;
++}
++const uint8_t *plat_store_view(uint32_t obj, uint32_t *n)
++{
++    const st_hdr_t *a, *b, *h = 0;
++    const uint8_t *p = 0;
++    if (!flash_ok || obj >= OBJ_NOBJ)
++        return 0;
++    a = st_vhead(obj, 0);
++    b = st_vhead(obj, 1);
++    if (b && (!a || b->seq > a->seq) && (p = st_vbody(obj, 1, b)) != 0)
++        h = b;
++    else if (a && (p = st_vbody(obj, 0, a)) != 0)
++        h = a;
++    else if (b && (p = st_vbody(obj, 1, b)) != 0)
++        h = b;
++    if (!p || !h->len)                            /* (an empty object is none, as st_load) */
++        return 0;
++    *n = h->len;
++    return p;
++}
+ 
+ static volatile uint32_t audio_cpu_pct, audio_xruns;
+ uint32_t plat_cpu_pct(void) { return audio_cpu_pct; }
+diff --git a/device/storage.c b/device/storage.c
+index 151a650..1baa972 100644
+--- a/device/storage.c
++++ b/device/storage.c
+@@ -18,8 +18,9 @@
+ #define ST_PAYLOAD_OFF 256u
+ #define ST_PAYLOAD_MAX (ST_SECTOR - ST_PAYLOAD_OFF)
+ 
+-/* flash map: the app's (app.h APP_STORE_MAP, an offset per object, plat.h). Nothing between 0xE0000 and 0xFBFFF:
+- * that is the update loader's staging area. The magic is X0X's; an app tells its own objects apart by its own magic. */
++/* flash map: the app's (app.h APP_STORE_MAP, an offset per object, plat.h). Nothing between 0xE0000 and 0xE6FFF:
++ * the update loader's staging area and the autosave (OGS: objects may sit in the XDATA1 window above, unity.c
++ * ST_RANGE_OK). The magic is X0X's; an app tells its own objects apart by its own magic. */
+ typedef struct {
+     uint32_t magic;
+     uint16_t type, slot;
+@@ -132,18 +133,13 @@ static int st_load_head(uint32_t obj, void *dst, uint32_t n)
+     return (int)n;
+ }
+ 
+-static int st_save(uint32_t obj, const void *src, uint32_t len)
++/* st_buf (len bytes) -> the copy that is not cur (st_current's: 0 A, 1 B, -1 none), as seq + 1 (OGS: st_save and
++ * st_patch) */
++static int st_commit(uint32_t obj, uint32_t len, int cur, uint32_t seq)
+ {
+-    uint32_t seq, base, off;
+-    int cur, rc;
++    uint32_t base = st_sector(obj, cur == 0 ? 1u : 0u), off;   /* write the other copy */
++    int rc;
+     st_hdr_t h;
+-    if (len > ST_PAYLOAD_MAX)
+-        return -1;
+-    cur = st_current(obj, &h);
+-    seq = cur < 0 ? 0u : h.seq;
+-    base = st_sector(obj, cur == 0 ? 1u : 0u);       /* write the other copy */
+-    for (off = 0; off < len; off++)
+-        st_buf[off] = ((const uint8_t *)src)[off];    /* the driver wants RAM sources */
+     if ((rc = st_erase(base)) != 0)
+         return rc;
+     for (off = 0; off < len; off += 256u) {
+@@ -169,3 +165,34 @@ static int st_save(uint32_t obj, const void *src, uint32_t len)
+     }
+     return 0;
+ }
++
++static int st_save(uint32_t obj, const void *src, uint32_t len)
++{
++    uint32_t off;
++    int cur;
++    st_hdr_t h;
++    if (len > ST_PAYLOAD_MAX)
++        return -1;
++    cur = st_current(obj, &h);
++    for (off = 0; off < len; off++)
++        st_buf[off] = ((const uint8_t *)src)[off];    /* the driver wants RAM sources */
++    return st_commit(obj, len, cur, cur < 0 ? 0u : h.seq);
++}
++
++/* OGS: bytes [off, off + n) of the object from src (RAM), the object len bytes long: a shorter (or absent) one grows
++ * with zeros, a longer one is cut. The rest comes from the current copy, through st_buf: no buffer of the caller's */
++static int st_patch(uint32_t obj, uint32_t len, uint32_t off, const void *src, uint32_t n)
++{
++    uint32_t i, have;
++    int cur;
++    st_hdr_t h;
++    if (len > ST_PAYLOAD_MAX || off > len || n > len - off)
++        return -1;
++    cur = st_current(obj, &h);                        /* (its payload is in st_buf) */
++    have = cur < 0 ? 0u : h.len;
++    for (i = have; i < len; i++)
++        st_buf[i] = 0;
++    for (i = 0; i < n; i++)
++        st_buf[off + i] = ((const uint8_t *)src)[i];
++    return st_commit(obj, len, cur, cur < 0 ? 0u : h.seq);
++}
+diff --git a/device/unity.c b/device/unity.c
+index 512374b..aa2e544 100644
+--- a/device/unity.c
++++ b/device/unity.c
+@@ -140,20 +140,73 @@ static int st_read(uint32_t off, void *dst, uint32_t n)   /* 256-byte IRQ-off wi
+     }
+     return 0;
+ }
+-static int st_erase(uint32_t off)
++/* erase and program next to playing (the store, plat_data_*): the LED scan and the screen must not stop (a 20 ms
++ * erase with the interrupts off froze them: a blink). The erase goes in slices (fl_erase_slice_ram: busy <=
++ * SOFT_SLICE_US, then suspended for SOFT_GAP_US with the interrupts on), each page program alone. While the
++ * interrupts are off, the LED scan goes on from the RAM driver's busy loops (fm1_input.h fm1_led_ram_step): dark
++ * lines there dimmed every LED by a third for the save. */
++#define SOFT_SLICE_US 600u
++#define SOFT_GAP_US 1000u
++static uint32_t soft_begin(void)
+ {
+-    uint32_t took;
+-    if (!FL_STORE_OK(off, 0x1000u))
+-        return -8;
+-    audio_silence();
+-    return fl_erase4k(off, &took);
++    uint32_t f = irq_save();
++    fm1_led_ram_begin();
++    return f;
+ }
+-static int st_prog(uint32_t off, const void *src, uint32_t n)
++static void soft_end(uint32_t f)
+ {
+-    if (!FL_STORE_OK(off, n))
+-        return -8;
+-    return fl_write(off, src, n);
++    fm1_led_ram_end();
++    irq_restore(f);
++}
++static void soft_spin(uint32_t us)
++{
++    uint32_t t0 = fm1_ticks();
++    fm1_wdt_feed();
++    while ((fm1_ticks() - t0) / FM1_TICKS_PER_US < us)
++        ;
++}
++static int soft_erase(uint32_t off)
++{
++    uint32_t n;
++    int rc = 1;
++    for (n = 0; rc == 1; n++) {
++        uint32_t f;
++        if (n)
++            soft_spin(SOFT_GAP_US);
++        if (n >= 2000u)                           /* (never seen: ~1.2 s of erase) */
++            return -5;
++        audio_silence();                          /* (each slice: the DMA would loop stale audio) */
++        f = soft_begin();
++        rc = FL_FAR(fl_erase_slice_ram)(off, !n, SOFT_SLICE_US);
++        soft_end(f);
++    }
++    return rc;
++}
++static int soft_write(uint32_t off, const void *src, uint32_t n)
++{
++    const uint8_t *p = src;
++    uint32_t took;
++    while (n) {
++        uint32_t chunk = 256u - (off & 0xFFu), f;
++        int rc;
++        if (chunk > n)
++            chunk = n;
++        f = soft_begin();
++        rc = FL_FAR(fl_prog_ram)(off, p, chunk, &took);
++        soft_end(f);
++        if (rc)
++            return rc;
++        off += chunk;
++        p += chunk;
++        n -= chunk;
++    }
++    return 0;
+ }
++/* OGS: store objects in the XDATA1 window too (app.h APP_STORE_MAP: 0xF8000, 0xFA000); plat_store_view reads them in
++ * place as any other (PLAT_DATA_OK covers the window) */
++#define ST_RANGE_OK(off, n) (FL_STORE_OK(off, n) || FL_IN(off, n, FL_XDATA1_LO, FL_XDATA1_HI))
++static int st_erase(uint32_t off) { return ST_RANGE_OK(off, 0x1000u) ? soft_erase(off) : -8; }
++static int st_prog(uint32_t off, const void *src, uint32_t n) { return ST_RANGE_OK(off, n) ? soft_write(off, src, n) : -8; }
+ #include "storage.c"
+ 
+ struct bootguard_s { uint32_t magic, failed, pending; };
+diff --git a/host/plat_host.c b/host/plat_host.c
+index 85620fd..5bd4805 100644
+--- a/host/plat_host.c
++++ b/host/plat_host.c
+@@ -169,6 +169,7 @@ int32_t plat_enc(int role)
+     return v;
+ }
+ uint32_t plat_master(void) { return mirror_in_master(master); }
++int plat_battery_raw(void) { return 600; }
+ int plat_battery(void) { return 3; }   /* (the host and the emulator: full) */
+ /* the lights ("leds"): bright, and dim (glow 0: none); PLAY's green counts as PLAY */
+ void plat_lights(uint32_t b, uint32_t k, uint32_t db, uint32_t dk, int glow)
+@@ -557,6 +558,29 @@ int plat_store_save(uint32_t obj, const void *src, uint32_t len)
+     store_writes++;
+     return 0;
+ }
++const uint8_t *plat_store_view(uint32_t obj, uint32_t *n)   /* OGS (plat.h) */
++{
++    store_ready();
++    if (obj >= OBJ_NOBJ || store_len[obj] <= 0)
++        return 0;
++    *n = (uint32_t)store_len[obj];
++    return store[obj];
++}
++int plat_store_patch(uint32_t obj, uint32_t len, uint32_t off, const void *src, uint32_t n)
++{
++    int have;
++    store_ready();
++    store_tries++;
++    if (obj >= OBJ_NOBJ || len > PLAT_STORE_MAX || off > len || n > len - off || store_fail)
++        return -1;
++    for (have = store_len[obj] < 0 ? 0 : store_len[obj]; have < (int)len; have++)
++        store[obj][have] = 0;
++    if (n)
++        memmove(store[obj] + off, src, n);
++    store_len[obj] = (int)len;
++    store_writes++;
++    return 0;
++}
+ 
+ static uint32_t cpu_pct;
+ uint32_t plat_cpu_pct(void) { return cpu_pct; }
+diff --git a/include/plat.h b/include/plat.h
+index 2140404..0164b0c 100644
+--- a/include/plat.h
++++ b/include/plat.h
+@@ -35,6 +35,7 @@ uint32_t plat_buttons(void);           /* held: bit B_* */
+ uint32_t plat_keys(void);              /* held: bit k = key k (0 = F3) */
+ int32_t plat_enc(int role);            /* detents since the last call, + = clockwise; EN_* */
+ uint32_t plat_master(void);            /* MASTER pot's position, 0..4096 (the render gets it as a gain: APP_GAIN) */
++int plat_battery_raw(void);            /* the battery's averaged reading, 0..1023 (0: none yet; INFO) */
+ int plat_battery(void);                /* the battery: 0 (empty) .. 3 (full), 4 a USB host powers the FM-1, -1 not read
+                                         * yet (the keys' readings own the converter: APP_KEY_SENSE) */
+ 
+@@ -200,6 +201,12 @@ int plat_store_size(uint32_t obj);                           /* its length in by
+                                                                * wants it whole or not at all checks it first) */
+ int plat_store_save(uint32_t obj, const void *src, uint32_t len);   /* 0 = ok */
+ #define PLAT_STORE_MAX 3840u           /* bytes per object */
++/* OGS: an object read in place: its current copy in the flash (CRC checked), *n its length; 0 = none, or an object
++ * outside the data area (0x97000..0xDFFFF). Read-only, and good until the object's next save (main loop) */
++const uint8_t *plat_store_view(uint32_t obj, uint32_t *n);
++/* OGS: part of an object rewritten without the whole in RAM: bytes [off, off + n) from src (RAM), the object made len
++ * bytes long (a shorter or absent one grows with zeros). One save, as plat_store_save; 0 = ok */
++int plat_store_patch(uint32_t obj, uint32_t len, uint32_t off, const void *src, uint32_t n);
+ /* The objects are the app's (app.h): an enum that includes OBJ_PANEL (the panel calibration, the platform's) and
+  * ends with OBJ_NOBJ, and APP_STORE_MAP, each object's flash offset: two 4 KiB sectors (A/B) from there, inside the
+  * data area (0x97000..0xDFFFF) or Felucca's settings sector pair at 0xFC000. An object's number is written in its
+diff --git a/tools/build.py b/tools/build.py
+index 9a8e9f2..4f1daff 100755
+--- a/tools/build.py
++++ b/tools/build.py
+@@ -305,6 +305,8 @@ def build_loader():
+     if not image or len(image) > 0x14000:
+         raise SystemExit("loader: image empty or too big")
+     ota = ldr_wrap(image)
++    if len(ota) > 0x5000 - 0x200:   # OGS: the staging area (bsp chip/ota.c OTA_AREA_LEN - 0x200) refuses a bigger one
++        raise SystemExit(f"loader: ota.bin {len(ota)} B does not fit the staging area")
+     (LDR / "ota.bin").write_bytes(ota)
+     bss = [int(ln.split()[0], 16) for ln in syms.splitlines() if ln.rstrip().endswith("_bss_end")]
+     print(f"loader: image {len(image)} B at {LOADER_LOAD:#x}" + (f", bss end {bss[0]:#x}" if bss else ""))
+diff --git a/tools/fm1_install.py b/tools/fm1_install.py
+index eb69903..f21dc2a 100755
+--- a/tools/fm1_install.py
++++ b/tools/fm1_install.py
+@@ -33,7 +33,7 @@ FINISH_CHECK, FINISH_WRITE = 0xE0000000, 0xF0000000
+ MAXDATA = 512
+ BLOCKS, BLK, KEEP = 20, 0x30, 0x2F
+ LOADER_MARK = b"FELUCCA-LOADER-1"
+-PORT_RE = re.compile(r"fm-?1|felucca|ota|composite|sinco|usb-midi", re.I)   # never probe other gear
++PORT_RE = re.compile(r"fm-?1|og ?synth|felucca|ota|composite|sinco|usb-midi", re.I)   # never probe other gear
+ 
+ # seconds; the tests shorten them
+ DELAY = {"open": 0.3, "start": 2.0, "reply": 0.01, "loader": 3.0, "reboot": 3.0, "retry": 1.0,
+diff --git a/tools/gen_font.py b/tools/gen_font.py
+index 71a57cd..d444d90 100755
+--- a/tools/gen_font.py
++++ b/tools/gen_font.py
+@@ -6,10 +6,12 @@
+   T / XS / S / B / M / L: Terminus 12 (T: digits and capitals), 12, 16, 16 bold, 24 bold, 32 bold (BDF, SIL OFL 1.1); see SIZES. TTF fonts also work through render()
+ (anti-aliased, tabular figures via the OpenType `tnum` feature).
+ 
+-Glyph format: per glyph an advance width, a bitmap width and an offset; the
+-bitmap starts FONT_PAD pixels left of the pen position (room for side
+-bearings); rows top to bottom, 2 pixels per byte (high nibble first),
+-alpha 0..15.
++Glyph format: per glyph an advance width, a cell width and an offset; the
++cell starts FONT_PAD pixels left of the pen position (room for side
++bearings) and is h rows high. Only the inked box of the cell is stored
++(box: x0, y0, w, h in the cell; nothing outside it is lit): its rows top to
++bottom, (w + 1) / 2 bytes each, 2 pixels per byte (high nibble first),
++alpha 0..15. font_a() in device/gfx.c reads a cell pixel.
+ """
+ import sys
+ from pathlib import Path
+@@ -154,7 +156,8 @@ def render(ttf, px, scale, pixel, first, last):
+         names = [a["name"] if isinstance(a["name"], str) else a["name"].decode() for a in font.get_variation_axes()]
+         font.set_variation_by_axes([float(axes.get(n.lower()[:4], axes.get(n, 0)) or a["default"])
+                                     for n, a in zip(names, font.get_variation_axes())])
+-    feats = None if pixel else ["tnum"]
++    from PIL import features as pil_features
++    feats = None if pixel or not pil_features.check("raqm") else ["tnum"]   # raqm brakuje na tym komputerze: bez tnum
+     asc, desc = font.getmetrics()
+     top = max(0, font.getbbox("A8|(", features=feats)[1] - 1)
+     h = asc + desc - top
+@@ -176,14 +179,21 @@ def main(out):
+              "#pragma once", "#include <stdint.h>", f"#define FONT_PAD {PAD}  /* x scale for L, see below */", ""]
+     for name, ttf, px, scale, pixel, first, last in SIZES:
+         h, glyphs = render(ttf, px, scale, pixel, first, last)
+-        data, offs = [], []
++        data, offs, box = [], [], []
+         for adv, bw, g in glyphs:
+             offs.append(len(data))
+-            for y in range(h):
+-                row = g[y * bw:(y + 1) * bw] + [0]
+-                for x in range(0, bw, 2):
++            ys = [y for y in range(h) if any(g[y * bw:(y + 1) * bw])]
++            xs = [x for x in range(bw) if any(g[y * bw + x] for y in range(h))]
++            if not ys:                                 # nothing lit (space): an empty box, no bytes
++                box += [0, 0, 0, 0]
++                continue
++            x0, y0, w, bh = xs[0], ys[0], xs[-1] - xs[0] + 1, ys[-1] - ys[0] + 1
++            box += [x0, y0, w, bh]
++            for y in range(y0, y0 + bh):
++                row = g[y * bw + x0:y * bw + x0 + w] + [0]
++                for x in range(0, w, 2):
+                     data.append((row[x] << 4) | row[x + 1])
+-        assert len(data) < 65536
++        assert len(data) < 65536 and max(box) < 256
+         lines.append(f"static const uint8_t FONT_{name}_DATA[{len(data)}] = {{")
+         for i in range(0, len(data), 24):
+             lines.append("    " + ", ".join(f"0x{b:02x}" for b in data[i:i + 24]) + ",")
+@@ -193,8 +203,9 @@ def main(out):
+                      ", ".join(str(a) for a, _, _ in glyphs) + "};")
+         lines.append(f"static const uint8_t FONT_{name}_BW[{len(glyphs)}] = {{" +
+                      ", ".join(str(b) for _, b, _ in glyphs) + "};")
++        lines.append(f"static const uint8_t FONT_{name}_BOX[{len(box)}] = {{" + ", ".join(map(str, box)) + "};")
+         lines.append(f"static const felucca_font_t FONT_{name} = {{ {h}, {PAD * scale}, {first}, {last}, "
+-                     f"FONT_{name}_ADV, FONT_{name}_BW, FONT_{name}_OFF, FONT_{name}_DATA }};")
++                     f"FONT_{name}_ADV, FONT_{name}_BW, FONT_{name}_OFF, FONT_{name}_DATA, FONT_{name}_BOX }};")
+         lines.append("")
+         print(f"font {name}: {ttf} {px}px h {h}, digit adv {glyphs[ord('0') - first][0]}, {len(data)} B")
+     print(f"font set {FONTSET}: {sum(len(l) for l in lines if l.startswith('    0x')) // 6} B (approx)")
+diff --git a/web/backup/index.html b/web/backup/index.html
+index f3e945c..fa3364e 100644
+--- a/web/backup/index.html
++++ b/web/backup/index.html
+@@ -448,7 +448,16 @@ $("backup").addEventListener("click", async () => {
+     dev = await connect();
+     say(`Receiving the backup from ${esc(FW.name)}&hellip;`);
+     progress(0);
+-    const { image, flags } = await PB.backup(dev.link, (n) => { sayProgress(`Receiving the backup: ${n.toLocaleString("en")} bytes`); bar.removeAttribute("value"); });
++    let image, flags;
++    for (let tries = 1; ; tries++) {   // a piece lost on the way (rare): the whole backup again, three times at most
++      try {
++        ({ image, flags } = await PB.backup(dev.link, (n) => { sayProgress(`Receiving the backup: ${n.toLocaleString("en")} bytes`); bar.removeAttribute("value"); }));
++        break;
++      } catch (e) {
++        if ((e.code !== "lost" && e.code !== "stopped") || dev.link.lost || tries >= 3) throw e;
++        say(`A piece went missing on the way. Trying again (${tries + 1} of 3)&hellip;`);
++      }
++    }
+     const sections = [];
+     for (const ex of EXTRAS) {
+       say(`Receiving ${esc(ex.what)} from ${esc(FW.name)}&hellip;`);
+diff --git a/web/fm1ota.js b/web/fm1ota.js
+index 482c784..3757b66 100644
+--- a/web/fm1ota.js
++++ b/web/fm1ota.js
+@@ -11,6 +11,9 @@ const HS_QUERY = [0xF0, 0x00, 0x32, 0x45, 0x00, 0x00, 0x00, 0x40, 0x7F, 0xF7];
+ const UPGRADE = [0xF0, 0x22, 0x24, 0x35, 0x7F, 0xF7];
+ const MAXDATA = 512;
+ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
++// a promise with a time limit: Edge on Windows can leave port.open() pending forever on a port that has just come
++// back (the FM-1 restarting into the loader or the new firmware) — the install hung there (2026-10-30)
++const within = (p, ms) => Promise.race([p, new Promise((_, no) => setTimeout(() => no(new Error("timeout")), ms))]);
+ const IS_OTA = (id) => /^ota-/i.test(id.model);
+ 
+ // M-VAVE's FM1 Open firmware (V10, 2026-10): its updater takes only a package it has been told about
+@@ -101,7 +104,11 @@ class Link {
+     }
+     return this.q.shift() || null;
+   }
+-  close() { this.input.onmidimessage = null; }
++  // the ports themselves too: a port left open while the device restarts hung Edge's MIDI (2026-10-30)
++  close() {
++    this.input.onmidimessage = null;
++    for (const p of [this.input, this.output]) try { p.close().catch(() => {}); } catch (_) { /* (old browsers) */ }
++  }
+ }
+ 
+ async function handshake(link, tries = 3) {
+@@ -144,9 +151,12 @@ async function query(link, cmd, payload = []) {
+ }
+ 
+ export class Updater {
+-  constructor(access, log) {
++  // refresh: () => a new MIDIAccess. On Windows a port that appears during an install (the loader, the new
++  // firmware) sometimes shows up only in a new one (a page reload found it): waitFor asks for one every 5 s
++  constructor(access, log, refresh) {
+     this.access = access;
+     this.log = log || (() => {});
++    this.refresh = refresh || null;
+   }
+ 
+   // every in/out pair with the same port name that answers the handshake
+@@ -154,10 +164,11 @@ export class Updater {
+     const outs = [...this.access.outputs.values()];
+     for (const input of this.access.inputs.values()) {
+       if (input.state === "disconnected") continue;
+-      if (!/fm-?1|felucca|ota|composite|sinco|usb-midi/i.test(input.name || "")) continue;   // never probe other gear
++      if (!/fm-?1|og ?synth|felucca|ota|composite|sinco|usb-midi/i.test(input.name || "")) continue;   // never probe other gear
+       const output = outs.find((o) => o.name === input.name) || (outs.length === 1 ? outs[0] : null);
+       if (!output) continue;
+-      try { await input.open(); await output.open(); } catch (_) { continue; }
++      try { await within(input.open(), 2000); await within(output.open(), 2000); }
++      catch (e) { this.log(`${input.name}: cannot open (${e && e.message || e}): busy in another program?`); continue; }
+       const link = new Link(input, output);
+       const id = await handshake(link, 2);
+       if (id && (!filter || filter(id))) return { link, id, name: input.name };
+@@ -168,17 +179,20 @@ export class Updater {
+ 
+   async waitFor(filter, ms) {
+     const end = Date.now() + ms;
+-    while (Date.now() < end) {
++    for (let n = 1; Date.now() < end; n++) {
+       const dev = await this.find(filter);
+       if (dev) return dev;
+       await sleep(1000);
++      if (this.refresh && n % 5 === 0) {
++        try { this.access = await this.refresh(); } catch (_) { /* keep the one we have */ }
++      }
+     }
+     return null;
+   }
+ 
+   // serve read requests until the device asks for one of the finish addresses; stops early
+   // when the port disappears (lost: true) instead of waiting out idleMs
+-  async serve(link, image, finishAddr, idleMs, onProgress) {
++  async serve(link, image, finishAddr, idleMs, onProgress, onFinish) {
+     let served = 0, bytes = 0, last = Date.now();
+     for (;;) {
+       const pkt = await link.read(1000);
+@@ -192,7 +206,7 @@ export class Updater {
+       last = Date.now();
+       if (r.addr === 0xE0000000 || r.addr === 0xF0000000) {
+         link.send(response(r.addr, [...new TextEncoder().encode("success"), 0]));
+-        if (r.addr === finishAddr) return { served, finished: true };
++        if (r.addr === finishAddr) { if (onFinish) onFinish(); return { served, finished: true }; }
+         continue;
+       }
+       if (r.len > MAXDATA || r.addr + r.len > image.length) throw fail("badreq", `bad request ${r.addr.toString(16)}+${r.len}`);
+@@ -206,8 +220,8 @@ export class Updater {
+     }
+   }
+ 
+-  // full install: running firmware -> loader -> new firmware
+-  async install(image, product, onStep, sha256) {
++  // step 1 alone: the running firmware reads the package and stages the loader (then it restarts into it)
++  async stage(image, product, onStep, sha256, onFinish) {
+     const step = onStep || (() => {});
+     const dev = await this.find((id) => !IS_OTA(id));
+     if (!dev) throw fail("notfound", "FM-1 not found (USB cable, and no other app using it?)");
+@@ -217,18 +231,24 @@ export class Updater {
+     step("start", dev.id.text);
+     dev.link.send(UPGRADE);
+     await sleep(2000);
+-    const s1 = await this.serve(dev.link, image, 0xE0000000, 8000, (n, b) => step("verify", n, b));
++    const s1 = await this.serve(dev.link, image, 0xE0000000, 8000, (n, b) => step("verify", n, b), onFinish);
+     dev.link.close();
+     if (!s1.finished) throw fail(s1.lost ? "lost" : "stopped", `the device ${s1.lost ? "was disconnected" : "stopped"} after ${s1.served} requests: nothing was written`);
++  }
++
++  // full install: running firmware -> loader -> new firmware
++  async install(image, product, onStep, sha256) {
++    const step = onStep || (() => {});
++    await this.stage(image, product, step, sha256);
+     step("loader");
+     await sleep(3000);
+-    const ota = await this.waitFor(IS_OTA, 30000);
++    const ota = await this.waitFor(IS_OTA, 60000);
+     if (!ota) throw fail("noloader", "the update loader did not appear. Replug the USB cable and press Install again: the device stays in update mode until it is finished.");
+     const s2 = await this.write(ota, image, step);
+     if (!s2.finished) throw fail(s2.lost ? "lost" : "stopped", `the loader ${s2.lost ? "was disconnected" : "stopped"} after ${s2.served} requests. Replug and press Install again to resume.`);
+     step("reboot");
+     await sleep(3000);
+-    const back = await this.waitFor((id) => !IS_OTA(id), 40000);
++    const back = await this.waitFor((id) => !IS_OTA(id), 60000);
+     if (!back) throw fail("noreturn", "the device did not come back: power-cycle it");
+     back.link.close();
+     if (back.id.text !== product) throw fail("mismatch", `installed, but the device reports ${back.id.text}`, back.id.text);
+@@ -280,10 +300,10 @@ export class Updater {
+   }
+ 
+   // step 2 with the loader found by find()/waitFor()
+-  async write(ota, image, step) {
++  async write(ota, image, step, onFinish) {
+     ota.link.send(UPGRADE);
+     await sleep(2000);
+-    const s2 = await this.serve(ota.link, image, 0xF0000000, 180000, (n, b) => step("write", n, b));
++    const s2 = await this.serve(ota.link, image, 0xF0000000, 180000, (n, b) => step("write", n, b), onFinish);
+     ota.link.close();
+     return s2;
+   }
+diff --git a/web/installer.html b/web/installer.html
+index 6e65819..4fcf704 100644
+--- a/web/installer.html
++++ b/web/installer.html
+@@ -147,6 +147,7 @@ const TEXT = {
+     nomidi: "このブラウザでは使えません。Chrome か Edge で開いてください。", loadfail: "読み込めませんでした: ",
+     start: "開始します", verify: "確認中", loader: "書き込みモードに切り替え中", write: "書き込み中",
+     reboot: "再起動中", done: "完了しました", stopped: "途中で止まりました。USB を挿し直してもう一度押してください。",
++    retry: "もう一度自動で試しています（操作は不要です）",
+     error: "エラー: ",
+     denied: "MIDI（SysEx）の使用が許可されませんでした。アドレスバーのサイト設定で MIDI を許可して、もう一度押してください。",
+     notfound: "FM-1 が見つかりません。USB ケーブル（データ通信用か）を確かめ、MIDI を使う他のアプリやブラウザのタブ（別のファームウェアのインストーラーやエディター）を閉じてから、もう一度押してください。別のファームウェアからは、そのまま起動した状態で構いません（アップデートモードは不要です）。",
+@@ -197,6 +198,7 @@ const TEXT = {
+     nomidi: "This browser cannot do it. Open the page in Chrome or Edge.", loadfail: "Could not load: ",
+     start: "Starting", verify: "Verifying", loader: "Switching to update mode", write: "Writing",
+     reboot: "Restarting", done: "Done", stopped: "Stopped. Replug the USB cable and press Install again.",
++    retry: "Not through yet: trying again by itself (nothing to do)",
+     error: "Error: ",
+     denied: "MIDI (SysEx) access was not allowed. Allow MIDI in the site settings (address bar) and press Install again.",
+     notfound: "FM-1 not found. Check the USB cable (a data cable), close other apps and browser tabs that use MIDI (another firmware's installer or editor), and press Install again. Coming from another firmware, leave it running as it is: no update mode is needed.",
+@@ -262,9 +264,11 @@ const say = (txt) => { lastKey = null; $("alert").textContent = ""; $("status").
+ /* follows the newest line, unless the reader has scrolled up to look at an earlier one */
+ const log = (t) => {
+   const el = $("log"), atEnd = el.scrollHeight - el.scrollTop - el.clientHeight < 24;
+-  el.append(t + "\n");
++  el.append(new Date().toISOString().slice(11, 19) + " " + t + "\n");
+   if (atEnd) el.scrollTop = el.scrollHeight;
+ };
++/* the log of an install to the local server that serves the page (a POST it may not take: then nothing) */
++const keepLog = () => fetch("../log", { method: "POST", body: $("log").textContent }).catch(() => {});
+ let image = null, boot = null;
+ const meta = /*META*/;
+ /* the firmware's own steps around an install (its site's install_app script, or none): before(midi, ui) runs before
+@@ -309,6 +313,12 @@ window.addEventListener("beforeunload", (e) => { if (writing) { e.preventDefault
+     image = logicalImage(pkg);
+     say(`{{NAME}} ${meta.version}`);
+     $("go").disabled = false;
++    const st = resumeGet();                     /* a reload in the middle of an install: go on from its step */
++    if (st && st.product === meta.product && Date.now() - st.t < 600000) {
++      $("log").textContent = st.log || "";
++      if (st.phase === "done") { finished(); return; }
++      run(image, meta.product, false, undefined, st);
++    } else resumeSet(null);
+   } catch (e) { sayK("loadfail", e.message); }
+   /* m-bootloader: offered only when its package is here and is the one the site was made with */
+   try {
+@@ -353,12 +363,115 @@ function confirmed(withBoot) {
+   return new Promise((r) => d.addEventListener("close", () => r(d.returnValue === "go"), { once: true }));
+ }
+ 
+-async function run(img, product, isStock, sha256) {
+-  const withBoot = !isStock && !!boot && $("mboot").checked;
+-  if (!(await confirmed(withBoot))) return;
++/* Edge on Windows does not list a MIDI device that appears while the page is open (the loader, then the new
++   firmware): neither the open MIDIAccess nor a new one in the same page sees it, a reloaded page does (OG Synth's
++   install logs, 2026-10-29: "noloader" / "noreturn" with the FM-1 there and fine). So an install reloads the page
++   itself at those two points and goes on from the stored step: nothing for the user to do. */
++const RESUME = "fm1-resume";
++const resumeGet = () => { try { return JSON.parse(sessionStorage.getItem(RESUME) || "null"); } catch (_) { return null; } };
++const resumeSet = (st) => { try { if (st) sessionStorage.setItem(RESUME, JSON.stringify(st)); else sessionStorage.removeItem(RESUME); } catch (_) { /* no storage: no reload either */ } };
++const RELOADS = 10;                               /* a reload while waiting for the loader: about 3 minutes */
++/* Edge on Windows hangs whole (156.0.4314.58, 2026-11-03, on a real FM-1) some 10 s after the last page with a MIDI
++   session goes away, when a device of that session has gone from USB. The session ended before the device goes is
++   fine, and a new one after it lists the new device. So: away from the page in the same moment as the last answer
++   the device restarts on, and no MIDI until it has restarted. */
++const SETTLE = 12000;                             /* the FM-1 restarting into the loader, before asking for MIDI */
++function leaveFor(phase) {
++  log(`${phase}: leaving the page before the FM-1 restarts`);
++  resumeSet({ phase, tries: 0, product: meta.product, t: Date.now(), log: $("log").textContent });
++  if (!resumeGet()) return false;
++  writing = false;                               /* (no "leave the page?" question) */
++  if (navigator.sendBeacon) navigator.sendBeacon("../log", $("log").textContent);   /* (not a fetch: no waiting) */
++  location.reload();
++  return true;
++}
++/* the loader has its last answer: the page came back without MIDI, the FM-1 starts the new firmware by itself */
++function finished() {
++  log(`written: ${meta.product}, the FM-1 restarts with it`);
++  log(`done ${meta.product}`);
++  $("bar").value = 100;
++  sayK("done");
++  resumeSet(null);
++  keepLog();
++}
++function reloadFor(phase, st) {
++  const tries = (st ? st.tries : 0) + 1;
++  if (tries > RELOADS) return false;
++  log(`${phase}: reloading the page to see the FM-1 (${tries}/${RELOADS})`);
++  resumeSet({ phase, tries, product: meta.product, t: Date.now(), log: $("log").textContent });
++  if (!resumeGet()) return false;
++  writing = false;                               /* (no "leave the page?" question) */
++  keepLog().finally(() => location.reload());    /* the log so far to the local server first (where it stalls) */
++  return true;
++}
++/* what the browser lists (the install log): port names and states */
++const ports = (midi) => [...midi.inputs.values()].map((p) => `${p.name} (${p.state})`).join(", ") || "none";
++
++/* the install as steps across reloads: "start" (the running firmware stages the loader), "loader" (it writes),
++   "return" (the new firmware has started); "reload" = the page is going away and goes on after it */
++async function goOn(up, img, product, step, sha256, st) {
++  let phase = st ? st.phase : "start", left = false;
++  const leaveAt = (next) => () => { left = leaveFor(next); };
++  log(`${phase}: MIDI ports: ${ports(up.access)}`);
++  keepLog();                                     /* (each step's log on the local server, also when it stalls) */
++  if (phase === "start") {
++    try {
++      await up.stage(img, product, step, sha256, leaveAt("loader"));
++      if (left) return "reload";
++    } catch (e) {                                /* an install cut off earlier: the loader waits for its write */
++      if (!e || e.code !== "notfound") throw e;
++      const cut = await up.waitFor(IS_OTA, 6000);
++      if (!cut) throw e;
++      cut.link.close();
++    }
++    step("loader");
++    phase = "loader";
++  }
++  if (phase === "loader") {
++    const ota = await up.waitFor(IS_OTA, 6000);
++    if (!ota) {
++      const back = await up.find((id) => !IS_OTA(id));   /* the loader already done (a reload too late)? */
++      if (back) {
++        back.link.close();
++        if (back.id.text === product) { step("done", back.id.text); return "done"; }
++      }
++      if (reloadFor("loader", st)) return "reload";
++      throw fail("noloader", "the update loader did not appear. Replug the USB cable and press Install again: the device stays in update mode until it is finished.");
++    }
++    const s2 = await up.write(ota, img, step, leaveAt("done"));
++    if (left) return "reload";
++    if (!s2.finished) {
++      if (s2.lost && reloadFor("loader", st)) return "reload";
++      throw fail(s2.lost ? "lost" : "stopped", `the loader ${s2.lost ? "was disconnected" : "stopped"} after ${s2.served} requests. Replug and press Install again to resume.`);
++    }
++    /* the loader asked for its last address: written and checked; it restarts into the new firmware by itself.
++       Done here, without MIDI: Edge (Windows) hung on the port of the FM-1 coming back (the page stopped answering,
++       2026-10-30, FM-1 fine) — the old wait for the return gave "did not come back" with the FM-1 running. */
++    step("reboot");
++    log(`written: ${product}, the FM-1 restarts with it`);
++    step("done", product);
++    return "done";
++  }
++  const back = await up.waitFor((id) => !IS_OTA(id), 6000);
++  if (!back) {
++    const ota = await up.find(IS_OTA);           /* still the loader: it goes on writing after the reload */
++    if (ota) ota.link.close();
++    if (reloadFor(ota ? "loader" : "return", st)) return "reload";
++    throw fail("noreturn", "the device did not come back: power-cycle it");
++  }
++  back.link.close();
++  if (back.id.text !== product) throw fail("mismatch", `installed, but the device reports ${back.id.text}`, back.id.text);
++  step("done", back.id.text);
++  return "done";
++}
++
++async function run(img, product, isStock, sha256, st) {
++  const withBoot = !st && !isStock && !!boot && $("mboot").checked;
++  if (!st && !(await confirmed(withBoot))) return;
++  if (st && st.phase === "loader") { sayK("loader"); await sleep(SETTLE); }
+   let midi;
+   try { midi = await navigator.requestMIDIAccess({ sysex: true }); }
+-  catch (e) { sayK("denied"); return; }
++  catch (e) { resumeSet(null); sayK("denied"); return; }
+   let appState = null;
+   if (APP && APP.before && !isStock) {
+     try { appState = await APP.before(midi, appUi); }
+@@ -389,20 +502,29 @@ async function run(img, product, isStock, sha256) {
+       if (k === "bootstart" || k === "bootwrite") sayK(k);
+       if (k === "bootdone") { $("bar").value = 100; sayK("bootdone"); }
+     };
+-    const ota = await up.find((id) => /^ota-/i.test(id.model));
+-    if (ota) {
+-      ota.link.close();
+-      const done = await up.resume(img, step);
+-      if (done && withBoot) await up.installBoot(boot, product, step);
+-      else {
+-        if (done) $("bar").value = 100;
+-        sayK(done ? (isStock ? "stockdone" : "done") : "stopped");
+-      }
+-      installed = !!done;
+-    } else {
+-      await up.install(img, product, step, sha256);
+-      if (withBoot) await up.installBoot(boot, product, step);
++    if (st) {                                     /* after a reload: where it was */
++      $("bar").value = st.phase === "return" ? 99 : (CHECK / total) * 100;
++      sayK(st.phase === "return" ? "reboot" : "loader");
++    }
++    if (!isStock && !withBoot && !APP) {          /* OG Synth: across reloads when it must */
++      if ((await goOn(up, img, product, step, sha256, st)) === "reload") return;
+       installed = true;
++    } else {
++      const ota = await up.find((id) => /^ota-/i.test(id.model));
++      if (ota) {
++        ota.link.close();
++        const done = await up.resume(img, step);
++        if (done && withBoot) await up.installBoot(boot, product, step);
++        else {
++          if (done) $("bar").value = 100;
++          sayK(done ? (isStock ? "stockdone" : "done") : "stopped");
++        }
++        installed = !!done;
++      } else {
++        await up.install(img, product, step, sha256);
++        if (withBoot) await up.installBoot(boot, product, step);
++        installed = true;
++      }
+     }
+   } catch (e) {
+     if (isStock && e && e.code === "mismatch") { $("bar").value = 100; sayK("stockdone"); }   /* stock names itself its own way */
+@@ -410,6 +532,7 @@ async function run(img, product, isStock, sha256) {
+     else sayK("error", e && e.message);
+     log(String(e && e.stack || e));
+   }
++  resumeSet(null);
+   if (installed && APP && APP.after && !isStock) {
+     try { await APP.after(midi, appUi, appState); }
+     catch (e) { say(String(e && e.message || e)); log(String(e && e.stack || e)); }
+@@ -417,6 +540,7 @@ async function run(img, product, isStock, sha256) {
+   writing = false;
+   $("go").disabled = !image;
+   $("stockgo").disabled = !stock;
++  keepLog();
+ }
+ 
+ $("go").addEventListener("click", () => run(image, meta.product, false));
