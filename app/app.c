@@ -182,7 +182,8 @@ enum { G_VHOME, G_VPAGES, G_TUNE, G_MIDICH, G_VEL, G_PRESS, G_TRANSP, G_ACCEL, G
        G_MTS0,                           /* (v0.82) wysyłki ścieżki T1..T4 (mt_sf): bity 0-6 REVERB, 7-13 DELAY; 0 = jak MIX w
                                           * presecie (stare zapisy), inaczej wartość 0-100 + 1 */
        G_MFXOFF = G_MTS0 + 4,            /* (v0.88) MASTER FX odpięty od ścieżki: bity 0-3 REVERB T1-T4, 4-7 DELAY; bit 8: zapis już z v0.88 */
-       G_SQUNIT,                         /* (v0.88) SEQ > OPTIONS: SEL + ALGO co BEAT (0), STEP, BAR */
+       G_SQUNIT,                         /* (v0.88) SEQ > OPTIONS: SEL + ALGO co BEAT (0), STEP, BAR; (v0.92) COUNT IN: 8 | ON | LEN << 1
+                                          * (poniżej 8: stare pole = bez odliczania, LEN 1 BAR) */
        G_MULTI = 48,                     /* v0.64 MULTI (docs/funkcje/multi.md): 0 SOLO, 1 MULTI */
        G_MT0,                            /* silnik ścieżki T1..T4 (NENG: pusta) */
        G_MTV0 = G_MT0 + 4,               /* głośność ścieżki 0-100 (80 = jak SOLO) */
@@ -263,7 +264,7 @@ static const pdef_t GDEF[NGALL] = {
     {"MULTI MASTER", 0, 2, 0, F_LIST, L_MTMST},   /* 41 (v0.77) */
     {"SEND", 0, 16383, 0, F_NUM, 0}, {"SEND", 0, 16383, 0, F_NUM, 0},   /* 42-45 (v0.82): G_MTS0 */
     {"SEND", 0, 16383, 0, F_NUM, 0}, {"SEND", 0, 16383, 0, F_NUM, 0},
-    {"LINK", 0, 511, 0, F_NUM, 0}, {"", 0, 2, 0, F_NUM, 0},   /* 46-47 (v0.88): G_MFXOFF, G_SQUNIT (v0.91: opcja usunięta, pole wolne) */
+    {"LINK", 0, 511, 0, F_NUM, 0}, {"", 0, 15, 0, F_NUM, 0},   /* 46-47 (v0.88): G_MFXOFF, G_SQUNIT (v0.92: COUNT IN) */
     {"MULTI", 0, 1, 0, F_LIST, L_ONOFF},     /* 48 (v0.64): MULTI, ścieżki T1-T4 (silnik, NENG = pusta) */
     {"T1", 0, NENG, ENG_MORPH, F_NUM, 0}, {"T2", 0, NENG, ENG_MOOG, F_NUM, 0}, {"T3", 0, NENG, ENG_VCO, F_NUM, 0},
     {"T4", 0, NENG, ENG_DCO, F_NUM, 0},
@@ -408,7 +409,7 @@ static uint32_t mt_hn;
 /* (v0.66) SEQ 4 ścieżki: nuty ścieżek obok wybranej z tego bloku (sq_apply, chwila = próbka): mt_mix dzieli blok
  * ścieżki w tych chwilach (co do próbki, jak wybraną sq_render) */
 #define MT_NEV 64
-static struct { uint16_t at; uint8_t t, on, note, vel, slide; int8_t from; } mt_ev[MT_NEV];
+static struct { uint16_t at; uint8_t t, on, note, vel, slide; int8_t from, pit; uint16_t dl; } mt_ev[MT_NEV];   /* (v0.92) pit, dl: ogs_seq.c sq_q */
 static uint32_t mt_nev;
 static uint32_t mt_code(uint32_t e)          /* ten sam kod = ten sam stan poza wspólnym RAM */
 {
@@ -608,12 +609,16 @@ static void mt_ev_do(uint32_t k)             /* przerwanie audio: zdarzenie k (w
     if (mt_ev[k].on) {
         ctl.slide = mt_ev[k].slide & 1u;
         ctl.slide_from = mt_ev[k].from;
+        ctl.npit = mt_ev[k].pit;
+        ctl.dlen = (float)mt_ev[k].dl * 0.001f;
         LANE_KEEP();
         mt_lim_on(mt_ev[k].t, (int32_t)mt_ev[k].note);   /* (v0.75) limit nut ścieżki */
         x->note_on((int32_t)mt_ev[k].note, (float)mt_ev[k].vel / 127.0f);
         LANE_BACK();
         mt_kick(mt_ev[k].t, (int32_t)mt_ev[k].note);
         ctl.slide = 0;
+        ctl.npit = 0;
+        ctl.dlen = 0.0f;
     } else {
         mt_lim_off(mt_ev[k].t, (int32_t)mt_ev[k].note);
         if ((mt_ev[k].slide & 4u) && x->note_cut)   /* (v0.87) SQ_CUT */
@@ -970,7 +975,7 @@ static void eng_off(const engine_t *e, int32_t key)
     nt_key[key & 127] = 0;
     sub_track();
 }
-static uint32_t chord_now(void) { return chord_mask(xt_play()); }
+static uint32_t chord_now(void) { return eng_play < NENG && mt_drum(eng_play) ? 1u : chord_mask(xt_play()); }   /* (v0.92) perkusja: bez CHORD */
 static void eng_on(const engine_t *e, int32_t key, float v) { eng_on_m(e, key, v, chord_now()); }
 static void eng_on_m(const engine_t *e, int32_t key, float v, uint32_t m)
 {
@@ -1500,7 +1505,7 @@ static const xfpreset_t XF[] = {
      {J_MODEL, 0, J_HPF, 1, J_SAW, 70, J_PULSE, 50, J_PW, 30, J_LPW, 40, J_LRATE, 30, J_CUT, 50, J_RES, 10,
       J_FENV, 15, XENV(J_EA, 60, 60, 80, 70), J_CHO, 2, -1},
      {XFX(FX_REVERB, 4, 85, 90, 20, 40, 3, 2, 40, 110)}},
-    {"RHODES", ENG_DX7, 1, 0, 3, {-1},
+    {"TINE KEYS", ENG_DX7, 1, 0, 3, {-1},
      {XFX(FX_TREM, 2, 50, 50, 0, 0, 1, 0, 0, 0), XFX(FX_CHORUS, 1, 35, 50, 10, 40, 40, 70, 110, 100),
       XFX(FX_REVERB, 3, 35, 45, 5, 20, 2, 2, 0, 90)}},
     /* (v0.51) ALPHA: COMB SAW, CHORUS RATE, obwiednia 4-odcinkowa (propozycja, do odsłuchu; na końcu numeracji: numery
@@ -4651,7 +4656,7 @@ __attribute__((used, visibility("default"))) int32_t ogs_sq(int32_t w)
 __attribute__((used, visibility("default"))) int32_t ogs_sqn(int32_t i, int32_t w)   /* nuta i: t, len, note, vel, fl, chance */
 {
     const sqn_t *q = &sqp.n[(uint32_t)i % SQ_NN];
-    return w == 0 ? q->t : w == 1 ? q->len : w == 2 ? q->note : w == 3 ? q->vel : w == 4 ? q->fl : q->chance;
+    return w == 0 ? q->t : w == 1 ? q->len : w == 2 ? q->note : w == 3 ? q->vel : w == 4 ? q->fl : w == 6 ? sqp.x[(uint32_t)i % SQ_NN] : q->chance;   /* (v0.92) 6: x */
 }
 __attribute__((used, visibility("default"))) const uint8_t *ogs_sq_flash(int32_t pat) { return plat_data(sq_off(pat)); }
 __attribute__((used, visibility("default"))) const int16_t *ogs_wt_frame(int32_t v, int32_t o) { return wd[v & 7].buf[o & 1]; }
@@ -4754,7 +4759,8 @@ enum { V_HOME = -1, V_GLO = -2, V_SAVE = -3, V_NAME = -4, V_ALLP = -5, V_IMPORT 
        V_PERF = -17,                      /* (v0.47) PERFORM: FX trzymany */
        V_MTL = -18,                       /* (v0.86) MULTI: lista silników ścieżki (SEL trzymany, jak lista efektów) */
        V_MOD = -19,                       /* (v0.65) strona MOD: LFO / ENV trzymany + klawisz OP (gest.md) */
-       V_SCN = -20 };                     /* (v0.86) MULTI: lista scen (v0.90: HOME na głównym ekranie) */
+       V_SCN = -20,                       /* (v0.86) MULTI: lista scen (v0.90: HOME na głównym ekranie) */
+       V_CPY = -21 };                     /* (v0.92) perkusja: SEL + klawisz + drugi klawisz = kopia dźwięku (pytanie) */
 static int8_t mt_red = -1;               /* (v0.81) silnik, który nie może grać obok reszty (czerwony): pod kursorem okna ENGINE, SEL w liście */
 static void mt_knob(uint32_t k, int32_t e);
 static void mod_knob(uint32_t k, int32_t e);
@@ -4848,14 +4854,18 @@ static struct {
     uint8_t sq_rng;                      /* NOTES: zaznaczony zakres (SEL + SELECT, jak w FL): edycja i karta na wszystkich */
     uint32_t sq_ra, sq_re;               /* zakres: komórka startu i końca (tick w gridzie, w obie strony) */
     uint8_t play_hold;                   /* PLAY w NOTES: krótko = od kursora, trzymany = od początku */
+    uint8_t rec_hold;                    /* (v0.92) REC: krótko = nagrywanie, trzymany = strona RECORD */
+    uint32_t rec_at;
     uint32_t play_at;
     uint8_t sq_pitch;                    /* wysokość nowej nuty z K2 (ostatnio wpisana / zmieniona) */
     uint8_t sqn_row;                     /* karta nuty: wiersz */
     uint8_t st_on;                       /* klawisze wpisują (pusty krok albo REC) do puszczenia wszystkich */
     uint8_t sq_zv, sq_zh;                /* NOTES: zoom w pionie (SEL + K1: ile rzędów), w poziomie (SEL + K2: takty) */
+    uint8_t cp_k, cp_yes;                /* (v0.92) kopia dźwięku: klawisz trzymany z SEL (+ 1), wybór TAK */
+    int8_t cp_a, cp_b, cp_back;          /* skąd, dokąd (dźwięk), strona sprzed okna */
     uint8_t redraw_roll;                 /* odtwarzanie: tylko piano roll (bez paska i chipów: mniej przesyłania) */
     uint8_t redraw;
-} ui = {.page = V_HOME, .knob = -1, .sq_low = 55, .sq_note = -1, .sq_pitch = 60, .sq_zv = 1, .pf_mac = {0, 0, 0, 100}};
+} ui = {.page = V_HOME, .knob = -1, .sq_low = 55, .sq_note = -1, .sq_pitch = 60, .sq_zv = 1, .sq_zh = 2, .pf_mac = {0, 0, 0, 100}};
 #ifdef PLAT_WEB
 #pragma push_macro("__attribute__")
 #undef __attribute__
@@ -4996,7 +5006,7 @@ static int32_t param_step(int32_t id, int32_t d)
 static int32_t chord_slot(int32_t g)     /* w sekcji g CHORD stoi za tą pozycją (-1: nie w tej sekcji) */
 {
     int32_t v = E->label_page(K_GLOBAL, G_EDIT, -1), i;
-    if (g != G_EDIT && g != G_ALL)
+    if ((g != G_EDIT && g != G_ALL) || ENG_GRP[set.eng] == EG_DRUM)   /* (v0.92, decyzja użytkownika 2026-11-04) perkusja: bez strony CHORD */
         return -1;
     for (i = 0; i < E->ngrp[g]; i++)
         if (E->grp[g][i] == v)
@@ -5912,11 +5922,34 @@ static void fx_knob(uint32_t k, int32_t e)   /* K1..K4 na stronie ui.fx_more (FX
     }
 }
 
-static void fx_select(int32_t e)         /* SELECT: slot (przesuwanie efektu: lista pod trzymanym SEL) */
+static void fx_mst_swap(void);
+static void fx_select(int32_t e)         /* SELECT: slot; (v0.92) SEL trzymany + SELECT: efekt jedzie w łańcuchu (kursor za nim) */
 {
-    int32_t to = clamp((int32_t)ui.fx_slot + (e > 0 ? 1 : -1), 0, fx_view_n() - 1);
-    if (ui.sel_hold)                         /* SELECT przy trzymanym SEL: bez listy */
+    int32_t to = clamp((int32_t)ui.fx_slot + (e > 0 ? 1 : -1), 0, fx_view_n() - 1), moved = 0;
+    if (ui.sel_hold) {                       /* SELECT przy trzymanym SEL: bez listy */
+        fx_slot_t *a = fx_cur(), *b = to != (int32_t)ui.fx_slot ? fx_view(to) : 0;
         ui.sel_used = 1;
+        if (!b)
+            return;
+        if (fx_is_mst(a) && fx_is_mst(b)) {  /* (MULTI: MASTER FX tylko między sobą) */
+            fx_mst_swap();
+            return;
+        }
+        if (fx_is_mst(a) || fx_is_mst(b)) {
+            app_say("MASTER FX", "STAYS ON TOP");
+            return;
+        }
+        if (a->type != FX_NONE || b->type != FX_NONE) {   /* (v0.92, decyzja użytkownika 2026-11-04) zamiana z sąsiadem, jak w liście */
+            const fx_slot_t x = *a;
+            char t[12] = "SLOT ", n[4];
+            *a = *b;
+            *b = x;
+            moved = 1;
+            int_text(to + 1, n, 0);
+            text_cat(t, n);
+            app_say("FX MOVED", t);
+        }
+    }
     ui.fx_slot = (uint8_t)to;
     if (to < ui.fx_win)                      /* łańcuch: 4 widoczne, przewija się tylko, gdy kursor wyjdzie poza */
         ui.fx_win = (uint8_t)to;
@@ -5924,6 +5957,8 @@ static void fx_select(int32_t e)         /* SELECT: slot (przesuwanie efektu: li
         ui.fx_win = (uint8_t)(to - 3);
     ui.knob = -1;
     ui.redraw = 1;
+    if (moved)
+        fx_changed();
 }
 
 /* (v0.85) MASTER FX: zamiana kolejnością (ALGO albo SEL trzymany na slocie 1 / 2); kursor idzie za efektem */
@@ -6082,10 +6117,22 @@ static void fx_mode(void)                /* SEL krótko: włącza / wyłącza (r
  * (v0.90, decyzje użytkownika 2026-11-03; docs/sekwencer.md na górze) SEL + OP1-4 = ścieżka (było SEQ + OP), NOTES: świecą klawisze nut
  * kroku pod kursorem, SEL + K3 długość co tick, SEL + K4 UNDO / REDO, SEL + ALGO długość co GRID,
  * K1 znowu po wysokości (ta sama wysokość: od lewej), VEL RANDOM i QUANTIZE w karcie nuty, sceny MULTI: HOME na głównym ekranie. */
-enum { SQ_NOTES, SQ_PATTERN, SQ_FEEL, SQ_RACK, SQ_OPT, SQ_NPG };   /* (v0.57) RACK: tylko silniki perkusji; (v0.88) OPT: strona ustawień */
-static const char *const SQ_PGNAME[SQ_NPG] = {"NOTES", "PATTERN", "FEEL", "RACK", "OPTIONS"};
+enum { SQ_NOTES, SQ_PATTERN, SQ_FEEL, SQ_RACK, SQ_OPT, SQ_REC, SQ_NPG };   /* (v0.57) RACK: tylko silniki perkusji; (v0.88) OPT: strona ustawień;
+                                                                             * (v0.92) REC: strona nagrywania (REC trzymany) */
+static const char *const SQ_PGNAME[SQ_NPG] = {"NOTES", "PATTERN", "FEEL", "RACK", "OPTIONS", "RECORD"};
 static const int8_t SQ_OPTG[4] = {-1, G_SQVEL, G_SQK1INV, G_SQZINV};   /* (v0.88) OPTIONS: pola GLO pod K1-K4; (v0.90) K1 pusta: SEL + ALGO już bez wyboru */
 static const char *const L_CLICK[] = {"OFF", "REC", "ON"};
+/* (v0.92, decyzja użytkownika 2026-11-04) REC trzymany: METRONOME (klik wzoru, jak FEEL CLICK), COUNT IN (odliczanie przed nagraniem
+ * z PLAY, innym klikiem), COUNT LEN, QUANTIZE (nagrane nuty na końcu: OFF albo wartość; w FEEL SEL: OFF <-> grid wzoru) */
+static const char *const L_CINL[] = {"1 BEAT", "2 BEATS", "1 BAR", "2 BARS"};
+static const char *const L_RECQ[] = {"OFF", "1/4", "1/8", "1/8T", "1/16", "1/16T", "1/32"};
+static const pdef_t RCDEF[4] = {{"METRONOME", 0, 2, 0, F_LIST, L_CLICK}, {"COUNT IN", 0, 1, 0, F_LIST, L_ONOFF},
+                                {"COUNT LEN", 0, 3, 2, F_LIST, L_CINL}, {"QUANTIZE", 0, 6, 0, F_LIST, L_RECQ}};
+static int32_t rc_cin(void) { return glob.g[G_SQUNIT] >= 8 ? glob.g[G_SQUNIT] & 7 : 4; }   /* bit 0 ON, bity 1-2 LEN (domyślnie 1 BAR) */
+static int32_t rc_get(int32_t k)
+{
+    return k == 0 ? sqp.click : k == 1 ? rc_cin() & 1 : k == 2 ? rc_cin() >> 1 : sqp.recq;
+}
 static void pt_rescan(void);
 static const pdef_t SQDEF[2][4] = {
     {{"PATTERN", 1, SQ_NPAT, 1, F_NUM, 0}, {"STEPS", 1, SQ_MAXBARS * 16, 16, F_NUM, 0}, {"BPM", 40, 300, 120, F_NUM, 0},
@@ -6107,20 +6154,22 @@ static uint32_t sq_grid(void) { return SQ_GRID[sqp.grid]; }
 static const uint8_t SQ_ZROWS[4] = {8, 13, 18, 26};
 static int32_t sq_rows(void) { return SQ_ZROWS[ui.sq_zv & 3u]; }
 static int32_t sq_rh(void) { return 182 / sq_rows(); }
-static int32_t sq_vbars(void)                    /* takty na ekranie: 1 / 2 / 4, nie więcej niż wzór */
+/* (v0.92, decyzja użytkownika 2026-11-04: „bardziej przybliżać K2”) zoom w poziomie: 1/4, 1/2, 1, 2, 4 takty (sq_zh 0..4, start 2) */
+static uint32_t sq_span(void)                    /* widok: ile ticków na szerokość, nie więcej niż wzór (najmniej takt) */
 {
-    int32_t b = 1 << (ui.sq_zh % 3u);
-    while (b > 1 && b > sqp.bars)
-        b >>= 1;
-    return b;
+    int32_t z = ui.sq_zh > 4u ? 2 : ui.sq_zh;
+    while (z > 2 && (1 << (z - 2)) > sqp.bars)
+        z--;
+    return (uint32_t)SQ_BAR * (1u << z) / 4u;
 }
+static int32_t sq_vbars(void) { return (int32_t)(sq_span() / SQ_BAR); }   /* (testy: 0 = mniej niż takt) */
 
 static void sq_zoom(int32_t vert, int32_t e)     /* (v0.89) SEL + K1: pion, SEL + K2: poziom */
 {
     char t[16], n[8];
     t[0] = 0;
     if (vert) {
-        ui.sq_zv = (uint8_t)clamp((int32_t)ui.sq_zv + (glob.g[G_SQZINV] ? -e : e), 0, 3);
+        ui.sq_zv = (uint8_t)clamp((int32_t)ui.sq_zv + (glob.g[G_SQZINV] ? e : -e), 0, 3);   /* (v0.92) odwrotnie niż do v0.91 */
         int_text(sq_rows(), t, 0);
         text_cat(t, " ROWS");
         if (ui.sq_low > 127 - sq_rows() + 1)
@@ -6129,13 +6178,17 @@ static void sq_zoom(int32_t vert, int32_t e)     /* (v0.89) SEL + K1: pion, SEL 
             ui.sq_low = clamp((int32_t)sqp.n[ui.sq_note].note - sq_rows() / 2, 0, 128 - sq_rows());
         }
     } else {
-        int32_t z = clamp((int32_t)ui.sq_zh + e, 0, 2);
-        while (z > 0 && (1 << z) > sqp.bars)    /* wzór krótszy: dalej się nie da */
+        int32_t z = clamp((int32_t)ui.sq_zh + (glob.g[G_SQZINV] ? e : -e), 0, 4);   /* (v0.92) w lewo dalej, kierunek jak pion */
+        while (z > 2 && (1 << (z - 2)) > sqp.bars)   /* wzór krótszy: dalej się nie da */
             z--;
         ui.sq_zh = (uint8_t)z;
-        int_text(sq_vbars(), n, 0);
-        text_cat(t, n);
-        text_cat(t, sq_vbars() > 1 ? " BARS" : " BAR");
+        if (z < 2) {
+            text_cat(t, z ? "1/2 BAR" : "1/4 BAR");
+        } else {
+            int_text(sq_vbars(), n, 0);
+            text_cat(t, n);
+            text_cat(t, sq_vbars() > 1 ? " BARS" : " BAR");
+        }
     }
     app_say("ZOOM", t);
     ui.sel_used = 1;
@@ -6164,12 +6217,13 @@ static void sq_changed(void)                     /* wzór zmieniony: zapis sam w
  * gałką na tej samej nucie bez przerwy 1,5 s). Cofanie zamienia wpisy z nutami (wpis trzyma potem stan „po”: ponawianie).
  * Pełny dziennik: najstarsze kroki wypadają; krok większy niż cały dziennik (np. CLEAR dużego wzoru) nie da się cofnąć.
  * Inny wzór: dziennik od zera. SU_HDR = długość wzoru (bars w t, xs w len). */
-#define SU_N 224                                 /* 224 x 10 B */
+#define SU_N 224                                 /* 224 x 12 B (v0.92: + x nuty) */
 #define SU_START 0x8000u
 #define SU_HDR 0x7FFFu
 static struct {
     uint16_t i;
     sqn_t o;
+    uint8_t x;                                   /* (v0.92) sqp.x nuty */
 } su_e[SU_N] __attribute__((section(".pool")));   /* (v0.91) w puli: RAM danych pełny; zawartość ważna tylko do su_n (zero w .bss) */
 static uint16_t su_n, su_pos;                    /* wpisy; przed su_pos: do cofnięcia, od su_pos: do ponowienia */
 static uint8_t su_new, su_skip;                  /* następny wpis zaczyna krok; krok za duży: do końca bez zapisu */
@@ -6223,6 +6277,7 @@ static void sq_u(uint32_t i)                     /* nuta i (albo SU_HDR) zaraz s
         su_e[su_n].o.len = sqp.xs;
     } else {
         su_e[su_n].o = sqp.n[i];
+        su_e[su_n].x = sqp.x[i];
     }
     su_pos = ++su_n;
     su_new = 0;
@@ -6240,8 +6295,11 @@ static void su_swap(uint32_t k)
         su_e[k].o.len = x;
     } else {
         const sqn_t c = sqp.n[i];
+        const uint8_t x = sqp.x[i];
         sqp.n[i] = su_e[k].o;
         su_e[k].o = c;
+        sqp.x[i] = su_e[k].x;
+        su_e[k].x = x;
     }
 }
 
@@ -6347,10 +6405,20 @@ static uint32_t sq_auto(uint32_t note)           /* ticki brzmienia nuty, 0: sil
     }
     return sq_ac[w];
 }
-static uint32_t sq_shown(const sqn_t *n)
+static uint32_t sq_shown(const sqn_t *n)          /* (v0.92) SQF_CUT: długość ustawiona, też dłuższa niż brzmienie (zanik rozciągnięty) */
 {
     const uint32_t a = n->len ? sq_auto(n->note) : 0u;
-    return !a ? n->len : (n->fl & SQF_CUT) && n->len < a ? n->len : a;
+    return !a || (n->fl & SQF_CUT) ? n->len : a;
+}
+/* (v0.92, decyzja użytkownika 2026-11-04: „mogę tylko skracać”) perkusja: nowa długość nuty i (sh: dotąd, nl: nowa). Krótsza od brzmienia
+ * ucina, dłuższa rozciąga zanik (silnik: ctl.dlen); przejście przez długość brzmienia zatrzymuje się na niej (bez bitu: samo brzmienie) */
+static void sq_drum_len(sqn_t *n, int32_t sh, int32_t nl, uint32_t a, uint32_t L)
+{
+    const int32_t A = (int32_t)(a < L ? a : L);
+    if ((n->fl & SQF_CUT) && ((sh < A && nl >= A) || (sh > A && nl <= A)))
+        nl = A;
+    n->fl = (uint8_t)(nl != A ? n->fl | SQF_CUT : n->fl & ~SQF_CUT);
+    n->len = (uint16_t)nl;
 }
 
 static int sq_held(uint32_t note, uint32_t keys) /* ta nuta jest pod trzymanym klawiszem */
@@ -6560,9 +6628,12 @@ static void sq_len_edit(int32_t mode, int32_t d, uint32_t key)
         }
         nl = clamp(nl, 1, (int32_t)L);
         sq_u(i);
+        if (a && d < 0 && nl >= sh && (n->fl & SQF_CUT))   /* (v0.92) krócej już się nie da (krok): z powrotem do brzmienia (AUTO) */
+            nl = (int32_t)(a < L ? a : L);
         if (a)
-            n->fl = (uint8_t)((uint32_t)nl < (a < L ? a : L) ? n->fl | SQF_CUT : n->fl & ~SQF_CUT);
-        n->len = (uint16_t)nl;
+            sq_drum_len(n, sh, nl, a, L);
+        else
+            n->len = (uint16_t)nl;
         ui.sq_len = n->len;                      /* nowe nuty: ta długość (jak w FL) */
     }
     sq_changed();
@@ -6620,6 +6691,7 @@ static int32_t sq_add(uint32_t note, uint32_t vel)   /* nowa nuta w kursorze (d�
             n->note = (uint8_t)note;
             n->fl = sq_tbits();
             n->chance = 100;
+            sqp.x[i] = 0;
             n->vel = (uint8_t)(vel ? vel : (uint32_t)glob.g[G_SQVEL]);
             sq_changed();
             return (int32_t)i;
@@ -6646,7 +6718,7 @@ static void sq_toggle(uint32_t note, uint32_t vel)   /* SEL + klawisz w kursorze
 
 static void sq_quantize(int all)                 /* nuty do gridu (all 1: wszystkie, 2: edytowane (karta), 0: z ostatniego nagrania) */
 {
-    uint32_t i, g = sq_grid(), L = sq_len();
+    uint32_t i, g = all || !sqp.recq ? sq_grid() : SQ_GRID[(sqp.recq - 1u) % 6u], L = sq_len();   /* (v0.92) nagranie: QUANTIZE z REC */
     for (i = 0; i < SQ_NN; i++) {
         sqn_t *n = &sqp.n[i];
         if (!n->vel || (!all && !(n->fl & SQF_NEW)) || (all == 1 && !sq_mine(n)) || (all == 2 && !sq_tgt(i)))   /* (wszystkie: wybranej ścieżki) */
@@ -6693,8 +6765,10 @@ static void sq_play_key(void)                    /* PLAY: start / stop (od pocz�
         sq.req = 2;
         app_say("STOP", "");
     } else {
+        static const uint16_t CL[4] = {SQ_PPQN, 2 * SQ_PPQN, SQ_BAR, 2 * SQ_BAR};
+        sq.cin = (uint16_t)(rc_cin() & 1 ? CL[rc_cin() >> 1] : 0u);   /* (v0.92) odliczanie (tylko z REC) */
         sq.req = 1;
-        app_say("PLAY", sq.rec ? "RECORDING" : "");
+        app_say(sq.rec && sq.cin ? "COUNT IN" : "PLAY", sq.rec ? "RECORDING" : "");
     }
     ui.redraw = 1;
 }
@@ -6756,7 +6830,7 @@ static void sq_open(uint32_t pg)                 /* strona sekcji SEQ */
     glob_commit();
     sq_hint_until = pg == SQ_NOTES && hints() ? plat_ms() + 2500u : 0;
     ui.sq_pg = (uint8_t)pg;
-    if (pg == SQ_PATTERN || pg == SQ_FEEL || pg == SQ_OPT)
+    if (pg == SQ_PATTERN || pg == SQ_FEEL || pg == SQ_OPT || pg == SQ_REC)
         ui.sq_set = (uint8_t)pg;
     else if (pg == SQ_NOTES || pg == SQ_RACK)
         ui.sq_rk = (uint8_t)(pg == SQ_RACK);
@@ -6795,6 +6869,10 @@ static void sq_set_turn(int32_t e)               /* SELECT w ustawieniach: PATTE
     if (e > 0 && ui.sq_pg == SQ_PATTERN)
         sq_open(SQ_FEEL);
     else if (e > 0 && ui.sq_pg == SQ_FEEL)
+        sq_open(SQ_OPT);
+    else if (e > 0 && ui.sq_pg == SQ_OPT)
+        sq_open(SQ_REC);
+    else if (e < 0 && ui.sq_pg == SQ_REC)
         sq_open(SQ_OPT);
     else if (e < 0 && ui.sq_pg == SQ_OPT)
         sq_open(SQ_FEEL);
@@ -7025,6 +7103,7 @@ static void rk_toggle(uint32_t col)              /* biały klawisz: krok strony 
                 n->note = RK_NOTE[ui.rk_row];
                 n->fl = sq_tbits();
                 n->chance = 100;
+                sqp.x[i] = 0;
                 n->vel = (uint8_t)glob.g[G_SQVEL];
                 any = 1;
                 break;
@@ -7047,22 +7126,124 @@ static void rk_mute(int32_t row, int solo)       /* FX + klawisz: MUTE wiersza, 
     sq_changed();
 }
 
-static void rk_knob(uint32_t k, int32_t e)       /* K1 VEL, K2 CHANCE, K3 RATCHET, K4 NUDGE; SEL trzymany: cały wiersz */
+/* (v0.92, decyzja użytkownika 2026-11-04: zamiast całego wiersza więcej dla kroku) SEL trzymany: K1 PITCH (±12 półtonów), K2 COND (obieg
+ * wzoru: 1:2, 2:2, 1:4 ... 1ST), K3 FLAM (ciche przednie uderzenie), K4 LENGTH (co 1/4 kroku; krócej ucina, dłużej rozciąga zanik,
+ * zatrzymanie na długości brzmienia = AUTO). Pary: VEL / PITCH, CHANCE / COND, RATCHET / FLAM, NUDGE / LENGTH. */
+/* (v0.92, decyzja użytkownika 2026-11-04) kopia dźwięku perkusji: SEL + trzymany klawisz + drugi klawisz -> pytanie (V_CPY). Kopiuje
+ * brzmienie i poziom; PAN, SEND (sprężyna) i CHOKE celu zostają. 88 / 99: tylko dźwięk tego samego rodzaju (stały model miejsca). */
+static int cp_dm(void) { return set.eng == ENG_88 || set.eng == ENG_99; }
+static void cp_name(int32_t snd, char *b)
+{
+    b[0] = 0;
+    if (cp_dm())
+        text_cat(b, (set.eng == ENG_88 ? D8_SN : D9_SN)[snd & 15]);
+    else
+        int_text(snd + 1, b, 0);
+}
+static void cp_ask(int32_t wa, int32_t wb)        /* wiersze (białe klawisze 0-15) */
+{
+    const int32_t a = cp_dm() ? wa : wa & 7, b = cp_dm() ? wb : wb & 7;
+    if (wa < 0 || wb < 0)
+        return;
+    if (a == b) {
+        app_say("SAME SOUND", "");
+        return;
+    }
+    if (cp_dm() && (set.eng == ENG_88 ? &DM8 : &DM9)->model[a] != (set.eng == ENG_88 ? &DM8 : &DM9)->model[b]) {
+        char t[16], n[4];
+        t[0] = 0;
+        cp_name(a, n);
+        text_cat(t, n);
+        text_cat(t, " > ");
+        cp_name(b, n);
+        text_cat(t, n);
+        app_say(t, "OTHER KIND OF SOUND");
+        return;
+    }
+    ui.cp_a = (int8_t)a;
+    ui.cp_b = (int8_t)b;
+    ui.cp_yes = 0;
+    ui.cp_k = 0;
+    if (ui.page != V_CPY)
+        ui.cp_back = (int8_t)ui.page;
+    ui.page = V_CPY;
+    ui.redraw = 1;
+}
+static void cp_ok(void)
+{
+    const int32_t a = ui.cp_a, b = ui.cp_b;
+    int32_t j;
+    ui.page = ui.cp_back;
+    ui.redraw = 1;
+    if (!ui.cp_yes)
+        return;
+    if (set.eng == ENG_MORPH) {
+        static const int16_t X[3] = {MP_PUNCH, MP_LEN, MP_FADE};
+        for (j = 0; j < MPL; j++)
+            set_param(b * MPL + j, MP[a * MPL + j]);
+        for (j = 0; j < 3; j++)
+            set_param(X[j] + b, MP[X[j] + a]);
+    } else if (set.eng == ENG_DUAL) {
+        for (j = 0; j < DUP; j++)
+            if (j != DUP_PAN && j != DUP_SEND && j != DUP_CHOKE)
+                set_param(b * DUP + j, DU[a * DUP + j]);
+        set_param(DU_GATE + b, DU[DU_GATE + a]);
+    } else {
+        const dmeng_t *e = set.eng == ENG_88 ? &DM8 : &DM9;
+        for (j = 0; j < DML; j++)
+            if (j != DML_PAN && j != DML_CHOKE)
+                set_param(b * DML + j, e->p[a * DML + j]);
+        set_param(DM_LEN + b, e->p[DM_LEN + a]);
+        set_param(DM_FADE + b, e->p[DM_FADE + a]);
+    }
+    {
+        char t[16], n[4];
+        t[0] = 0;
+        cp_name(a, n);
+        text_cat(t, n);
+        text_cat(t, " > ");
+        cp_name(b, n);
+        text_cat(t, n);
+        app_say(t, "COPIED");
+    }
+}
+
+static void rk_knob(uint32_t k, int32_t e)       /* K1 VEL, K2 CHANCE, K3 RATCHET, K4 NUDGE; SEL trzymany: PITCH, COND, FLAM, LENGTH */
 {
     const uint32_t L = sq_len();
-    const int all = ui.sel_hold;
-    const int32_t d = k == 0 ? accel(EN_K1, e, 127) : e > 0 ? 1 : -1;
+    const int more = ui.sel_hold;
+    const int32_t d = k == 0 && !more ? accel(EN_K1, e, 127) : k == 3 && more ? accel(EN_K4, e, (int32_t)L / 6) : e > 0 ? 1 : -1;
     uint32_t i, n = 0;
-    if (all)
+    if (more)
         ui.sel_used = 1;
     ui.sq_moved = plat_ms();
-    sq_um(0x200u + k + ((uint32_t)all << 3) + ((uint32_t)ui.rk_row << 4) + ((uint32_t)ui.rk_step << 9));
+    sq_ac_new();
+    sq_um(0x200u + k + ((uint32_t)more << 3) + ((uint32_t)ui.rk_row << 4) + ((uint32_t)ui.rk_step << 9));
     for (i = 0; i < SQ_NN; i++) {
         sqn_t *q = &sqp.n[i];
-        if (all ? !(q->vel && q->len && sq_mine(q) && q->t < L && rk_row_of(q->note) == ui.rk_row) : !rk_in(q, ui.rk_row, ui.rk_step))
+        if (!rk_in(q, ui.rk_row, ui.rk_step))
             continue;
         n++;
         sq_u(i);
+        if (more) {
+            const uint8_t x = sqp.x[i];
+            if (k == 0) {
+                sqp.x[i] = SQX_MAKE(clamp(SQX_PIT(x) + d, -12, 12), SQX_COND(x));
+            } else if (k == 1) {
+                sqp.x[i] = SQX_MAKE(SQX_PIT(x), clamp((int32_t)SQX_COND(x) + d, 0, NSQC - 1));
+            } else if (k == 2) {
+                q->fl = (uint8_t)(d > 0 ? q->fl | SQF_GLIDE : q->fl & ~SQF_GLIDE);   /* (perkusja: bit GLIDE = FLAM) */
+            } else {
+                const uint32_t a = sq_auto(q->note);
+                int32_t sh = (int32_t)sq_shown(q);
+                sh = sh > (int32_t)L ? (int32_t)L : sh;
+                if (a)
+                    sq_drum_len(q, sh, clamp(sh + 6 * d, 1, (int32_t)L), a, L);
+                else
+                    q->len = (uint16_t)clamp(sh + 6 * d, 1, (int32_t)L);
+            }
+            continue;
+        }
         if (k == 0) {
             q->vel = (uint8_t)clamp((int32_t)q->vel + d, 1, 127);
         } else if (k == 1) {
@@ -7076,7 +7257,7 @@ static void rk_knob(uint32_t k, int32_t e)       /* K1 VEL, K2 CHANCE, K3 RATCHE
         }
     }
     if (!n) {
-        app_say(all ? "EMPTY ROW" : "EMPTY STEP", "PRESS A WHITE KEY");
+        app_say("EMPTY STEP", "PRESS A WHITE KEY");
         return;
     }
     sq_changed();
@@ -7101,6 +7282,21 @@ static void sq_knob(uint32_t k, int32_t e)
         text_cat(t, "%");
         app_say("RANDOM ROLLS", t);
         sq_changed();
+        return;
+    }
+    if (ui.sq_pg == SQ_REC) {                    /* (v0.92) RECORD */
+        const int32_t v = clamp(rc_get((int32_t)k) + (e > 0 ? 1 : -1), RCDEF[k].lo, RCDEF[k].hi);
+        if (k == 0) {
+            sqp.click = (uint8_t)v;
+            sq_changed();
+        } else if (k == 3) {
+            sqp.recq = (uint8_t)v;
+            sq_changed();
+        } else {
+            const int32_t c = k == 1 ? (rc_cin() & 6) | v : (rc_cin() & 1) | v << 1;
+            glob.g[G_SQUNIT] = (int16_t)(8 | c);
+            glob_dirty = 1;
+        }
         return;
     }
     if (ui.sq_pg == SQ_OPT) {                    /* (v0.88) OPTIONS: pola GLO, zapis przy wyjściu (glob_commit) */
@@ -7311,6 +7507,7 @@ static void sqn_ok(void)                         /* karta: SEL (na wszystkich ed
                 }
                 sq_u(j);
                 sqp.n[j] = sqp.n[i];
+                sqp.x[j] = sqp.x[i];
                 sqp.n[j].t = (uint16_t)((sqp.n[i].t + w) % L);
             }
             ui.sq_ra = (lo + w) % L;
@@ -7357,6 +7554,7 @@ static void sqn_ok(void)                         /* karta: SEL (na wszystkich ed
         }
         sq_u((uint32_t)j);
         sqp.n[j] = c;
+        sqp.x[j] = sqp.x[f];
         ui.sq_note = j;
         app_say("NOTE", "DUPLICATED");
     } else if (ui.sqn_row == SN_DEL) {
@@ -7374,7 +7572,7 @@ static void sqn_ok(void)                         /* karta: SEL (na wszystkich ed
 static void sq_sel_short(void)                   /* SEL krótko: NOTES = GLIDE, PATTERN / RACK = narzędzia, FEEL = REC QUANTIZE */
 {
     uint32_t i, all = 1;
-    if (ui.sq_pg == SQ_OPT)                      /* (v0.88) OPTIONS: same gałki */
+    if (ui.sq_pg == SQ_OPT || ui.sq_pg == SQ_REC)   /* (v0.88) OPTIONS, (v0.92) RECORD: same gałki */
         return;
     if (ui.sq_pg == SQ_PATTERN || ui.sq_pg == SQ_RACK) {
         ui.page = V_SQT;
@@ -7385,8 +7583,8 @@ static void sq_sel_short(void)                   /* SEL krótko: NOTES = GLIDE, 
         return;
     }
     if (ui.sq_pg == SQ_FEEL) {
-        sqp.recq ^= 1u;
-        app_say("REC QUANTIZE", sqp.recq ? "ON" : "OFF");
+        sqp.recq = (uint8_t)(sqp.recq ? 0u : sqp.grid + 1u);   /* (v0.92) ON = grid wzoru; wartość: REC trzymany */
+        app_say("REC QUANTIZE", L_RECQ[sqp.recq]);
         sq_changed();
         return;
     }
@@ -7439,6 +7637,7 @@ static void sqt_ok(void)                         /* okno narzędzi wzoru: SEL ro
                 break;
             sq_u(j);
             sqp.n[j] = sqp.n[i];
+            sqp.x[j] = sqp.x[i];
             sqp.n[j].t = (uint16_t)(sqp.n[i].t + L);   /* (kopia: t >= L, nie kopiuje się drugi raz) */
         }
         sq_steps_set((int32_t)ns2);
@@ -7940,6 +8139,8 @@ static void fx_press(void)               /* FX krótko (przy puszczeniu): strona
 static void knob_turn(uint32_t k, int32_t e)
 {
     int32_t id;
+    if (ui.page == V_CPY)                    /* (v0.92) okno kopii: tylko SELECT / SEL / HOME */
+        return;
     if (ui.page == V_SQT) {                  /* (v0.66.2) narzędzia wzoru: gałka = ścieżka MOVE HERE FROM */
         if (ui.sqt_cur == ST_MOVE) {
             ui.sqt_from = (uint8_t)clamp((int32_t)ui.sqt_from + (e > 0 ? 1 : -1), 0, MT_N - 1);
@@ -8228,6 +8429,8 @@ static void save_ok(void)               /* SEL w oknach: zatwierdza (HOME anuluj
         go_home();
     } else if (ui.page == V_IMPORT) {
         import_ok();
+    } else if (ui.page == V_CPY) {
+        cp_ok();
     } else if (ui.page == V_RESET) {
         if (!ui.reset_sure) {
             ui.reset_sure = 1;               /* drugie potwierdzenie */
@@ -8280,6 +8483,11 @@ static void save_key(void)
 
 static void home_key(void)               /* HOME: wraca; w ALL PRESETS / ENGINE do tego sprzed otwarcia */
 {
+    if (ui.page == V_CPY) {                  /* (v0.92) kopia dźwięku: NIE */
+        ui.page = ui.cp_back;
+        ui.redraw = 1;
+        return;
+    }
     if (ui.page == V_FXL) {                  /* lista efektów: z powrotem, bez zmiany */
         ui.page = V_FX;
         ui.redraw = 1;
@@ -9148,6 +9356,18 @@ static void input(void)
             uint32_t q = touch_pressure(k);
             pr = q > pr ? q : pr;
         }
+        if (ui.cp_k == k + 1u && !(keys & bit))   /* (v0.92) kopia dźwięku: pierwszy klawisz puszczony */
+            ui.cp_k = 0;
+        if (ENG_GRP[set.eng] == EG_DRUM && ui.sel_hold && (keys & bit) && !(ui.keys & bit) && rk_row_of((uint32_t)note) >= 0
+            && !(ui.page == V_SEQ && ui.sq_pg == SQ_NOTES)) {   /* (NOTES: SEL + klawisze = nuty w kursorze) */
+            if (ui.cp_k && (keys >> (ui.cp_k - 1u) & 1u)) {   /* (v0.92, decyzja użytkownika 2026-11-04) SEL + trzymany + ten: kopia */
+                eaten |= bit;
+                ui.sel_used = 1;
+                cp_ask(rk_row_of((uint32_t)key_note(ui.cp_k - 1u)), rk_row_of((uint32_t)note));
+                continue;
+            }
+            ui.cp_k = (uint8_t)(k + 1u);         /* pierwszy: dalej jak zawsze (wybór dźwięku, RACK: wiersz i odsłuch) */
+        }
         if (ui.sel_hold && sq_sel_trk() && (keys & bit) && !(ui.keys & bit)
             && key_label(k) >= K_OP1 && key_label(k) <= K_OP4) {   /* (v0.90) SEL + OP1-4 w SEQ (MULTI): ścieżka T1-T4 (było SEQ + OP) */
             eaten |= bit;
@@ -9265,6 +9485,7 @@ static void input(void)
             }
         } else if (!(btn & bit) && (ui.btn & bit) && ui.sel_hold) {
             ui.sel_hold = 0;
+            ui.cp_k = 0;
             if (!ui.sel_used && plat_ms() - ui.sel_at < 500u)
                 sel_cycle();
             ui.knob = -1;
@@ -9358,7 +9579,10 @@ static void input(void)
                 sq_play_key();
             }
             break;
-        case B_REC: sq_rec_key(); break;
+        case B_REC:                          /* (v0.92) krótko: REC jak dotąd (przy puszczeniu), trzymany 0,4 s: strona RECORD */
+            ui.rec_hold = 1;
+            ui.rec_at = plat_ms();
+            break;
         default: app_say("SOON", ""); break;
         }
     }
@@ -9449,6 +9673,12 @@ static void input(void)
             }
             if (ui.page == V_GLO) {          /* GLO: sekcja, strona sekcji, działanie SYSTEM */
                 glo_select(e);
+                continue;
+            }
+            if (ui.page == V_CPY) {          /* (v0.92) kopia dźwięku: TAK / NIE */
+                if (e & 1)
+                    ui.cp_yes ^= 1u;
+                ui.redraw = 1;
                 continue;
             }
             if (ui.page == V_RESET) {        /* FACTORY RESET: co (przed potwierdzeniem) */
@@ -11246,7 +11476,8 @@ static void draw_fx(void)              /* FX: łańcuch u góry (nazwy na tle mo
         foot_col = RGB(255, 60, 50);
         foot_keep = 1;
     } else {
-        foot_hint = c->type == FX_NONE ? "SEL: CHOOSE AN EFFECT   HOME: EXIT"
+        foot_hint = ui.sel_hold && !mst ? "SEL+SELECT: MOVE FX   HOLD LONGER: LIST"   /* (v0.92) */
+                  : c->type == FX_NONE ? "SEL: CHOOSE AN EFFECT   HOME: EXIT"
                   : !more && mst ? "SEL: TRACK ON / OFF   HOLD SEL: ORDER"
                   : !more && c->type == FX_EQ ? "SEL: ON / OFF   SEL+KNOB: Q   FX: MORE"   /* (v0.91) */
                   : !more ? "SEL: ON / OFF   HOLD SEL: LIST   FX: MORE"
@@ -11346,8 +11577,8 @@ static void sq_state(char *t)                    /* PLAY / REC / STOP i wzór */
 #define RROWS sq_rows()                          /* zoom w pionie: 8 / 13 / 18 / 26 rzędów (22 / 14 / 10 / 7 px) */
 #define RH sq_rh()
 
-static uint32_t sq_span(void) { return (uint32_t)sq_vbars() * SQ_BAR; }   /* widok: ile ticków na szerokość */
 static uint32_t sq_bar0(void) { return ui.sq_cur / sq_span() * sq_span(); }   /* początek widoku */
+static int sq_bar_seen(uint32_t i) { return i * SQ_BAR < sq_bar0() + sq_span() && (i + 1u) * SQ_BAR > sq_bar0(); }   /* takt i na ekranie */
 static int32_t rx(uint32_t t, uint32_t bar0) { return RX + (int32_t)((t - bar0) * RW / sq_span()); }
 
 static void note_bar(int32_t x0, int32_t x1, int32_t y, int32_t h, uint16_t c)   /* nuta: zaokrąglone rogi */
@@ -11406,8 +11637,7 @@ static void notes_top_mt(void)                   /* (v0.66) NOTES w MULTI: ście
     x = cv_text(8, 16, &FONT_XS, t, sq.rec ? RGB(255, 70, 60) : C_GRAY) + 10;
     bw = nb > 8u ? 4 : 6;                        /* takty: kreski, bieżący jasny, grający biały */
     for (i = 0; i < nb && x + bw < 232; i++, x += bw + 2) {
-        uint16_t col = i >= bar0 / (uint32_t)sq_vbars() * (uint32_t)sq_vbars()
-                     && i < bar0 / (uint32_t)sq_vbars() * (uint32_t)sq_vbars() + (uint32_t)sq_vbars() ? C_HI : C_DIM;
+        uint16_t col = sq_bar_seen(i) ? C_HI : C_DIM;
         if (sq.play && i == sq.pos / SQ_BAR)
             col = i == bar0 ? C_WHITE : C_GRAY;
         cv_rect(x, 19, bw, 5, col);
@@ -11461,8 +11691,7 @@ static void notes_top(void)                      /* górny pasek NOTES: wzór, s
         bw = nb > 8u ? 4 : 8;                    /* takty: kreski, bieżący jasny, grający biały */
         x = sq.rec || sq.play ? 108 : 52;
         for (i = 0; i < nb && x + bw < 140; i++, x += bw + 2) {
-            uint16_t c = i >= bar0 / (uint32_t)sq_vbars() * (uint32_t)sq_vbars()
-                       && i < bar0 / (uint32_t)sq_vbars() * (uint32_t)sq_vbars() + (uint32_t)sq_vbars() ? C_HI : C_DIM;
+            uint16_t c = sq_bar_seen(i) ? C_HI : C_DIM;
             if (sq.play && i == sq.pos / SQ_BAR)
                 c = i == bar0 ? C_WHITE : C_GRAY;
             cv_rect(x, 12, bw, 5, c);
@@ -11600,15 +11829,20 @@ static void draw_notes_page(void)                /* NOTES: piano roll na całą 
             cv_rect(xa, rows * rh - 2, xb - xa, 2, C_HI);
         }
     }
-    for (pass = 0; pass < 2u; pass++)            /* (v0.66) MULTI: najpierw nuty innych ścieżek (ghost), na nich wybranej */
+    /* (v0.66) MULTI: najpierw nuty innych ścieżek (ghost), na nich wybranej. (v0.92, użytkownik 2026-11-04: krótka nuta wewnątrz
+     * długiej była niewidoczna) nuty wybranej od najdłuższych do najkrótszych (pass 1-3), zaznaczone na samym wierzchu (pass 4);
+     * nuta na innej ma czarne szczeliny przy końcach */
+    for (pass = 0; pass < 5u; pass++)
     for (i = 0; i < SQ_NN; i++) {                /* nuty: jasność = velocity, zaznaczone białe (jak w Melodee) */
         const sqn_t *q = &sqp.n[i];
         int32_t row, x0, x1, y;
         uint16_t c;
         uint32_t sl;
-        if (!q->vel || q->t >= L || q->t >= bar0 + V || (uint32_t)sq_mine(q) != pass)
+        if (!q->vel || q->t >= L || q->t >= bar0 + V || (uint32_t)sq_mine(q) != (pass ? 1u : 0u))
             continue;
         sl = pass ? sq_shown(q) : q->len;        /* (v0.87) perkusja: ile naprawdę trwa */
+        if (pass && (SQ_ISSEL(i) ? 4u : sl > 4u * g ? 1u : sl > g ? 2u : 3u) != pass)
+            continue;
         if (q->t + (sl ? sl : 1u) <= bar0)
             continue;
         row = low + rows - 1 - q->note;
@@ -11633,6 +11867,10 @@ static void draw_notes_page(void)                /* NOTES: piano roll na całą 
             continue;
         }
         y = row * rh + 1;
+        if (pass > 1u) {                         /* (v0.92) szczeliny: widać ją na dłuższej nucie */
+            cv_rect(x0 - 1, y, 1, rh - (rh > 8 ? 3 : 2), C_BLACK);
+            cv_rect(x1, y, 1, rh - (rh > 8 ? 3 : 2), C_BLACK);
+        }
         note_bar(x0, x1, y, rh - (rh > 8 ? 3 : 2), c);
         if (SQN_RAT(q) > 1u) {                   /* ratchet: podział nuty */
             uint32_t k, rr = SQN_RAT(q);
@@ -11670,7 +11908,7 @@ static void draw_notes_page(void)                /* NOTES: piano roll na całą 
 
 static void draw_rack(void)                      /* (v0.57) RACK: 8 wierszy x 16 kroków strony, pod spodem wartości kroku */
 {
-    static const char *const KN[4] = {"VEL ", "CHANCE ", "RATCHET ", "NUDGE "};
+    static const char *const KN[8] = {"VEL ", "CHANCE ", "RATCHET ", "NUDGE ", "PITCH ", "COND ", "FLAM ", "LEN "};
     const uint32_t L = sq_len(), ns = rk_steps(), st = ui.rk_step % ns, pg0 = st / 16u * 16u;
     const uint32_t play = sq.play ? sq.pos / RK_T : 0xFFFFu;
     const int32_t sel = rk_find(ui.rk_row, st);
@@ -11717,6 +11955,12 @@ static void draw_rack(void)                      /* (v0.57) RACK: 8 wierszy x 16
                     int_text((int32_t)SQN_RAT(q), n, 0);
                     cv_text(x + 4, y + 1, &FONT_T, n, C_BLACK);
                 }
+                if (SQX_PIT(sqp.x[i]))           /* (v0.92) PITCH: kreska u góry (wyżej) / u dołu (niżej); FLAM: lewy brzeg; COND: kropka */
+                    cv_rect(x + 3, SQX_PIT(sqp.x[i]) > 0 ? y + 2 : y + 10, 7, 2, C_WHITE);
+                if (q->fl & SQF_GLIDE)
+                    cv_rect(x + 2, y + 2, 2, 10, C_BLACK);
+                if (SQX_COND(sqp.x[i]))
+                    cv_rect(x + 9, y + 9, 2, 2, C_BLACK);
             }
             if (on && s == st) {                 /* wybrany krok: obrys */
                 cv_rect(x, y, 13, 1, C_WHITE);
@@ -11726,12 +11970,33 @@ static void draw_rack(void)                      /* (v0.57) RACK: 8 wierszy x 16
             }
         }
     }
-    for (k = 0; k < 4; k++) {                    /* pod gałkami: wartości kroku (SEL trzymany: cały wiersz) */
+    for (k = 0; k < 4; k++) {                    /* pod gałkami: wartości kroku (SEL trzymany: PITCH, COND, FLAM, LEN); (v0.92) na środku kolumny */
         const sqn_t *q = sel >= 0 ? &sqp.n[sel] : 0;
         t[0] = 0;
-        text_cat(t, ui.sel_hold ? (k == 0 ? "ROW VEL " : k == 1 ? "ROW CH " : k == 2 ? "ROW RAT " : "ROW NDG ") : KN[k]);
+        text_cat(t, KN[k + (ui.sel_hold ? 4 : 0)]);
         if (!q) {
             text_cat(t, "-");
+        } else if (ui.sel_hold) {
+            const uint8_t x = sqp.x[sel];
+            if (k == 0) {
+                int_text(SQX_PIT(x), n, 1);
+                text_cat(t, n);
+            } else if (k == 1) {
+                text_cat(t, L_SQCOND[SQX_COND(x)]);
+            } else if (k == 2) {
+                text_cat(t, q->fl & SQF_GLIDE ? "ON" : "OFF");
+            } else if (!(q->fl & SQF_CUT) && sq_auto(q->note)) {
+                text_cat(t, "AUTO");
+            } else {
+                const uint32_t sl = sq_shown(q);
+                int_text((int32_t)(sl / RK_T), n, 0);
+                text_cat(t, n);
+                if (sl % RK_T) {
+                    text_cat(t, ".");
+                    int_text((int32_t)(sl % RK_T * 10u / RK_T), n, 0);
+                    text_cat(t, n);
+                }
+            }
         } else if (k == 0) {
             int_text(q->vel, n, 0);
             text_cat(t, n);
@@ -11746,9 +12011,9 @@ static void draw_rack(void)                      /* (v0.57) RACK: 8 wierszy x 16
             int_text((int32_t)((q->t + L + 12u - st * RK_T % L) % L) - 12, n, 1);
             text_cat(t, n);
         }
-        cv_text(4 + k * 60, 142, &FONT_T, t, ui.knob == k ? C_HI : C_GRAY);
+        cv_text(k * 60 + (60 - text_w(&FONT_T, t)) / 2, 142, &FONT_T, t, ui.knob == k ? C_HI : ui.sel_hold ? C_WHITE : C_GRAY);
     }
-    foot_hint = ui.sel_hold ? "SELECT: STEP   ALGO: LENGTH   KNOB: ROW" : "FX+KEY: MUTE   ARP+KEY: SOLO   SEL: TOOLS";   /* (v0.91) SEL + ALGO */
+    foot_hint = ui.sel_hold ? "SELECT: STEP   ALGO: PAT LEN   KEY+KEY: COPY" : "FX+KEY: MUTE   ARP+KEY: SOLO   SEL: TOOLS";   /* (v0.91) SEL + ALGO */
 }
 
 /* (v0.90, decyzja użytkownika 2026-11-03: wybór wzoru był brzydki; funkcje bez zmian) PATTERN: u góry 16 wzorów (wybrany jasny, pusty
@@ -11785,19 +12050,19 @@ static void draw_pattern(void)
         }
     sq_state(t);
     sq_title("PATTERN", sq.play || sq.rec ? t : 0);
-    for (i = 0; i < SQ_NPAT; i++) {              /* 16 wzorów */
-        const int32_t x = 8 + i * 14, cur = i == sqg.pat, full = cur ? used > 0 : pt_full >> i & 1;
+    for (i = 0; i < SQ_NPAT; i++) {              /* 16 wzorów; (v0.92, decyzja użytkownika 2026-11-04) pod podglądem */
+        const int32_t x = 8 + i * 14, cur = i == sqg.pat, full = cur ? used > 0 : pt_full >> i & 1, y = 89;
         int_text(i + 1, n, 0);
         if (cur)
-            note_bar(x, x + 13, 30, 20, C_HI);
+            note_bar(x, x + 13, y, 20, C_HI);
         else
-            cv_rect(x, 30, 13, 20, full ? C_LINE : RGB(14, 14, 17));
-        cv_text(x + (13 - text_w(&FONT_T, n)) / 2, 33, &FONT_T, n, cur ? C_BLACK : full ? C_WHITE : C_DIM);
+            cv_rect(x, y, 13, 20, full ? C_LINE : RGB(14, 14, 17));
+        cv_text(x + (13 - text_w(&FONT_T, n)) / 2, y + 3, &FONT_T, n, cur ? C_BLACK : full ? C_WHITE : C_DIM);
         if (full)
-            cv_rect(x + 5, 46, 3, 2, cur ? C_BLACK : C_HI);
+            cv_rect(x + 5, y + 16, 3, 2, cur ? C_BLACK : C_HI);
     }
     {                                            /* podgląd: cały wzór na szerokość, wysokości od najniższej do najwyższej nuty */
-        const int32_t px = 8, py = 55, pw = 224, ph = 54;
+        const int32_t px = 8, py = 30, pw = 224, ph = 54;
         int32_t span = hi - lo + 1, pass;
         uint32_t b;
         cv_rect(px, py, pw, ph, RGB(14, 14, 17));
@@ -11851,6 +12116,24 @@ static void draw_seq(void)
         draw_rack();
     } else if (ui.sq_pg == SQ_PATTERN) {         /* (v0.90) PATTERN: wzory, podgląd, wartości */
         draw_pattern();
+    } else if (ui.sq_pg == SQ_REC) {             /* (v0.92) RECORD (REC trzymany) */
+        const pdef_t *d[4];
+        int16_t v[4];
+        char txt[4][16], t[24];
+        int32_t k;
+        sq_state(t);
+        sq_title(SQ_PGNAME[SQ_REC], t);
+        for (k = 0; k < 4; k++) {
+            d[k] = &RCDEF[k];
+            v[k] = (int16_t)rc_get(k);
+            txt[k][0] = 0;
+            def_text(d[k], -1, v[k], txt[k]);
+        }
+        col_y = 34;
+        col_h = hints() ? 120 : 120 + FOOT_TALL;
+        draw_cols(d, v, txt, 0);
+        col_y = col_h = -1;
+        foot_hint = "REC: ARM   PLAY: START   SELECT: PAGE";
     } else if (ui.sq_pg == SQ_OPT) {             /* (v0.88) OPTIONS; (v0.89) zwykła strona ustawień */
         const pdef_t *d[4];
         int16_t v[4];
@@ -11890,7 +12173,8 @@ static void draw_seq(void)
                 text_cat(t, n);
                 text_cat(t, "%");
             }
-            text_cat(t, sqp.recq ? "  REC QUANT ON" : "  REC QUANT OFF");
+            text_cat(t, "  REC Q ");
+            text_cat(t, L_RECQ[sqp.recq % 7u]);
         }
         sq_title(SQ_PGNAME[pg], t);
         for (k = 0; k < 4; k++) {
@@ -12218,6 +12502,40 @@ static void draw_reset(void)           /* SYSTEM > FACTORY RESET: co, potem drug
     body_blit();
 }
 
+/* (v0.92) kopia dźwięku perkusji: pytanie, SELECT TAK / NIE, SEL zatwierdza, HOME = NIE */
+static void draw_cpy(void)
+{
+    char t[24], n[8];
+    int32_t i;
+    cv_begin(240, BODY_H, C_BLACK);
+    cv_text(8, 4, &FONT_M, "COPY SOUND", C_WHITE);
+    t[0] = 0;
+    cp_name(ui.cp_a, n);
+    text_cat(t, n);
+    text_cat(t, "  >  ");
+    cp_name(ui.cp_b, n);
+    text_cat(t, n);
+    center(34, &FONT_B, t, C_HI);
+    t[0] = 0;
+    text_cat(t, "SOUND ");
+    text_cat(t, n);
+    text_cat(t, " WILL BE REPLACED");
+    center(60, &FONT_XS, t, C_GRAY);
+    center(74, &FONT_XS, "(PAN, SEND AND CHOKE STAY)", C_DIM);
+    for (i = 0; i < 2; i++) {                    /* TAK / NIE */
+        const int on = (i == 0) == (ui.cp_yes != 0);
+        const int32_t x = 24 + i * 100;
+        if (on)
+            note_bar(x, x + 92, 94, 26, C_HI);
+        else
+            cv_rect(x, 94, 92, 26, C_LINE);
+        cv_text(x + (92 - text_w(&FONT_S, i ? "NO" : "YES")) / 2, 99, &FONT_S, i ? "NO" : "YES", on ? C_BLACK : C_GRAY);
+    }
+    foot_hint = "SELECT: YES / NO   SEL: OK   HOME: NO";
+    foot_keep = 1;
+    body_blit();
+}
+
 static void draw_note(void)            /* SYSTEM > BACKUP / CALIBRATION: jak to zrobić */
 {
     cv_begin(240, BODY_H, C_BLACK);
@@ -12286,6 +12604,8 @@ static void draw(void)
         draw_perf();
     else if (ui.page == V_SQT)
         draw_sqt();
+    else if (ui.page == V_CPY)
+        draw_cpy();
     else if (ui.page == V_HOME && ui.mode_until) {   /* (v0.86) napis SOLO / MULTI */
         header();
         draw_mode();
@@ -12425,7 +12745,8 @@ void app_frame(void)
         }
     }
     if (ui.page == V_FX && ui.sel_hold && !ui.sel_used
-        && now - ui.sel_at >= (fx_cur()->type == FX_EQ && !fx_is_mst(fx_cur()) ? SEL_EQ_MS : SEL_SHOW_MS)) {   /* SEL trzymany: lista efektów */
+        && now - ui.sel_at >= SEL_EQ_MS) {   /* SEL trzymany: lista efektów; (v0.92, decyzja użytkownika 2026-11-04) wszędzie 0,8 s jak na EQ
+                                              * (SEL + SELECT przesuwa efekt) */
         ui.sel_used = 1;
         fxl_open();
     }
@@ -12463,6 +12784,18 @@ void app_frame(void)
         if (h != heavy) {
             heavy = h;
             ui.redraw = 1;
+        }
+    }
+    if (ui.rec_hold) {                       /* (v0.92) REC: puszczony przed 400 ms = nagrywanie, trzymany = RECORD (drugi raz: z powrotem) */
+        int up = !(plat_buttons() >> B_REC & 1u);
+        if (up || now - ui.rec_at >= 400u) {
+            ui.rec_hold = 0;
+            if (up)
+                sq_rec_key();
+            else if (ui.page == V_SEQ && ui.sq_pg == SQ_REC)
+                sq_view_back();
+            else
+                sq_open(SQ_REC);
         }
     }
     if (ui.play_hold) {                      /* PLAY w NOTES: puszczony przed 400 ms = od kursora */

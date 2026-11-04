@@ -28,6 +28,9 @@ static struct {
     float bpm;                               /* tempo (SEQ / zegar MIDI): LFO SYNC */
     int8_t dsemi;                            /* (v0.56) perkusja: OCT (+ TRANSPOSE) = przestrojenie wszystkich dźwięków
                                               * o półtony, układ klawiszy zostaje (decyzja użytkownika 2026-10-29) */
+    int8_t npit;                             /* (v0.92) perkusja, nuta z SEQ: PITCH tej nuty w półtonach (RACK SEL + K1) */
+    float dlen;                              /* (v0.92) perkusja, nuta z SEQ: długość nuty w s (0: brzmienie); dłuższa
+                                              * niż brzmienie = zanik rozciągnięty do niej */
 } ctl = {0.0f, 0.0f, 0.0f, 440.0f, 0, 0, 120.0f, 0};
 #define SLIDE_GLIDE 32                       /* czas glide nuty z SLIDE, gdy brzmienie ma GLIDE 0 */
 
