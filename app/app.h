@@ -7,7 +7,7 @@
 #include "plat.h"
 
 #define APP_NAME "OG SYNTH"
-#define OGS_VERSION "1.0.0"              /* GLO > SYSTEM > INFO */
+#define OGS_VERSION "1.0.1"              /* GLO > SYSTEM > INFO */
 #define APP_SPLASH_RGB RGB(255, 154, 31)       /* #FF9A1F, pomarańczowy OG Deck */
 #define APP_SPLASH                       /* ekran startowy: logo OG Synth (app_splash, app.c) */
 #define APP_BLOCK 256u                   /* frames per audio block: 5.8 ms at 44.1 kHz */

@@ -194,7 +194,9 @@ enum { G_VHOME, G_VPAGES, G_TUNE, G_MIDICH, G_VEL, G_PRESS, G_TRANSP, G_ACCEL, G
        NGLOB = 64,
        G_MCTH = NGLOB,                   /* (v0.91) pola GLO ponad 64: glob.gx (za pfs, zapis bez nich = domyślne); MULTI MASTER COMP: */
        G_MCRA, G_MCAT, G_MCRE,           /* THRESH, RATIO, ATTACK, RELEASE (surowe 0-127 jak gałki COMPRESSOR; domyślne = stałe z v0.77) */
-       NGALL };
+       G_MTCH0,                          /* (v1.0.1) MIDI > T1-T4 CHANNEL: kanał ścieżki MULTI 1-16 (domyślnie 1-4 = jak od v0.64;
+                                          * zapis 1.0.0 ma tu 0: poza zakresem = domyślne) */
+       NGALL = G_MTCH0 + 4 };
 #define NGX 8                            /* miejsca glob.gx (zapas na kolejne pola) */
 _Static_assert(NGALL - NGLOB <= NGX, "GLO: pola ponad 64");
 #define GV(q) (*((q) < NGLOB ? &glob.g[q] : &glob.gx[(q) - NGLOB]))
@@ -276,18 +278,20 @@ static const pdef_t GDEF[NGALL] = {
     {"PAN", -50, 50, 0, F_SIGNED, 0},                                                                       /* (v0.72) */
     {"COMP THRESH", 0, 127, 21, F_CUSTOM, 0}, {"COMP RATIO", 0, 127, 29, F_CUSTOM, 0},   /* 64-67 (v0.91): glob.gx */
     {"COMP ATTACK", 0, 127, 79, F_CUSTOM, 0}, {"COMP RELEASE", 0, 127, 62, F_CUSTOM, 0},
+    {"T1 CHANNEL", 1, 16, 1, F_NUM, 0}, {"T2 CHANNEL", 1, 16, 2, F_NUM, 0},   /* 68-71 (v1.0.1): G_MTCH0 */
+    {"T3 CHANNEL", 1, 16, 3, F_NUM, 0}, {"T4 CHANNEL", 1, 16, 4, F_NUM, 0},
 };
 _Static_assert(G_ALGO0 + G_ALGO_N == G_SQZINV, "GLO: miejsca ALGO");
 /* sekcje GLO: lista (SELECT wybiera, SEL wchodzi, HOME wraca); w sekcji gałki K1-K4, SELECT: strony po 4 */
 enum { GS_PLAY, GS_MIDI, GS_AUDIO, GS_DISPLAY, GS_ALGO, GS_SYSTEM, NGS };
 static const char *const GS_NAME[NGS] = {"PLAY", "MIDI", "AUDIO", "DISPLAY", "ALGO KNOB", "SYSTEM"};
-static const char *const GS_HINT[NGS] = {"TUNE, TRANSPOSE, VELOCITY", "CHANNEL, OUT, LOCAL, CLOCK", "SPEAKER EQ, CORE, MASTER",
+static const char *const GS_HINT[NGS] = {"TUNE, TRANSPOSE, VELOCITY", "CHANNELS, OUT, LOCAL, CLOCK", "SPEAKER EQ, CORE, MASTER",
                                          "VISUALS, LIGHTS, COLOR", "PER ENGINE",
                                          "INFO, RESET, BACKUP, HINTS"};
 #define GS_N 16                          /* pozycji w sekcji (ALGO KNOB: jedna na silnik, NENG_MAX) */
 static const int8_t GS_ITEM[NGS][GS_N] = {
     {G_TUNE, G_TRANSP, G_VEL, G_VELFIX, G_PRESS, G_ACCEL, G_TOPKEYS, -1},
-    {G_MIDICH, G_MIDIOUT, G_LOCAL, G_PROGCH, G_CLKIN, G_CLKOUT, -1},
+    {G_MIDICH, G_MIDIOUT, G_LOCAL, G_PROGCH, G_CLKIN, G_CLKOUT, G_MTCH0, G_MTCH0 + 1, G_MTCH0 + 2, G_MTCH0 + 3, -1},
     {G_SPKEQ, G_CPU2, G_MTMST, G_MCTH, G_MCRA, G_MCAT, G_MCRE, -1},
     {G_VHOME, G_VPAGES, G_LIGHTS, G_KEYL, G_SCROFF, G_COLOR, -1},
     {G_ALGO0, G_ALGO0 + 1, G_ALGO0 + 2, G_ALGO0 + 3, G_ALGO0 + 4, G_ALGO0 + 5, G_ALGO0 + 6, G_ALGO0 + 7, G_ALGO8, G_ALGO8 + 1, G_ALGO8 + 2, G_ALGO8 + 6, G_ALGO8 + 7, -1},   /* silniki (NENG; od
@@ -331,6 +335,7 @@ static struct {
     uint8_t gbc[PF_NCV * 32 + PF_NCV];   /* (v0.91) PERFORM: krzywe (ogs_fx.h ogs_pf_cvd); zapis bez nich: domyślne */
 } glob;
 #define GLOB_V90 ((int32_t)__builtin_offsetof(__typeof__(glob), gx))   /* zapis do v0.90: bez gx */
+static inline uint32_t mt_ch(int32_t t) { return (uint32_t)GV(G_MTCH0 + t) - 1u; }   /* (v1.0.1) kanał MIDI ścieżki t (0-15) */
 #define GLOB_V91C ((int32_t)__builtin_offsetof(__typeof__(glob), gbc) + PF_NCV * 32 + PF_NCV)   /* z krzywymi PERFORM */
 /* (v0.91) krzywe domyślne (propozycja): 1 GATE (1/16 na zmianę), 2 PUMP (narasta co ćwierćnutę), 3 REPEAT (ostatnia ćwierćnuta
  * powtarza trzecią), 4 HALF (każda szesnastka dwa razy: połowa tempa); SMOOTH 20 */
@@ -1067,16 +1072,25 @@ static void events_in(void)              /* przerwanie audio: nuty z panelu i z 
                 sq.ext_req = (uint8_t)(st == 0xFAu ? 1u : st == 0xFCu ? 2u : 3u);
             continue;
         }
-        if (mt_on && st < 0xF0u && (st & 0x0Fu) < MT_N) {   /* (v0.64) MULTI: kanał 1-4 = ścieżka T1-T4 */
-            int32_t t = (int32_t)(st & 0x0Fu);
-            if (mt_eng[t] >= NENG)
-                continue;
-            if (mt_eng[t] != eng_play) {
-                mt_midi(t, ty, d1, d2);
-                continue;
+        if (mt_on && st < 0xF0u) {           /* (v0.64) MULTI: kanał ścieżki = ta ścieżka; (v1.0.1) kanały z GLO MIDI T1-T4
+                                              * CHANNEL (domyślnie 1-4), kilka ścieżek na jednym kanale gra razem */
+            const uint32_t c = st & 0x0Fu;
+            int32_t t, hit = 0, foc = 0;
+            for (t = 0; t < MT_N; t++) {
+                if (mt_ch(t) != c)
+                    continue;
+                hit = 1;
+                if (mt_eng[t] >= NENG)       /* pusta ścieżka: nic */
+                    continue;
+                if (mt_eng[t] == eng_play)   /* wybrana: dalej jak SOLO (ARP, nagrywanie, bend, wheel, nacisk) */
+                    foc = 1;
+                else
+                    mt_midi(t, ty, d1, d2);
             }
-        } else if (mt_on && st < 0xF0u && (ty == 0x90u || ty == 0x80u)) {
-            /* kanały 5-16: wybrana ścieżka */
+            if (hit && !foc)
+                continue;
+            if (!hit && ty != 0x90u && ty != 0x80u && ch && c != ch - 1u)   /* inne kanały: nuty do wybranej, reszta wg MIDI CH */
+                continue;
         } else if (st < 0xF0u && ch && (st & 0x0Fu) != ch - 1u)   /* GLO MIDI CH: tylko ten kanał */
             continue;
         if (ty == 0x90u && d2)
@@ -9330,7 +9344,7 @@ static void input(void)
                                               * trakcie nie zostawia wiszącej nuty ani nuty w ARP) */
     uint32_t keys, btn = plat_buttons(), k, avail = 0, shown, pr = 0, gk;
     int sel_shown;
-    uint32_t chan = mt_ui() ? (uint32_t)glob.g[G_MTFOC]   /* (v0.66.1) MULTI: MIDI OUT kanał 1-4 = wybrana ścieżka */
+    uint32_t chan = mt_ui() ? mt_ch(glob.g[G_MTFOC])   /* (v0.66.1) MULTI: MIDI OUT na kanale wybranej ścieżki (v1.0.1: z GLO) */
                   : glob.g[G_MIDICH] ? (uint32_t)glob.g[G_MIDICH] - 1u : 0u;
     int32_t e;
     touch_poll();
