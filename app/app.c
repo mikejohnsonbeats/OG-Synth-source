@@ -232,6 +232,8 @@ static struct {
     int32_t save_back;                   /* okno SAVE: strona, na którą wracamy */
     int32_t save_id, cur;                /* okno nazwy: dokąd zapis, kursor */
     int32_t allp_back;                   /* okno ALL PRESETS: preset sprzed otwarcia (HOME wraca) */
+    uint8_t allp_sel, allp_del;          /* (v1.0.2) ALL PRESETS: SEL wciśnięty (puszczony krótko = OK, trzymany = usuń USER),
+                                          * okno DELETE? (SEL tak, HOME nie) */
     int32_t engp_back;                   /* okno ENGINE: silnik sprzed otwarcia (HOME wraca) */
     int32_t imp_slot, imp_back;          /* okno IMPORT: miejsce 0..31, strona do powrotu */
     uint8_t imp_cz;                      /* okno IMPORT: bank CZ (16 miejsc) zamiast DX7 */
@@ -443,7 +445,14 @@ static void input(void)
         uint32_t bit = 1u << B_SEL;
         if ((btn & bit) && !(ui.btn & bit)) {
             ui.browse = 0;
-            if (ui.page <= V_SAVE && !PANEL_PAGE(ui.page)) {
+            if (ui.page == V_ALLP) {         /* (v1.0.2) ALL PRESETS: OK przy puszczeniu, trzymany = usuń USER; w oknie DELETE?: tak */
+                if (ui.allp_del) {
+                    user_del();
+                } else {
+                    ui.allp_sel = 1;
+                    ui.sel_at = plat_ms();
+                }
+            } else if (ui.page <= V_SAVE && !PANEL_PAGE(ui.page)) {
                 save_ok();
             } else if (ui.page == V_GLO) {
                 glo_sel();
@@ -453,6 +462,10 @@ static void input(void)
                 ui.sel_at = plat_ms();
                 ui.redraw = 1;
             }
+        } else if (!(btn & bit) && (ui.btn & bit) && ui.allp_sel) {
+            ui.allp_sel = 0;                 /* (v1.0.2) krótko (albo trzymany na nie-USER): OK; trzymany na USER: okno DELETE? */
+            if (ui.page == V_ALLP)
+                save_ok();
         } else if (!(btn & bit) && (ui.btn & bit) && ui.sel_hold) {
             ui.sel_hold = 0;
             ui.cp_k = 0;
@@ -560,6 +573,8 @@ static void input(void)
         if ((e = plat_enc((int)k)) == 0)
             continue;
         ui.input_at = plat_ms();                 /* GLO SCREEN OFF: każdy ruch budzi */
+        if (ui.allp_del && ui.page == V_ALLP)    /* (v1.0.2) okno DELETE?: gałki stoją */
+            continue;
         if (ui.mode_until) {
             ui.mode_until = 0;
             ui.redraw = 1;
@@ -970,6 +985,11 @@ void app_frame(void)
             preset_go(id);
             ui.redraw = 1;
         }
+    }
+    if (ui.allp_sel && now - ui.sel_at >= SEL_EQ_MS && CUR >= ID_USER && CUR < ID_SYX && ui.page == V_ALLP) {
+        ui.allp_sel = 0;                     /* (v1.0.2) ALL PRESETS: SEL trzymany 0,8 s na USER = okno DELETE? */
+        ui.allp_del = 1;
+        ui.redraw = 1;
     }
     if (ui.page == V_FX && ui.sel_hold && !ui.sel_used
         && now - ui.sel_at >= SEL_EQ_MS) {   /* SEL trzymany: lista efektów; (v0.92, decyzja użytkownika 2026-11-04) wszędzie 0,8 s jak na EQ

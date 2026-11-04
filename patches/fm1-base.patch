@@ -103,10 +103,25 @@ index 4d4f45c..b83da6c 100644
                  if (!a || (uint32_t)px >= cv_w || py < cv_y0 || py >= cv_y1)
                      continue;
 diff --git a/device/main_fm1.c b/device/main_fm1.c
-index dd7cde2..dd64a1f 100644
+index dd7cde2..56728f5 100644
 --- a/device/main_fm1.c
 +++ b/device/main_fm1.c
-@@ -937,8 +937,9 @@ static void fm1_main(void)
+@@ -844,7 +844,13 @@ static void fm1_main(void)
+                                                      * VDDIO 3.2 V, WiFi's regulator automatic (fm1_sys.h) */
+         fm1_clock_read(clock_boot);
+         clock_fix = (int8_t)fm1_clock_stock();      /* the stock 360 MHz, whichever bootloader started us (fm1_clock.h) */
+-        flash_ok = FL_FAR(fl_jedec_ram)() == 0x856014u;   /* the expected 1 MiB part, else RAM only */
++        {   /* OGS 1.0.2: a known 1 MiB part, else RAM only: the stock Puya P25Q80 (85 60 14) or the UC25HQ80 of the
++             * units sold since autumn 2026 (B3 60 14, the same plain SPI NOR commands; fm1-base #35, #36). Before
++             * this, those units saved nothing ("SAVE FAILED") and took no update from the running firmware */
++            uint32_t id = FL_FAR(fl_jedec_ram)();
++            flash_ok = id == 0x856014u || id == 0xB36014u;
++            flash_plain = id != 0x856014u;          /* (unity.c soft_erase: no erase suspend on the other part) */
++        }
+ #if FM1B_WIFI
+         if (flash_ok)
+             FL_FAR(fl_uid_ram)(flash_uid);
+@@ -937,8 +943,9 @@ static void fm1_main(void)
                  master_pos = mirror_in_master(remote.master >= 0 ? (uint32_t)remote.master : (uint32_t)(knob / 4));
              }
          }
@@ -289,10 +304,18 @@ index 151a650..1baa972 100644
 +    return st_commit(obj, len, cur, cur < 0 ? 0u : h.seq);
 +}
 diff --git a/device/unity.c b/device/unity.c
-index 512374b..aa2e544 100644
+index 512374b..2adf572 100644
 --- a/device/unity.c
 +++ b/device/unity.c
-@@ -140,20 +140,73 @@ static int st_read(uint32_t off, void *dst, uint32_t n)   /* 256-byte IRQ-off wi
+@@ -121,6 +121,7 @@ static volatile uint32_t fm1_ms;  /* milliseconds since boot (TIMER4-based, TIME
+ #endif
+ 
+ static uint8_t flash_ok;          /* JEDEC id matched at boot */
++static uint8_t flash_plain;       /* OGS 1.0.2: not the Puya (the UC25HQ80): erases whole, without suspend */
+ #if FM1B_WIFI
+ static uint8_t flash_uid[16];     /* the flash's factory unique ID (plat_chip_uid), read at boot */
+ #endif
+@@ -140,20 +141,82 @@ static int st_read(uint32_t off, void *dst, uint32_t n)   /* 256-byte IRQ-off wi
      }
      return 0;
  }
@@ -335,6 +358,15 @@ index 512374b..aa2e544 100644
 +{
 +    uint32_t n;
 +    int rc = 1;
++    if (flash_plain) {                            /* (OGS 1.0.2) the UC25HQ80: its suspend bits unchecked on hardware,
++                                                   * so fm1-base's plain 4 KiB erase (a short blink of the LEDs) */
++        uint32_t f, took;
++        audio_silence();
++        f = soft_begin();
++        rc = FL_FAR(fl_erase4k_ram)(off, &took);
++        soft_end(f);
++        return rc;
++    }
 +    for (n = 0; rc == 1; n++) {
 +        uint32_t f;
 +        if (n)
@@ -576,7 +608,7 @@ index f3e945c..fa3364e 100644
      for (const ex of EXTRAS) {
        say(`Receiving ${esc(ex.what)} from ${esc(FW.name)}&hellip;`);
 diff --git a/web/fm1ota.js b/web/fm1ota.js
-index 482c784..3757b66 100644
+index 482c784..1d3844b 100644
 --- a/web/fm1ota.js
 +++ b/web/fm1ota.js
 @@ -11,6 +11,9 @@ const HS_QUERY = [0xF0, 0x00, 0x32, 0x45, 0x00, 0x00, 0x00, 0x40, 0x7F, 0xF7];
@@ -673,13 +705,16 @@ index 482c784..3757b66 100644
      const step = onStep || (() => {});
      const dev = await this.find((id) => !IS_OTA(id));
      if (!dev) throw fail("notfound", "FM-1 not found (USB cable, and no other app using it?)");
-@@ -217,18 +231,24 @@ export class Updater {
+@@ -217,18 +231,27 @@ export class Updater {
      step("start", dev.id.text);
      dev.link.send(UPGRADE);
      await sleep(2000);
 -    const s1 = await this.serve(dev.link, image, 0xE0000000, 8000, (n, b) => step("verify", n, b));
 +    const s1 = await this.serve(dev.link, image, 0xE0000000, 8000, (n, b) => step("verify", n, b), onFinish);
      dev.link.close();
++    // OGS 1.0.2: no request at all from a running firmware = it never started its update loader (a newer FM-1's flash,
++    // UC25HQ80, unknown to that firmware): the way out is the stock firmware through the chip's update mode
++    if (!s1.finished && !s1.lost && !s1.served) throw fail("noupdate", "the device stopped after 0 requests: nothing was written");
      if (!s1.finished) throw fail(s1.lost ? "lost" : "stopped", `the device ${s1.lost ? "was disconnected" : "stopped"} after ${s1.served} requests: nothing was written`);
 +  }
 +
@@ -701,7 +736,7 @@ index 482c784..3757b66 100644
      if (!back) throw fail("noreturn", "the device did not come back: power-cycle it");
      back.link.close();
      if (back.id.text !== product) throw fail("mismatch", `installed, but the device reports ${back.id.text}`, back.id.text);
-@@ -280,10 +300,10 @@ export class Updater {
+@@ -280,10 +303,10 @@ export class Updater {
    }
  
    // step 2 with the loader found by find()/waitFor()
@@ -715,10 +750,10 @@ index 482c784..3757b66 100644
      return s2;
    }
 diff --git a/web/installer.html b/web/installer.html
-index 6e65819..4fcf704 100644
+index 6e65819..0927ff6 100644
 --- a/web/installer.html
 +++ b/web/installer.html
-@@ -147,6 +147,7 @@ const TEXT = {
+@@ -147,11 +147,13 @@ const TEXT = {
      nomidi: "このブラウザでは使えません。Chrome か Edge で開いてください。", loadfail: "読み込めませんでした: ",
      start: "開始します", verify: "確認中", loader: "書き込みモードに切り替え中", write: "書き込み中",
      reboot: "再起動中", done: "完了しました", stopped: "途中で止まりました。USB を挿し直してもう一度押してください。",
@@ -726,7 +761,13 @@ index 6e65819..4fcf704 100644
      error: "エラー: ",
      denied: "MIDI（SysEx）の使用が許可されませんでした。アドレスバーのサイト設定で MIDI を許可して、もう一度押してください。",
      notfound: "FM-1 が見つかりません。USB ケーブル（データ通信用か）を確かめ、MIDI を使う他のアプリやブラウザのタブ（別のファームウェアのインストーラーやエディター）を閉じてから、もう一度押してください。別のファームウェアからは、そのまま起動した状態で構いません（アップデートモードは不要です）。",
-@@ -197,6 +198,7 @@ const TEXT = {
+     model: "接続されている機器は FM-1 ではありません。",
+     lost: "USB の接続が切れました。挿し直してもう一度押してください。",
++    noupdate: "この FM-1 は書き込みを始めませんでした。2026 年秋以降の FM-1 はメモリーチップが新しく、古いファームウェアはそこから更新できません。REC を押したまま電源を入れ（UPDATE MODE）、M-VAVE の M-UPGRADE で純正ファームウェアに戻してから、もう一度インストールしてください。",
+     noloader: "書き込みモードの FM-1 が見つかりません。USB を挿し直してもう一度押してください（終わるまで書き込みモードのままです）。",
+     noreturn: "FM-1 が戻ってきません。電源を入れ直してください。",
+     mismatch: "書き込みは終わりましたが、FM-1 が別のバージョンを報告しています: ",
+@@ -197,11 +199,13 @@ const TEXT = {
      nomidi: "This browser cannot do it. Open the page in Chrome or Edge.", loadfail: "Could not load: ",
      start: "Starting", verify: "Verifying", loader: "Switching to update mode", write: "Writing",
      reboot: "Restarting", done: "Done", stopped: "Stopped. Replug the USB cable and press Install again.",
@@ -734,7 +775,22 @@ index 6e65819..4fcf704 100644
      error: "Error: ",
      denied: "MIDI (SysEx) access was not allowed. Allow MIDI in the site settings (address bar) and press Install again.",
      notfound: "FM-1 not found. Check the USB cable (a data cable), close other apps and browser tabs that use MIDI (another firmware's installer or editor), and press Install again. Coming from another firmware, leave it running as it is: no update mode is needed.",
-@@ -262,9 +264,11 @@ const say = (txt) => { lastKey = null; $("alert").textContent = ""; $("status").
+     model: "The connected device is not an FM-1.",
+     lost: "The USB connection was lost. Replug it and press Install again.",
++    noupdate: "The FM-1 did not start the update. Newer FM-1s (sold since autumn 2026) have a different memory chip, and an older firmware on them can't update itself. Hold REC while switching the FM-1 on (the screen says UPDATE MODE), put the stock firmware back with M-VAVE's M-UPGRADE (m-vave.com/download), then install again.",
+     noloader: "The FM-1 in update mode was not found. Replug the USB cable and press Install again (it stays in update mode until it is finished).",
+     noreturn: "The FM-1 did not come back. Power-cycle it.",
+     mismatch: "Written, but the FM-1 reports another version: ",
+@@ -229,7 +233,7 @@ const TEXT = {
+ let lang = "en";                                 /* English first; 日本語 is a click away */
+ const t = (k) => TEXT[lang][k];
+ /* what happens goes to two regions: #status (polite) the steps and the progress, #alert a failure */
+-const FAILS = new Set(["nomidi", "loadfail", "stopped", "error", "denied", "notfound", "model", "lost", "noloader",
++const FAILS = new Set(["nomidi", "loadfail", "stopped", "error", "denied", "notfound", "model", "lost", "noloader", "noupdate",
+                        "noreturn", "mismatch", "badpkg", "stockbad", "bootrefused"]);
+ let lastKey = null, lastArg = "", lastPct = null;
+ const textOf = (k, arg, pct) => t(k) + arg + (pct == null ? "" : t("pct").replace("{n}", pct));
+@@ -262,9 +266,11 @@ const say = (txt) => { lastKey = null; $("alert").textContent = ""; $("status").
  /* follows the newest line, unless the reader has scrolled up to look at an earlier one */
  const log = (t) => {
    const el = $("log"), atEnd = el.scrollHeight - el.scrollTop - el.clientHeight < 24;
@@ -747,7 +803,7 @@ index 6e65819..4fcf704 100644
  let image = null, boot = null;
  const meta = /*META*/;
  /* the firmware's own steps around an install (its site's install_app script, or none): before(midi, ui) runs before
-@@ -309,6 +313,12 @@ window.addEventListener("beforeunload", (e) => { if (writing) { e.preventDefault
+@@ -309,6 +315,12 @@ window.addEventListener("beforeunload", (e) => { if (writing) { e.preventDefault
      image = logicalImage(pkg);
      say(`{{NAME}} ${meta.version}`);
      $("go").disabled = false;
@@ -760,7 +816,7 @@ index 6e65819..4fcf704 100644
    } catch (e) { sayK("loadfail", e.message); }
    /* m-bootloader: offered only when its package is here and is the one the site was made with */
    try {
-@@ -353,12 +363,115 @@ function confirmed(withBoot) {
+@@ -353,12 +365,115 @@ function confirmed(withBoot) {
    return new Promise((r) => d.addEventListener("close", () => r(d.returnValue === "go"), { once: true }));
  }
  
@@ -880,7 +936,7 @@ index 6e65819..4fcf704 100644
    let appState = null;
    if (APP && APP.before && !isStock) {
      try { appState = await APP.before(midi, appUi); }
-@@ -389,20 +502,29 @@ async function run(img, product, isStock, sha256) {
+@@ -389,20 +504,29 @@ async function run(img, product, isStock, sha256) {
        if (k === "bootstart" || k === "bootwrite") sayK(k);
        if (k === "bootdone") { $("bar").value = 100; sayK("bootdone"); }
      };
@@ -923,7 +979,7 @@ index 6e65819..4fcf704 100644
      }
    } catch (e) {
      if (isStock && e && e.code === "mismatch") { $("bar").value = 100; sayK("stockdone"); }   /* stock names itself its own way */
-@@ -410,6 +532,7 @@ async function run(img, product, isStock, sha256) {
+@@ -410,6 +534,7 @@ async function run(img, product, isStock, sha256) {
      else sayK("error", e && e.message);
      log(String(e && e.stack || e));
    }
@@ -931,7 +987,7 @@ index 6e65819..4fcf704 100644
    if (installed && APP && APP.after && !isStock) {
      try { await APP.after(midi, appUi, appState); }
      catch (e) { say(String(e && e.message || e)); log(String(e && e.stack || e)); }
-@@ -417,6 +540,7 @@ async function run(img, product, isStock, sha256) {
+@@ -417,6 +542,7 @@ async function run(img, product, isStock, sha256) {
    writing = false;
    $("go").disabled = !image;
    $("stockgo").disabled = !stock;
