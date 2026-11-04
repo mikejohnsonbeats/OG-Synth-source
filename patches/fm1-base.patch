@@ -470,7 +470,7 @@ index eb69903..f21dc2a 100755
  # seconds; the tests shorten them
  DELAY = {"open": 0.3, "start": 2.0, "reply": 0.01, "loader": 3.0, "reboot": 3.0, "retry": 1.0,
 diff --git a/tools/gen_font.py b/tools/gen_font.py
-index 71a57cd..d444d90 100755
+index 71a57cd..10a767a 100755
 --- a/tools/gen_font.py
 +++ b/tools/gen_font.py
 @@ -6,10 +6,12 @@
@@ -490,7 +490,22 @@ index 71a57cd..d444d90 100755
  """
  import sys
  from pathlib import Path
-@@ -154,7 +156,8 @@ def render(ttf, px, scale, pixel, first, last):
+@@ -30,10 +32,11 @@ FONTSETS = {
+                  ("B", "ter-u16b.bdf", 16, 1, True, 32, 126),
+                  ("M", "ter-u24b.bdf", 24, 1, True, 32, 95),
+                  ("L", "ter-u32b.bdf", 32, 1, True, 32, 95)],
++    # OGS (v0.92): XS / S / B bez małych liter (UI wielkimi; małe zamienia gfx.c glyph()) — ok. 3 KB flasha
+     "barlow": [("T", "BarlowSemiCondensed-SemiBold.ttf", 10, 1, False, 32, 95),   # footers (from X0X)
+-               ("XS", "BarlowSemiCondensed-SemiBold.ttf", 12, 1, False, 32, 126),
+-               ("S", "BarlowSemiCondensed-Medium.ttf", 15, 1, False, 32, 126),
+-               ("B", "BarlowSemiCondensed-Bold.ttf", 15, 1, False, 32, 126),
++               ("XS", "BarlowSemiCondensed-SemiBold.ttf", 12, 1, False, 32, 95),
++               ("S", "BarlowSemiCondensed-Medium.ttf", 15, 1, False, 32, 95),
++               ("B", "BarlowSemiCondensed-Bold.ttf", 15, 1, False, 32, 95),
+                ("M", "BarlowSemiCondensed-SemiBold.ttf", 23, 1, False, 32, 95),
+                ("L", "BarlowSemiCondensed-Bold.ttf", 31, 1, False, 32, 95)],    # capitals and digits, as the others
+                                                                                   # (the splash, the panel: 14 KB less)
+@@ -154,7 +157,8 @@ def render(ttf, px, scale, pixel, first, last):
          names = [a["name"] if isinstance(a["name"], str) else a["name"].decode() for a in font.get_variation_axes()]
          font.set_variation_by_axes([float(axes.get(n.lower()[:4], axes.get(n, 0)) or a["default"])
                                      for n, a in zip(names, font.get_variation_axes())])
@@ -500,7 +515,7 @@ index 71a57cd..d444d90 100755
      asc, desc = font.getmetrics()
      top = max(0, font.getbbox("A8|(", features=feats)[1] - 1)
      h = asc + desc - top
-@@ -176,14 +179,21 @@ def main(out):
+@@ -176,14 +180,21 @@ def main(out):
               "#pragma once", "#include <stdint.h>", f"#define FONT_PAD {PAD}  /* x scale for L, see below */", ""]
      for name, ttf, px, scale, pixel, first, last in SIZES:
          h, glyphs = render(ttf, px, scale, pixel, first, last)
@@ -527,7 +542,7 @@ index 71a57cd..d444d90 100755
          lines.append(f"static const uint8_t FONT_{name}_DATA[{len(data)}] = {{")
          for i in range(0, len(data), 24):
              lines.append("    " + ", ".join(f"0x{b:02x}" for b in data[i:i + 24]) + ",")
-@@ -193,8 +203,9 @@ def main(out):
+@@ -193,8 +204,9 @@ def main(out):
                       ", ".join(str(a) for a, _, _ in glyphs) + "};")
          lines.append(f"static const uint8_t FONT_{name}_BW[{len(glyphs)}] = {{" +
                       ", ".join(str(b) for _, b, _ in glyphs) + "};")

@@ -256,14 +256,18 @@ static struct {
     uint8_t sq_rng;                      /* NOTES: zaznaczony zakres (SEL + SELECT, jak w FL): edycja i karta na wszystkich */
     uint32_t sq_ra, sq_re;               /* zakres: komórka startu i końca (tick w gridzie, w obie strony) */
     uint8_t play_hold;                   /* PLAY w NOTES: krótko = od kursora, trzymany = od początku */
+    uint8_t rec_hold;                    /* (v0.92) REC: krótko = nagrywanie, trzymany = strona RECORD */
+    uint32_t rec_at;
     uint32_t play_at;
     uint8_t sq_pitch;                    /* wysokość nowej nuty z K2 (ostatnio wpisana / zmieniona) */
     uint8_t sqn_row;                     /* karta nuty: wiersz */
     uint8_t st_on;                       /* klawisze wpisują (pusty krok albo REC) do puszczenia wszystkich */
     uint8_t sq_zv, sq_zh;                /* NOTES: zoom w pionie (SEL + K1: ile rzędów), w poziomie (SEL + K2: takty) */
+    uint8_t cp_k, cp_yes;                /* (v0.92) kopia dźwięku: klawisz trzymany z SEL (+ 1), wybór TAK */
+    int8_t cp_a, cp_b, cp_back;          /* skąd, dokąd (dźwięk), strona sprzed okna */
     uint8_t redraw_roll;                 /* odtwarzanie: tylko piano roll (bez paska i chipów: mniej przesyłania) */
     uint8_t redraw;
-} ui = {.page = V_HOME, .knob = -1, .sq_low = 55, .sq_note = -1, .sq_pitch = 60, .sq_zv = 1, .pf_mac = {0, 0, 0, 100}};
+} ui = {.page = V_HOME, .knob = -1, .sq_low = 55, .sq_note = -1, .sq_pitch = 60, .sq_zv = 1, .sq_zh = 2, .pf_mac = {0, 0, 0, 100}};
 #include "ogs_app_06.c"
 void app_say(const char *a, const char *b)
 {
@@ -321,6 +325,18 @@ static void input(void)
         if (keys & bit) {                    /* nacisk: najmocniej wciśnięty klawisz */
             uint32_t q = touch_pressure(k);
             pr = q > pr ? q : pr;
+        }
+        if (ui.cp_k == k + 1u && !(keys & bit))   /* (v0.92) kopia dźwięku: pierwszy klawisz puszczony */
+            ui.cp_k = 0;
+        if (ENG_GRP[set.eng] == EG_DRUM && ui.sel_hold && (keys & bit) && !(ui.keys & bit) && rk_row_of((uint32_t)note) >= 0
+            && !(ui.page == V_SEQ && ui.sq_pg == SQ_NOTES)) {   /* (NOTES: SEL + klawisze = nuty w kursorze) */
+            if (ui.cp_k && (keys >> (ui.cp_k - 1u) & 1u)) {   /* (v0.92, decyzja użytkownika 2026-11-04) SEL + trzymany + ten: kopia */
+                eaten |= bit;
+                ui.sel_used = 1;
+                cp_ask(rk_row_of((uint32_t)key_note(ui.cp_k - 1u)), rk_row_of((uint32_t)note));
+                continue;
+            }
+            ui.cp_k = (uint8_t)(k + 1u);         /* pierwszy: dalej jak zawsze (wybór dźwięku, RACK: wiersz i odsłuch) */
         }
         if (ui.sel_hold && sq_sel_trk() && (keys & bit) && !(ui.keys & bit)
             && key_label(k) >= K_OP1 && key_label(k) <= K_OP4) {   /* (v0.90) SEL + OP1-4 w SEQ (MULTI): ścieżka T1-T4 (było SEQ + OP) */
@@ -439,6 +455,7 @@ static void input(void)
             }
         } else if (!(btn & bit) && (ui.btn & bit) && ui.sel_hold) {
             ui.sel_hold = 0;
+            ui.cp_k = 0;
             if (!ui.sel_used && plat_ms() - ui.sel_at < 500u)
                 sel_cycle();
             ui.knob = -1;
@@ -532,7 +549,10 @@ static void input(void)
                 sq_play_key();
             }
             break;
-        case B_REC: sq_rec_key(); break;
+        case B_REC:                          /* (v0.92) krótko: REC jak dotąd (przy puszczeniu), trzymany 0,4 s: strona RECORD */
+            ui.rec_hold = 1;
+            ui.rec_at = plat_ms();
+            break;
         default: app_say("SOON", ""); break;
         }
     }
@@ -623,6 +643,12 @@ static void input(void)
             }
             if (ui.page == V_GLO) {          /* GLO: sekcja, strona sekcji, działanie SYSTEM */
                 glo_select(e);
+                continue;
+            }
+            if (ui.page == V_CPY) {          /* (v0.92) kopia dźwięku: TAK / NIE */
+                if (e & 1)
+                    ui.cp_yes ^= 1u;
+                ui.redraw = 1;
                 continue;
             }
             if (ui.page == V_RESET) {        /* FACTORY RESET: co (przed potwierdzeniem) */
@@ -946,7 +972,8 @@ void app_frame(void)
         }
     }
     if (ui.page == V_FX && ui.sel_hold && !ui.sel_used
-        && now - ui.sel_at >= (fx_cur()->type == FX_EQ && !fx_is_mst(fx_cur()) ? SEL_EQ_MS : SEL_SHOW_MS)) {   /* SEL trzymany: lista efektów */
+        && now - ui.sel_at >= SEL_EQ_MS) {   /* SEL trzymany: lista efektów; (v0.92, decyzja użytkownika 2026-11-04) wszędzie 0,8 s jak na EQ
+                                              * (SEL + SELECT przesuwa efekt) */
         ui.sel_used = 1;
         fxl_open();
     }
@@ -984,6 +1011,18 @@ void app_frame(void)
         if (h != heavy) {
             heavy = h;
             ui.redraw = 1;
+        }
+    }
+    if (ui.rec_hold) {                       /* (v0.92) REC: puszczony przed 400 ms = nagrywanie, trzymany = RECORD (drugi raz: z powrotem) */
+        int up = !(plat_buttons() >> B_REC & 1u);
+        if (up || now - ui.rec_at >= 400u) {
+            ui.rec_hold = 0;
+            if (up)
+                sq_rec_key();
+            else if (ui.page == V_SEQ && ui.sq_pg == SQ_REC)
+                sq_view_back();
+            else
+                sq_open(SQ_REC);
         }
     }
     if (ui.play_hold) {                      /* PLAY w NOTES: puszczony przed 400 ms = od kursora */
