@@ -1,5 +1,8 @@
 # Changelog
 
+## v1.0.2 — 2026-11-04
+Źródła MPL OG Synth 1.0.2 (zapis i aktualizacje na FM1 z flashem UC25HQ80, usuwanie presetów USER, komunikat instalatora).
+
 ## v1.0.1 — 2026-11-04
 Źródła MPL OG Synth 1.0.1 (GLO > MIDI > T1-T4 CHANNEL).
 
