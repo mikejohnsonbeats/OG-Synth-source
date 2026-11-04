@@ -6475,7 +6475,7 @@ static int sq_cell_lt(int32_t a, int32_t b)      /* (v0.90, decyzja użytkownika
                                                   * ta sama wysokość kilka razy w komórce (jak ratchet): od lewej (czas) */
 {
     const sqn_t *x = &sqp.n[a], *y = &sqp.n[b];
-    return x->note != y->note ? x->note < y->note : x->t != y->t ? x->t < y->t : a < b;
+    return x->note != y->note ? x->note < y->note : x->t != y->t ? x->t > y->t : a < b;   /* (1.0.0) ta sama wysokość: od prawej */
 }
 
 static int32_t sq_cell_note(int32_t j)           /* j-ta nuta komórki kursora (od dołu), -1 brak */
@@ -7355,8 +7355,9 @@ static void sq_knob(uint32_t k, int32_t e)
         sq_undo(e);
         return;
     }
-    if (k == 0) {                                /* K1: nuty kroku od dołu (ta sama wysokość: od lewej), dalej: widok */
-        sq_vert(glob.g[G_SQK1INV] ? -e : e);
+    if (k == 0) {                                /* K1: nuty kroku od dołu (ta sama wysokość: od prawej), dalej: widok; (1.0.0, decyzja
+                                                  * użytkownika 2026-11-04) w lewo = w górę (do v0.92 w prawo; INVERTED = dawny kierunek) */
+        sq_vert(glob.g[G_SQK1INV] ? e : -e);
         return;
     }
     if (sq_tgt_first() < 0) {                    /* pusty krok: PITCH wstawia nutę (ostatnia wysokość) */
@@ -7371,7 +7372,7 @@ static void sq_knob(uint32_t k, int32_t e)
         sq_len_edit(ui.sel_hold ? 1 : 2, ui.sel_hold ? accel(EN_K3, e, (int32_t)L) : e, 0x300u + k);
         return;
     }
-    d = k == 3 ? accel(EN_K4, e, 127) : e;
+    d = k == 3 ? accel(EN_K4, e, 127) : -e;      /* (1.0.0, decyzja użytkownika 2026-11-04) K2 w lewo = wyżej */
     sq_um(0x100u + k + ((uint32_t)(ui.sq_note + 1) << 4) + ((uint32_t)ui.sq_rng << 15));
     for (i = 0; i < SQ_NN; i++) {                /* podświetlona albo wszystkie z zakresu */
         sqn_t *n = &sqp.n[i];
