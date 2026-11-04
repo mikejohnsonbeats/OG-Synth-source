@@ -4251,6 +4251,17 @@ int app_sysex(const uint8_t *p, uint32_t n)
                 mt_stest[k] = p[5 + k] & 127u;
             return 1;
         }
+        if (p[4] == 0x2Du && n >= 9u && p[5] == 'W' && p[6] == 'I' && p[7] == 'P' && p[8] == 'E') {
+            /* (v1.0.2) powrót do stock (strona instalacji, przed pakietem M-VAVE): dane OG Synth ponad flash.bin stocka
+             * (0xA9000) skasowane — stock widzi tam pusty flash jak nowy FM1, nie nasze presety ("janked"). Niżej
+             * pisze oficjalny loader. Kalibracja radia i BTIF (0xE8000, 0xE9000) zostają. -> 24 2D 00 */
+            uint32_t a;
+            for (a = 0xA9000u; a < 0xFC000u; a += 0x1000u)
+                if (a < 0xE0000u || a >= 0xF8000u)
+                    plat_data_erase(a);
+            bank_ack(0x2Du, 0);
+            return 1;
+        }
         if (p[4] == 0x2Cu && n >= 9u) {      /* (v0.83) pomiar MULTI: 2C t1 t2 t3 t4 — efekty ścieżek (bity: 1 DIST, 2 FILTER,
                                               * 4 COMP, 8 EQ), gałki domyślne, bez budżetu; 0 0 0 0 = koniec. Bez zapisu. */
             uint32_t k;

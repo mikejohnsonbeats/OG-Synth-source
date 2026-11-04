@@ -608,7 +608,7 @@ index f3e945c..fa3364e 100644
      for (const ex of EXTRAS) {
        say(`Receiving ${esc(ex.what)} from ${esc(FW.name)}&hellip;`);
 diff --git a/web/fm1ota.js b/web/fm1ota.js
-index 482c784..1d3844b 100644
+index 482c784..9ee7033 100644
 --- a/web/fm1ota.js
 +++ b/web/fm1ota.js
 @@ -11,6 +11,9 @@ const HS_QUERY = [0xF0, 0x00, 0x32, 0x45, 0x00, 0x00, 0x00, 0x40, 0x7F, 0xF7];
@@ -694,18 +694,34 @@ index 482c784..1d3844b 100644
          continue;
        }
        if (r.len > MAXDATA || r.addr + r.len > image.length) throw fail("badreq", `bad request ${r.addr.toString(16)}+${r.len}`);
-@@ -206,8 +220,8 @@ export class Updater {
+@@ -206,8 +220,24 @@ export class Updater {
      }
    }
  
 -  // full install: running firmware -> loader -> new firmware
 -  async install(image, product, onStep, sha256) {
++  // OGS 1.0.2: before the stock firmware, the running OG Synth (its identity starts with prefix) erases its data above
++  // stock's flash.bin (stock found our presets there: "janked"). F0 7D 4F 47 53 2D "WIPE" F7 -> 24 2D 00. true: erased;
++  // false: another firmware, or one that does not know it (1.0.1 and older): nothing changes, the install goes on
++  async wipeApp(prefix, ms = 15000) {
++    const dev = await this.find((id) => !IS_OTA(id) && id.text.startsWith(prefix));
++    if (!dev) return false;
++    dev.link.drain();
++    dev.link.send([0xF0, 0x7D, 0x4F, 0x47, 0x53, 0x2D, 0x57, 0x49, 0x50, 0x45, 0xF7]);
++    const t0 = Date.now();
++    let ok = false;
++    for (let m; !ok && Date.now() - t0 < ms && (m = await dev.link.read(ms - (Date.now() - t0)));)
++      ok = m.length >= 8 && m[1] === 0x7D && m[5] === 0x24 && m[6] === 0x2D;
++    dev.link.close();
++    return ok;
++  }
++
 +  // step 1 alone: the running firmware reads the package and stages the loader (then it restarts into it)
 +  async stage(image, product, onStep, sha256, onFinish) {
      const step = onStep || (() => {});
      const dev = await this.find((id) => !IS_OTA(id));
      if (!dev) throw fail("notfound", "FM-1 not found (USB cable, and no other app using it?)");
-@@ -217,18 +231,27 @@ export class Updater {
+@@ -217,18 +247,27 @@ export class Updater {
      step("start", dev.id.text);
      dev.link.send(UPGRADE);
      await sleep(2000);
@@ -736,7 +752,7 @@ index 482c784..1d3844b 100644
      if (!back) throw fail("noreturn", "the device did not come back: power-cycle it");
      back.link.close();
      if (back.id.text !== product) throw fail("mismatch", `installed, but the device reports ${back.id.text}`, back.id.text);
-@@ -280,10 +303,10 @@ export class Updater {
+@@ -280,10 +319,10 @@ export class Updater {
    }
  
    // step 2 with the loader found by find()/waitFor()
@@ -750,10 +766,10 @@ index 482c784..1d3844b 100644
      return s2;
    }
 diff --git a/web/installer.html b/web/installer.html
-index 6e65819..0927ff6 100644
+index 6e65819..528ebb3 100644
 --- a/web/installer.html
 +++ b/web/installer.html
-@@ -147,11 +147,13 @@ const TEXT = {
+@@ -147,11 +147,14 @@ const TEXT = {
      nomidi: "このブラウザでは使えません。Chrome か Edge で開いてください。", loadfail: "読み込めませんでした: ",
      start: "開始します", verify: "確認中", loader: "書き込みモードに切り替え中", write: "書き込み中",
      reboot: "再起動中", done: "完了しました", stopped: "途中で止まりました。USB を挿し直してもう一度押してください。",
@@ -763,11 +779,12 @@ index 6e65819..0927ff6 100644
      notfound: "FM-1 が見つかりません。USB ケーブル（データ通信用か）を確かめ、MIDI を使う他のアプリやブラウザのタブ（別のファームウェアのインストーラーやエディター）を閉じてから、もう一度押してください。別のファームウェアからは、そのまま起動した状態で構いません（アップデートモードは不要です）。",
      model: "接続されている機器は FM-1 ではありません。",
      lost: "USB の接続が切れました。挿し直してもう一度押してください。",
++    wipe: "OG Synth のデータを消去しています（純正ファームウェアのため）…",
 +    noupdate: "この FM-1 は書き込みを始めませんでした。2026 年秋以降の FM-1 はメモリーチップが新しく、古いファームウェアはそこから更新できません。REC を押したまま電源を入れ（UPDATE MODE）、M-VAVE の M-UPGRADE で純正ファームウェアに戻してから、もう一度インストールしてください。",
      noloader: "書き込みモードの FM-1 が見つかりません。USB を挿し直してもう一度押してください（終わるまで書き込みモードのままです）。",
      noreturn: "FM-1 が戻ってきません。電源を入れ直してください。",
      mismatch: "書き込みは終わりましたが、FM-1 が別のバージョンを報告しています: ",
-@@ -197,11 +199,13 @@ const TEXT = {
+@@ -197,11 +200,14 @@ const TEXT = {
      nomidi: "This browser cannot do it. Open the page in Chrome or Edge.", loadfail: "Could not load: ",
      start: "Starting", verify: "Verifying", loader: "Switching to update mode", write: "Writing",
      reboot: "Restarting", done: "Done", stopped: "Stopped. Replug the USB cable and press Install again.",
@@ -777,11 +794,12 @@ index 6e65819..0927ff6 100644
      notfound: "FM-1 not found. Check the USB cable (a data cable), close other apps and browser tabs that use MIDI (another firmware's installer or editor), and press Install again. Coming from another firmware, leave it running as it is: no update mode is needed.",
      model: "The connected device is not an FM-1.",
      lost: "The USB connection was lost. Replug it and press Install again.",
++    wipe: "Erasing OG Synth's data, so the stock firmware starts clean…",
 +    noupdate: "The FM-1 did not start the update. Newer FM-1s (sold since autumn 2026) have a different memory chip, and an older firmware on them can't update itself. Hold REC while switching the FM-1 on (the screen says UPDATE MODE), put the stock firmware back with M-VAVE's M-UPGRADE (m-vave.com/download), then install again.",
      noloader: "The FM-1 in update mode was not found. Replug the USB cable and press Install again (it stays in update mode until it is finished).",
      noreturn: "The FM-1 did not come back. Power-cycle it.",
      mismatch: "Written, but the FM-1 reports another version: ",
-@@ -229,7 +233,7 @@ const TEXT = {
+@@ -229,7 +235,7 @@ const TEXT = {
  let lang = "en";                                 /* English first; 日本語 is a click away */
  const t = (k) => TEXT[lang][k];
  /* what happens goes to two regions: #status (polite) the steps and the progress, #alert a failure */
@@ -790,7 +808,7 @@ index 6e65819..0927ff6 100644
                         "noreturn", "mismatch", "badpkg", "stockbad", "bootrefused"]);
  let lastKey = null, lastArg = "", lastPct = null;
  const textOf = (k, arg, pct) => t(k) + arg + (pct == null ? "" : t("pct").replace("{n}", pct));
-@@ -262,9 +266,11 @@ const say = (txt) => { lastKey = null; $("alert").textContent = ""; $("status").
+@@ -262,9 +268,11 @@ const say = (txt) => { lastKey = null; $("alert").textContent = ""; $("status").
  /* follows the newest line, unless the reader has scrolled up to look at an earlier one */
  const log = (t) => {
    const el = $("log"), atEnd = el.scrollHeight - el.scrollTop - el.clientHeight < 24;
@@ -803,7 +821,7 @@ index 6e65819..0927ff6 100644
  let image = null, boot = null;
  const meta = /*META*/;
  /* the firmware's own steps around an install (its site's install_app script, or none): before(midi, ui) runs before
-@@ -309,6 +315,12 @@ window.addEventListener("beforeunload", (e) => { if (writing) { e.preventDefault
+@@ -309,6 +317,12 @@ window.addEventListener("beforeunload", (e) => { if (writing) { e.preventDefault
      image = logicalImage(pkg);
      say(`{{NAME}} ${meta.version}`);
      $("go").disabled = false;
@@ -816,7 +834,7 @@ index 6e65819..0927ff6 100644
    } catch (e) { sayK("loadfail", e.message); }
    /* m-bootloader: offered only when its package is here and is the one the site was made with */
    try {
-@@ -353,12 +365,115 @@ function confirmed(withBoot) {
+@@ -353,12 +367,115 @@ function confirmed(withBoot) {
    return new Promise((r) => d.addEventListener("close", () => r(d.returnValue === "go"), { once: true }));
  }
  
@@ -936,7 +954,7 @@ index 6e65819..0927ff6 100644
    let appState = null;
    if (APP && APP.before && !isStock) {
      try { appState = await APP.before(midi, appUi); }
-@@ -389,20 +504,29 @@ async function run(img, product, isStock, sha256) {
+@@ -389,20 +506,33 @@ async function run(img, product, isStock, sha256) {
        if (k === "bootstart" || k === "bootwrite") sayK(k);
        if (k === "bootdone") { $("bar").value = 100; sayK("bootdone"); }
      };
@@ -972,6 +990,10 @@ index 6e65819..0927ff6 100644
 +        }
 +        installed = !!done;
 +      } else {
++        if (isStock && meta.product.startsWith("FM-1_11")) {   /* OGS 1.0.2: OG Synth's data out of stock's way */
++          sayK("wipe");
++          log(`wipe ${(await up.wipeApp("FM-1_11")) ? "done" : "skipped"}`);
++        }
 +        await up.install(img, product, step, sha256);
 +        if (withBoot) await up.installBoot(boot, product, step);
 +        installed = true;
@@ -979,7 +1001,7 @@ index 6e65819..0927ff6 100644
      }
    } catch (e) {
      if (isStock && e && e.code === "mismatch") { $("bar").value = 100; sayK("stockdone"); }   /* stock names itself its own way */
-@@ -410,6 +534,7 @@ async function run(img, product, isStock, sha256) {
+@@ -410,6 +540,7 @@ async function run(img, product, isStock, sha256) {
      else sayK("error", e && e.message);
      log(String(e && e.stack || e));
    }
@@ -987,7 +1009,7 @@ index 6e65819..0927ff6 100644
    if (installed && APP && APP.after && !isStock) {
      try { await APP.after(midi, appUi, appState); }
      catch (e) { say(String(e && e.message || e)); log(String(e && e.stack || e)); }
-@@ -417,6 +542,7 @@ async function run(img, product, isStock, sha256) {
+@@ -417,6 +548,7 @@ async function run(img, product, isStock, sha256) {
    writing = false;
    $("go").disabled = !image;
    $("stockgo").disabled = !stock;
