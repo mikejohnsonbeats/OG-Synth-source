@@ -5,6 +5,15 @@ OG Synth is firmware for the M-VAVE FM-1 by Mike Johnson Beats. Site, installer 
 This repository holds the source of the parts of OG Synth covered by the Mozilla Public License 2.0, for each released
 version (git tags match the firmware versions on ogsynth.cc).
 
+## Downloads and recovery
+Every version is also in [Releases](https://github.com/mikejohnsonbeats/OG-Synth-source/releases), in case ogsynth.cc is
+ever down: the firmware package, an offline copy of the install page (runs on your own computer with Python 3) and SHA-256 sums.
+- Back to stock: the install page has "Back to the stock firmware" (M-VAVE's FM-1.fwsc from https://www.m-vave.com/download),
+  or use M-VAVE's own updater, M-UPGRADE.
+- FM-1 won't start: with the m-bootloader option installed, hold PLAY while switching on for its recovery menu (REC: update
+  mode). Without it, a Mac can put the stock firmware back with the
+  [felucca-bsp tools](https://github.com/hugelton/felucca-bsp/tree/main/tools).
+
 ## What is here
 - `app/`: the parts of the application based on the fm1-base template: `app.c` (the template's functions as OG Synth
   changed them), `app.h`, `fm1.toml`, `words.tsv`, the manual, the emulator and backup pages; `LICENSE`: MPL-2.0
