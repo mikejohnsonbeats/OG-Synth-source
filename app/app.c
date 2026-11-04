@@ -299,7 +299,7 @@ static void input(void)
                                               * trakcie nie zostawia wiszącej nuty ani nuty w ARP) */
     uint32_t keys, btn = plat_buttons(), k, avail = 0, shown, pr = 0, gk;
     int sel_shown;
-    uint32_t chan = mt_ui() ? (uint32_t)glob.g[G_MTFOC]   /* (v0.66.1) MULTI: MIDI OUT kanał 1-4 = wybrana ścieżka */
+    uint32_t chan = mt_ui() ? mt_ch(glob.g[G_MTFOC])   /* (v0.66.1) MULTI: MIDI OUT na kanale wybranej ścieżki (v1.0.1: z GLO) */
                   : glob.g[G_MIDICH] ? (uint32_t)glob.g[G_MIDICH] - 1u : 0u;
     int32_t e;
     touch_poll();
