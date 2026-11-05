@@ -21,9 +21,9 @@ void app_render(int32_t *lr, uint32_t n, uint32_t master_q12)
     static float bl[APP_BLOCK], br[APP_BLOCK];
     const engine_t *e;
     static float hx[2], hy[2], eq_g;         /* SPEAKER EQ: górnoprzepustowy ok. 150 Hz (mały głośnik nie charczy) */
-    float gain = (float)master_q12 / 4096.0f * 7500000.0f;
+    float gain = mt_void ? 0.0f : (float)master_q12 / 4096.0f * 7500000.0f;   /* (v1.1.2) pusta scena: cisza (gain_now wygładza) */
     uint32_t i, done = 0, w = scope_w;
-    int sc = scope_on, eq = glob.g[G_SPKEQ], fading, want;
+    int sc = scope_on && !mt_void, eq = glob.g[G_SPKEQ], fading, want;
     float pk = 0.0f;
     if (mt_seen != mt_ver || mt_xs < 0.0f) {   /* (v0.64) MULTI: zmiana trybu / ścieżek po przygaszeniu wyjścia */
         if ((!mt_on && eng_play >= NENG) || mt_xg <= 0.0f) {   /* (start: od razu) */
@@ -450,9 +450,13 @@ static void input(void)
         uint32_t bit = 1u << B_SEL;
         if ((btn & bit) && !(ui.btn & bit)) {
             ui.browse = 0;
-            if (ui.page == V_ALLP) {         /* (v1.0.2) ALL PRESETS: OK przy puszczeniu, trzymany = usuń USER; w oknie DELETE?: tak */
+            if (ui.page == V_ALLP || ui.page == V_SCN) {   /* (v1.0.2) ALL PRESETS: OK przy puszczeniu, trzymany = usuń USER; w oknie
+                                                            * DELETE?: tak; (v1.1.2) lista scen tak samo */
                 if (ui.allp_del) {
-                    user_del();
+                    if (ui.page == V_SCN)
+                        scn_del();
+                    else
+                        user_del();
                 } else {
                     ui.allp_sel = 1;
                     ui.sel_at = plat_ms();
@@ -469,7 +473,7 @@ static void input(void)
             }
         } else if (!(btn & bit) && (ui.btn & bit) && ui.allp_sel) {
             ui.allp_sel = 0;                 /* (v1.0.2) krótko (albo trzymany na nie-USER): OK; trzymany na USER: okno DELETE? */
-            if (ui.page == V_ALLP)
+            if (ui.page == V_ALLP || ui.page == V_SCN)
                 save_ok();
         } else if (!(btn & bit) && (ui.btn & bit) && ui.sel_hold) {
             ui.sel_hold = 0;
@@ -578,7 +582,7 @@ static void input(void)
         if ((e = plat_enc((int)k)) == 0)
             continue;
         ui.input_at = plat_ms();                 /* GLO SCREEN OFF: każdy ruch budzi */
-        if (ui.allp_del && ui.page == V_ALLP)    /* (v1.0.2) okno DELETE?: gałki stoją */
+        if (ui.allp_del && (ui.page == V_ALLP || ui.page == V_SCN))   /* (v1.0.2) okno DELETE?: gałki stoją */
             continue;
         if (ui.mode_until) {
             ui.mode_until = 0;
@@ -1002,7 +1006,8 @@ void app_frame(void)
             ui.redraw = 1;
         }
     }
-    if (ui.allp_sel && now - ui.sel_at >= SEL_EQ_MS && CUR >= ID_USER && CUR < ID_SYX && ui.page == V_ALLP) {
+    if (ui.allp_sel && now - ui.sel_at >= SEL_EQ_MS
+        && (ui.page == V_ALLP ? CUR >= ID_USER && CUR < ID_SYX : ui.page == V_SCN && glob.scn[ui.scn_cur].ok)) {   /* (v1.1.2) też scena */
         ui.allp_sel = 0;                     /* (v1.0.2) ALL PRESETS: SEL trzymany 0,8 s na USER = okno DELETE? */
         ui.allp_del = 1;
         ui.redraw = 1;
