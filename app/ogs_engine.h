@@ -207,6 +207,14 @@ static inline int32_t gest_fixdepth(const gest_fix_t *t, int32_t n, const int16_
                            {"AMOUNT", -100, 100, 0, F_SIGNED, 0}, {"VIA", 0, 0, 0, F_NONE, 0}
 #define SK_MX_PDEF(srcl, n) SK_MX_ROW(srcl, n), SK_MX_ROW(srcl, n), SK_MX_ROW(srcl, n), SK_MX_ROW(srcl, n)
 
+/* (v1.1.1, decyzja użytkownika 2026-11-05) DETUNE unisona do +-100 centów we wszystkich silnikach: do 60 bez zmian (to samo wyrażenie
+ * w silniku = ta sama dokładność, bit w bit), od 60 krzywa gładko (wartość i nachylenie ciągłe) do 1 półtonu przy 100.
+ * dt 0..1 (DETUNE / 100), v0 / s0: dotychczasowa krzywa silnika w 0,6 (półtony / półtony na 1,0). WAVE: własny RANGE. */
+float ogs_det_wide(float dt, float v0, float s0);   /* jedna kopia (app.c, nie wklejana: flash); DSP w .ram_text jej nie woła */
+#define det_wide ogs_det_wide
+float ogs_sk_detu(float sp, float dt);         /* sp * dt^2 / 2 do 0,6 (jak dotąd), wyżej det_wide; jedna kopia w app.c */
+#define SK_DETU(sp, dt) ogs_sk_detu(sp, dt)
+
 /* pasek modulacji: suma ilości połączeń do celu d (bez wyłączonych źródeł) */
 static inline int32_t gest_depth(const int16_t *p, int32_t n, int32_t (*row)(int32_t i), int32_t d)
 {

@@ -151,6 +151,16 @@ static int eng_sounding(void) { return eng_ready() && E->sounding(); }
 static int32_t eng_held_note(void) { return eng_ready() ? E->held_note() : -1; }
 static float eng_scope_semi(void) { return eng_ready() ? E->scope_semi() : 60.0f; }
 
+/* (v1.1.1) DETUNE unisona od 60 do 100 (ogs_engine.h): jedna kopia zamiast wklejania w każdym silniku */
+float __attribute__((noinline)) ogs_det_wide(float dt, float v0, float s0)
+{
+    const float x = dt - 0.6f;
+    return v0 + x * (s0 + x * ((1.0f - v0 - 0.4f * s0) * 6.25f));
+}
+float __attribute__((noinline)) ogs_sk_detu(float sp, float dt)   /* (bez FMA na FM1: ten sam wynik co wklejone sp * dt * dt * 0.5f) */
+{
+    return dt <= 0.6f ? sp * dt * dt * 0.5f : sp * ogs_det_wide(dt, 0.18f, 0.6f);
+}
 static void nt_clear(void);
 static void eng_enter(uint32_t e)        /* przerwanie audio: silnik e do wspólnego RAM (wszystko cichnie) */
 {
@@ -255,7 +265,7 @@ static const char *const L_MTCTL[] = {"NOTES", "+ BEND, WHEEL"};   /* (v1.1.0) G
 static const char *const L_TUNEK[] = {"FINE", "SEMITONES"};        /* (v1.1.0) G_TUNEK */
 static const pdef_t GDEF[NGALL] = {
     {"VISUAL HOME", 0, 1, 1, F_LIST, LI(L_ONOFF)}, {"VISUAL PAGES", 0, 1, 1, F_LIST, LI(L_ONOFF)},
-    {"TUNE A4", 430, 450, 440, F_NUM, 0},      {"MIDI CH", 0, 16, 0, F_LIST, LI(L_MIDICH)},
+    {"TUNE A4", 4270, 4530, 4400, F_CUSTOM, 0},   /* (v1.1.1, decyzja użytkownika 2026-11-05) 427,0-453,0 Hz co 0,1 Hz (dziesiąte Hz) */      {"MIDI CH", 0, 16, 0, F_LIST, LI(L_MIDICH)},
     {"VELOCITY", -5, 5, 0, F_SIGNED, 0},       {"PRESSURE", -5, 5, 0, F_SIGNED, 0},
     {"TRANSPOSE", -12, 12, 0, F_SIGNED, 0},    {"KNOB ACCEL", 0, 1, 1, F_LIST, LI(L_ONOFF)},
     {"MIDI OUT", 0, 1, 1, F_LIST, LI(L_ONOFF)},    {"LOCAL", 0, 1, 1, F_LIST, LI(L_ONOFF)},
@@ -858,7 +868,7 @@ static void glob_apply(void)             /* GLO -> silniki, klawisze, ekran */
     uint32_t i;
     for (i = 0; i < PF_N; i++)               /* (v0.90) PERFORM: ustawienia klawiszy */
         ogs_pf_cfg[i] = glob.pfs[i];
-    ctl.a4 = (float)glob.g[G_TUNE];
+    ctl.a4 = (float)glob.g[G_TUNE] * 0.1f;   /* (v1.1.1) dziesiąte Hz */
     touch_curve(glob.g[G_VEL]);
     touch_sens(glob.g[G_PRESS]);
     palette_set(0);                          /* trzy ciemne stopnie i dwa jasne: kolory OG Synth */
@@ -1454,6 +1464,15 @@ static void def_text(const pdef_t *d, int32_t id, int32_t v, char *b)
         text_cat(b, PLIST(d)[v - d->lo]);
     else if (d == &GDEF[G_VELFIX] && !v)
         text_cat(b, "OFF");
+    else if (d == &GDEF[G_TUNE]) {           /* (v1.1.1) 440.0 HZ */
+        char n[8];
+        int_text(v / 10, b, 0);
+        n[0] = '.';
+        n[1] = (char)('0' + v % 10);
+        n[2] = 0;
+        text_cat(b, n);
+        text_cat(b, " HZ");
+    }
     else if (d >= GDEF && d < GDEF + NGLOB && algo_eng((int32_t)(d - GDEF)) >= 0) {   /* ALGO KNOB: nazwa parametru */
         int32_t e = algo_eng((int32_t)(d - GDEF));
         text_cat(b, algo_ok(e, v) ? ENG[e].def(v)->name : "DEFAULT");
@@ -3846,6 +3865,8 @@ static void store_load(void)             /* wszystko z pamięci: przy starcie i 
     k = plat_store_load(OBJ_GLOBAL, &glob, sizeof glob);
     ok = k >= 4 + 4 * 2 && glob.magic == GLOB_MAGIC;
     e = k == 4 + 4 * 2 ? 2 : (k - 4) / 2;    /* ile pól zapisano (v0.4: 4 pola o innym znaczeniu, ważne 2) */
+    if (ok && e > G_TUNE && glob.g[G_TUNE] >= 430 && glob.g[G_TUNE] <= 450)
+        glob.g[G_TUNE] = (int16_t)(glob.g[G_TUNE] * 10);   /* (v1.1.1) zapis do 1.1.0: TUNE A4 w pełnych Hz -> dziesiąte */
     for (b = 0; b < NGLOB; b++) {
         if (!ok || b >= e || glob.g[b] < GDEF[b].lo || glob.g[b] > GDEF[b].hi)
             glob.g[b] = GDEF[b].def;
