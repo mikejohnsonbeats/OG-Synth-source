@@ -401,6 +401,7 @@ static const uint32_t MT_SZ[NENG][2] = {    /* stan silnika: *_ERAM, *_EPOOL (AL
 static volatile uint16_t mt_ver;             /* UI: zmiana trybu / silników ścieżek (przerwanie: po przygaszeniu) */
 static uint16_t mt_seen;
 static uint8_t mt_on, mt_eng[MT_N] = {MT_NONE, MT_NONE, MT_NONE, MT_NONE};
+static uint8_t mt_void;                      /* (v1.1.2) MULTI bez żadnej ścieżki (pusta scena): dźwięk jak SOLO, wyjście wyciszone */
 static uint8_t *mt_er[MT_N], *mt_ep[MT_N];
 static float mt_g[MT_N];                     /* głośność ścieżki (wygładzona) */
 static float mt_xg = 1.0f, mt_xs;            /* przygaszenie całego wyjścia (mt_xs < 0: w dół) */
@@ -496,6 +497,7 @@ static void mt_apply(void)                   /* przerwanie audio, wyjście przyg
     uint8_t *base;
     int16_t eng[MT_N];
     mt_nev = 0;                              /* (v0.66) nuty SEQ dla starych ścieżek: nieważne */
+    mt_void = 0;
     if (!glob.g[G_MULTI]) {
         if (mt_on) {
             mt_on = 0;
@@ -549,8 +551,9 @@ static void mt_apply(void)                   /* przerwanie audio, wyjście przyg
     for (t = 0; eng_play == 0xFF && t < MT_N; t++)
         if (mt_eng[t] < NENG)
             eng_play = mt_eng[t];
-    if (eng_play == 0xFF) {                  /* żadnej ścieżki: SOLO */
+    if (eng_play == 0xFF) {                  /* żadnej ścieżki: SOLO; (v1.1.2) w MULTI (pusta scena) wyciszone */
         mt_on = 0;
+        mt_void = 1;
         ogs_fx_arena_give();
     }
     mt_home();
@@ -1220,9 +1223,9 @@ void app_render(int32_t *lr, uint32_t n, uint32_t master_q12)
     static float bl[APP_BLOCK], br[APP_BLOCK];
     const engine_t *e;
     static float hx[2], hy[2], eq_g;         /* SPEAKER EQ: górnoprzepustowy ok. 150 Hz (mały głośnik nie charczy) */
-    float gain = (float)master_q12 / 4096.0f * 7500000.0f;
+    float gain = mt_void ? 0.0f : (float)master_q12 / 4096.0f * 7500000.0f;   /* (v1.1.2) pusta scena: cisza (gain_now wygładza) */
     uint32_t i, done = 0, w = scope_w;
-    int sc = scope_on, eq = glob.g[G_SPKEQ], fading, want;
+    int sc = scope_on && !mt_void, eq = glob.g[G_SPKEQ], fading, want;
     float pk = 0.0f;
     if (mt_seen != mt_ver || mt_xs < 0.0f) {   /* (v0.64) MULTI: zmiana trybu / ścieżek po przygaszeniu wyjścia */
         if ((!mt_on && eng_play >= NENG) || mt_xg <= 0.0f) {   /* (start: od razu) */
@@ -3087,19 +3090,16 @@ static void mt_fix(void)                     /* GLO: ścieżki poprawne (silniki
             glob.g[G_MT0 + t] = MT_NONE;
     if (glob.g[G_MT0 + glob.g[G_MTFOC]] >= NENG && mt_first() >= 0)
         glob.g[G_MTFOC] = (int16_t)mt_first();
-    if (mt_first() < 0)
-        glob.g[G_MULTI] = 0;
-}
+}                                            /* (v1.1.2) bez ścieżek MULTI zostaje (pusta scena; mt_enter: domyślne) */
 static void mt_boot(void)
 {
     if (!glob.g[G_MULTI])
         return;
     mt_fix();
-    if (glob.g[G_MULTI]) {
+    if (mt_first() >= 0)                     /* (v1.1.2) pusta scena: set.eng zostaje */
         set.eng = (uint8_t)glob.g[G_MT0 + glob.g[G_MTFOC]];
-        mt_cur = (uint8_t)glob.g[G_MTFOC];
-        mt_ver++;
-    }
+    mt_cur = (uint8_t)glob.g[G_MTFOC];
+    mt_ver++;
     glob_apply();                            /* (kolor MULTI) */
 }
 static void mt_focus_go(int32_t t)           /* wybrana ścieżka: jej silnik na stronach, klawiszach, SEQ */
@@ -8735,7 +8735,7 @@ static void save_key(void)
 
 static void home_key(void)               /* HOME: wraca; w ALL PRESETS / ENGINE do tego sprzed otwarcia */
 {
-    if (ui.page == V_ALLP && ui.allp_del) {   /* (v1.0.2) okno DELETE?: nie */
+    if ((ui.page == V_ALLP || ui.page == V_SCN) && ui.allp_del) {   /* (v1.0.2) okno DELETE?: nie */
         ui.allp_del = 0;
         ui.redraw = 1;
         return;
@@ -8867,7 +8867,7 @@ static void mt_enter(void)
 {
     glob.g[G_MULTI] = 1;
     mt_fix();
-    if (!mt_ui()) {                      /* (żadnej ścieżki: domyślne) */
+    if (mt_first() < 0) {                /* (żadnej ścieżki: domyślne) */
         int32_t t;
         for (t = 0; t < MT_N; t++)
             glob.g[G_MT0 + t] = GDEF[G_MT0 + t].def;
@@ -9216,13 +9216,22 @@ static void mt_scene_presets(void)       /* app_frame: przerwanie zastosowało n
     ev_push(EV_ALL_OFF);
     ui.redraw = 1;
 }
+static void scn_say(const char *w)       /* (v1.1.2) „SCENE n” + w w stopce (scena pod kursorem) */
+{
+    char h[12], t[8];
+    h[0] = 0;
+    text_cat(h, "SCENE ");
+    int_text(ui.scn_cur + 1, t, 0);
+    text_cat(h, t);
+    app_say(h, w);
+}
 static void mt_scene_save(void)
 {
     const int32_t mt_scn = ui.scn_cur;
     scn_t *c = &glob.scn[mt_scn];
-    char h[12], t[12];
+    char t[12];
     int32_t k, ed = -1;
-    c->ok = 1;
+    c->ok = 1;                               /* (v1.1.2) bez ścieżek: na liście i po wczytaniu = pusta */
     c->foc = (uint8_t)glob.g[G_MTFOC];
     c->mute = (uint8_t)glob.g[G_MTMUTE];
     c->rsv = SCN_NUM;                        /* (v0.78) numeracja presetów */
@@ -9239,19 +9248,24 @@ static void mt_scene_save(void)
     glob.scm[mt_scn] = glob.mfx;             /* (v0.85) MASTER FX */
     glob_dirty = 1;                          /* (zapis w ciszy jak GLO MULTI) */
     mt_gdirty = 1;
-    h[0] = 0;
-    text_cat(h, "SCENE ");
-    int_text(mt_scn + 1, t, 0);
-    text_cat(h, t);
     if (ed >= 0) {                           /* niezapisane brzmienie: scena pamięta zapisany preset */
         t[0] = 'T';
         t[1] = (char)('1' + ed);
         t[2] = 0;
         text_cat(t, " NOT SAVED");
-        app_say(h, t);
+        scn_say(t);
     } else {
-        app_say(h, "SAVED");
+        scn_say("SAVED");
     }
+    ui.redraw = 1;
+}
+/* (v1.1.2, decyzja użytkownika 2026-11-05) lista scen: SEL trzymany na zapisanej + SEL w oknie DELETE? = usuwa (jak ALL PRESETS) */
+static void scn_del(void)
+{
+    ui.allp_del = 0;
+    glob.scn[ui.scn_cur].ok = 0;
+    glob_dirty = 1;
+    scn_say("DELETED");
     ui.redraw = 1;
 }
 static void mt_scene_load(void)
@@ -9259,43 +9273,35 @@ static void mt_scene_load(void)
     const int32_t mt_scn = ui.scn_cur;
     const scn_t *c = &glob.scn[mt_scn];
     int32_t k;
-    if (!c->ok) {
-        app_say("SCENE", "EMPTY");
-        return;
+    for (k = 0; k < MT_N; k++) {             /* (v1.1.2, decyzja użytkownika 2026-11-05) pusta scena: nic na żadnej ścieżce */
+        glob.g[G_MT0 + k] = (int16_t)(c->ok && c->eng[k] < NENG ? c->eng[k] : MT_NONE);
+        if (c->ok) {
+            glob.g[G_MTV0 + k] = (int16_t)clamp(c->vol[k], 0, 100);
+            glob.g[G_MTP0 + k] = (int16_t)clamp(c->pan[k], -50, 50);
+        }
     }
-    for (k = 0; k < MT_N; k++) {
-        glob.g[G_MT0 + k] = (int16_t)(c->eng[k] < NENG ? c->eng[k] : MT_NONE);
-        glob.g[G_MTV0 + k] = (int16_t)clamp(c->vol[k], 0, 100);
-        glob.g[G_MTP0 + k] = (int16_t)clamp(c->pan[k], -50, 50);
+    glob.g[G_MTFOC] = 0;
+    if (c->ok) {
+        glob.g[G_MTMUTE] = (int16_t)(c->mute & 15u);
+        glob.g[G_MTFOC] = (int16_t)c->foc;
+        glob.mfx = glob.scm[mt_scn];         /* (v0.85) MASTER FX */
+        mt_scn_pend = (uint8_t)(mt_scn + 1u);   /* (mt_scene_presets z app_frame) */
     }
-    glob.g[G_MTMUTE] = (int16_t)(c->mute & 15u);
-    glob.g[G_MTFOC] = (int16_t)c->foc;
     glob.g[G_MULTI] = 1;
-    glob.mfx = glob.scm[mt_scn];             /* (v0.85) MASTER FX */
     mt_fix();
-    if (!mt_ui()) {                          /* (żadnej poprawnej ścieżki) */
-        app_say("SCENE", "EMPTY");
-        return;
-    }
     mt_gdirty = 1;
     mt_ver++;                                /* całe wyjście przygasa, ścieżki od nowa; brzmienia po przygaszeniu */
-    mt_scn_pend = (uint8_t)(mt_scn + 1u);    /* (mt_scene_presets z app_frame) */
+    mt_cur = (uint8_t)glob.g[G_MTFOC];
     mt_focus_go(glob.g[G_MTFOC]);
     ev_push(EV_ALL_OFF);
-    {
-        char h[12], t[8];
-        h[0] = 0;
-        text_cat(h, "SCENE ");
-        int_text(mt_scn + 1, t, 0);
-        text_cat(h, t);
-        app_say(h, "LOADED");
-    }
+    scn_say(mt_first() < 0 ? "EMPTY" : "LOADED");
     go_home();
 }
 static void scn_open(void)               /* (v0.90) MULTI: HOME na głównym ekranie = lista scen (było: ustawienia SEQ za OPTIONS) */
 {
     glob_commit();
     ui.page = V_SCN;
+    ui.allp_sel = ui.allp_del = 0;           /* (v1.1.2) SEL trzymany = usuń scenę */
     ui.knob = -1;
     ui.quick = 0;
     ui.browse = 0;
@@ -9744,9 +9750,13 @@ static void input(void)
         uint32_t bit = 1u << B_SEL;
         if ((btn & bit) && !(ui.btn & bit)) {
             ui.browse = 0;
-            if (ui.page == V_ALLP) {         /* (v1.0.2) ALL PRESETS: OK przy puszczeniu, trzymany = usuń USER; w oknie DELETE?: tak */
+            if (ui.page == V_ALLP || ui.page == V_SCN) {   /* (v1.0.2) ALL PRESETS: OK przy puszczeniu, trzymany = usuń USER; w oknie
+                                                            * DELETE?: tak; (v1.1.2) lista scen tak samo */
                 if (ui.allp_del) {
-                    user_del();
+                    if (ui.page == V_SCN)
+                        scn_del();
+                    else
+                        user_del();
                 } else {
                     ui.allp_sel = 1;
                     ui.sel_at = plat_ms();
@@ -9763,7 +9773,7 @@ static void input(void)
             }
         } else if (!(btn & bit) && (ui.btn & bit) && ui.allp_sel) {
             ui.allp_sel = 0;                 /* (v1.0.2) krótko (albo trzymany na nie-USER): OK; trzymany na USER: okno DELETE? */
-            if (ui.page == V_ALLP)
+            if (ui.page == V_ALLP || ui.page == V_SCN)
                 save_ok();
         } else if (!(btn & bit) && (ui.btn & bit) && ui.sel_hold) {
             ui.sel_hold = 0;
@@ -9872,7 +9882,7 @@ static void input(void)
         if ((e = plat_enc((int)k)) == 0)
             continue;
         ui.input_at = plat_ms();                 /* GLO SCREEN OFF: każdy ruch budzi */
-        if (ui.allp_del && ui.page == V_ALLP)    /* (v1.0.2) okno DELETE?: gałki stoją */
+        if (ui.allp_del && (ui.page == V_ALLP || ui.page == V_SCN))   /* (v1.0.2) okno DELETE?: gałki stoją */
             continue;
         if (ui.mode_until) {
             ui.mode_until = 0;
@@ -10747,13 +10757,14 @@ static void draw_home(void)            /* bez górnego paska: wiersz informacji,
         int_text(CUR - ID_FM1 + 1, n, 0);
         text_cat(t, n);
         text_cat(t, " / 128");
-    } else if (CUR >= ID_CZ) {               /* brzmienie z banku CZ: nazwa banku i numer w nim */
+    } else if (CUR >= ID_CZ && CUR < ID_XF) {   /* brzmienie z banku CZ: nazwa banku i numer w nim; (v1.1.2, GitHub issue #2)
+                                                 * fabryczne z efektami (za FM1) to nie bank: było „BANK 25 n / 16” */
         syx_bank_name(NSYX + (CUR - ID_CZ) / 16, t);
         text_cat(t, "  ");
         int_text((CUR - ID_CZ) % 16 + 1, n, 0);
         text_cat(t, n);
         text_cat(t, " / 16");
-    } else if (CUR >= ID_SYX) {              /* brzmienie z banku: nazwa banku i numer w nim */
+    } else if (CUR >= ID_SYX && CUR < ID_XF) {   /* brzmienie z banku: nazwa banku i numer w nim */
         syx_bank_name((CUR - ID_SYX) / 32, t);
         text_cat(t, "  ");
         int_text((CUR - ID_SYX) % 32 + 1, n, 0);
@@ -10768,7 +10779,7 @@ static void draw_home(void)            /* bez górnego paska: wiersz informacji,
                 if (i <= CUR)
                     pos++;
             }
-        text_cat(t, CUR >= ID_USER ? "USER PRESET  " : "PRESET  ");
+        text_cat(t, CUR >= ID_USER && CUR < ID_SYX ? "USER PRESET  " : "PRESET  ");   /* (v1.1.2) fabryczne z efektami: PRESET */
         int_text(pos, n, 0);
         text_cat(t, n);
         text_cat(t, " / ");
@@ -11284,6 +11295,20 @@ static void draw_name(void)            /* okno nazwy: 12 kratek, kursor podkreś
 /* okno ALL PRESETS: bieżący w środku, wokół sąsiedzi; silnik z lewej, sekcja bieżącego z prawej u góry.
  * v0.37 (użytkownik 2026-10-28): 7 wierszy (było 5), między sekcjami ich nazwy (nowy silnik: jego nazwa) */
 enum { AP_ROWS = 7, AP_MID = 3 };
+static void del_box(const char *nm)     /* (v1.1.2) okno DELETE? (ALL PRESETS, sceny): na środku, nazwa */
+{
+    if (!ui.allp_del)
+        return;
+    cv_rect(20, 64, 200, 70, C_DIM);
+    center(74, &FONT_M, "DELETE?", C_WHITE);
+    center(104, &FONT_S, nm, C_HI);
+}
+static void del_foot(void)
+{
+    foot_keep = ui.allp_del;                 /* pytanie przed kasowaniem: zawsze (jak FACTORY RESET) */
+    foot_col = ui.allp_del ? C_WHITE : 0;
+    body_blit();
+}
 static void draw_allp(void)
 {
     char t[24];
@@ -11335,18 +11360,12 @@ static void draw_allp(void)
         preset_name(id, t);
         cv_text(52, y, r != AP_MID ? &FONT_XS : &FONT_S, t, r != AP_MID ? C_GRAY : C_WHITE);
     }
-    if (ui.allp_del) {                       /* (v1.0.2) okno DELETE?: na środku, nazwa presetu */
-        cv_rect(20, 64, 200, 70, C_DIM);
-        center(74, &FONT_M, "DELETE?", C_WHITE);
-        preset_name(CUR, t);
-        center(104, &FONT_S, t, C_HI);
-    }
+    preset_name(CUR, t);
+    del_box(t);                              /* (v1.0.2) okno DELETE?: na środku, nazwa presetu */
     foot_hint = ui.allp_del ? "SURE?  SEL: YES   HOME: NO"
               : CUR >= ID_USER && CUR < ID_SYX ? "SELECT: SECTION   SEL: OK   HOLD SEL: DELETE"
               : "SELECT: SECTION   ALGO: ENGINE   SEL: OK";
-    foot_keep = ui.allp_del;                 /* pytanie przed kasowaniem: zawsze (jak FACTORY RESET) */
-    foot_col = ui.allp_del ? C_WHITE : 0;
-    body_blit();
+    del_foot();
 }
 
 static void big_text(const char *s, int32_t cy, float maxw, float maxh, uint16_t col)   /* FONT_L powiększony na płótno */
@@ -11535,10 +11554,15 @@ static void draw_scn(void)             /* (v0.86) lista scen MULTI (v0.90: HOME 
                     text_cat(t, "  ");
                 text_cat(t, ENG[c->eng[k]].name);
             }
-        cv_text(30, y + 1, &FONT_XS, c->ok ? t : "EMPTY", on ? C_BLACK : c->ok ? C_WHITE : C_DIM);
+        cv_text(30, y + 1, &FONT_XS, c->ok && t[0] ? t : "EMPTY", on ? C_BLACK : c->ok && t[0] ? C_WHITE : C_DIM);
     }
-    foot_hint = "SELECT: SCENE   SEL: LOAD   SAVE: STORE";
-    body_blit();
+    t[0] = 0;                                /* (v1.1.2) okno DELETE? jak w ALL PRESETS */
+    text_cat(t, "SCENE ");
+    int_text(ui.scn_cur + 1, t + 6, 0);
+    del_box(t);
+    foot_hint = ui.allp_del ? "SURE?  SEL: YES   HOME: NO"
+              : glob.scn[ui.scn_cur].ok ? "SEL: LOAD   SAVE: STORE   HOLD SEL: DELETE" : "SELECT: SCENE   SEL: LOAD   SAVE: STORE";
+    del_foot();
 }
 
 static void draw_import(void)          /* okno IMPORT: bank DX7 -> miejsce 1-32 */
@@ -13145,7 +13169,8 @@ void app_frame(void)
             ui.redraw = 1;
         }
     }
-    if (ui.allp_sel && now - ui.sel_at >= SEL_EQ_MS && CUR >= ID_USER && CUR < ID_SYX && ui.page == V_ALLP) {
+    if (ui.allp_sel && now - ui.sel_at >= SEL_EQ_MS
+        && (ui.page == V_ALLP ? CUR >= ID_USER && CUR < ID_SYX : ui.page == V_SCN && glob.scn[ui.scn_cur].ok)) {   /* (v1.1.2) też scena */
         ui.allp_sel = 0;                     /* (v1.0.2) ALL PRESETS: SEL trzymany 0,8 s na USER = okno DELETE? */
         ui.allp_del = 1;
         ui.redraw = 1;

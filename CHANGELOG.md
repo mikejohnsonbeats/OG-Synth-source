@@ -1,5 +1,9 @@
 # Changelog
 
+## v1.1.2 — 2026-11-05
+Źródła MPL OG Synth 1.1.2 „Clean scenes” (lista scen MULTI: SEL trzymany usuwa scenę, pusta scena czyści ścieżki;
+HOME: PRESET n / m fabrycznych presetów z efektami, issue #2).
+
 ## v1.1.1 — 2026-11-05
 Źródła MPL OG Synth 1.1.1 „Fine tune” (TUNE A4 427,0-453,0 Hz co 0,1 Hz, DETUNE unisona do +-100 centów).
 
