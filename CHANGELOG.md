@@ -1,5 +1,8 @@
 # Changelog
 
+## v1.1.1 — 2026-11-05
+Źródła MPL OG Synth 1.1.1 „Fine tune” (TUNE A4 427,0-453,0 Hz co 0,1 Hz, DETUNE unisona do +-100 centów).
+
 ## v1.1.0 — 2026-11-05
 Źródła MPL OG Synth 1.1.0 „Key & chords” (tonacja wzoru, akordy KEY 3 / 7 i VOICING, nazwa akordu, RECORD z BPM i TAP TEMPO,
 nowe pola GLO, UPDATE MODE; app/ogs_lists.h: listy wartości parametrów jako numery).
