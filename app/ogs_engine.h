@@ -6,14 +6,16 @@
  * gałka -> id (more: parametry rzadziej używane, strona zostaje prosta). */
 #pragma once
 #include <stdint.h>
+#include "ogs_lists.h"
 
 enum { F_NUM, F_SIGNED, F_LIST, F_NONE, F_CUSTOM };   /* F_CUSTOM: tekst wartości robi silnik (text) */
 typedef struct {
     const char *name;
     int16_t lo, hi, def;
     uint8_t fmt;
-    const char *const *list;
+    uint8_t list;                            /* (v1.1.0) numer listy wartości w ogs_lists[] (0: brak; ogs_lists.h, PLIST) */
 } pdef_t;
+_Static_assert(sizeof(pdef_t) == sizeof(void *) + 8, "pdef_t: wskaznik nazwy + 8 B (v1.1.0)");
 
 static const char *const L_ONOFF[] = {"OFF", "ON"};
 
@@ -201,7 +203,7 @@ static inline int32_t gest_fixdepth(const gest_fix_t *t, int32_t n, const int16_
  * DEST (numer parametru + 1, 0 = brak), AMOUNT (-100..100 = cały zakres celu), VIA (nieużywane: wiersz jak w WAVE)
  * na końcu parametrów silnika (stare presety: zera = brzmienie bez zmian) */
 #define SK_MXN 4
-#define SK_MX_ROW(srcl, n) {"SOURCE", 0, 3, 0, F_LIST, srcl}, {"DEST", 0, n, 0, F_CUSTOM, 0}, \
+#define SK_MX_ROW(srcl, n) {"SOURCE", 0, 3, 0, F_LIST, LI(srcl)}, {"DEST", 0, n, 0, F_CUSTOM, 0}, \
                            {"AMOUNT", -100, 100, 0, F_SIGNED, 0}, {"VIA", 0, 0, 0, F_NONE, 0}
 #define SK_MX_PDEF(srcl, n) SK_MX_ROW(srcl, n), SK_MX_ROW(srcl, n), SK_MX_ROW(srcl, n), SK_MX_ROW(srcl, n)
 

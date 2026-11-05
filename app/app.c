@@ -196,10 +196,16 @@ enum { G_VHOME, G_VPAGES, G_TUNE, G_MIDICH, G_VEL, G_PRESS, G_TRANSP, G_ACCEL, G
        G_MCRA, G_MCAT, G_MCRE,           /* THRESH, RATIO, ATTACK, RELEASE (surowe 0-127 jak gałki COMPRESSOR; domyślne = stałe z v0.77) */
        G_MTCH0,                          /* (v1.0.1) MIDI > T1-T4 CHANNEL: kanał ścieżki MULTI 1-16 (domyślnie 1-4 = jak od v0.64;
                                           * zapis 1.0.0 ma tu 0: poza zakresem = domyślne) */
-       NGALL = G_MTCH0 + 4 };
+       G_MTCTL = G_MTCH0 + 4,            /* (v1.1.0) pola od 72: glob.gx2 (na końcu obiektu, zapis bez nich = domyślne);
+                                          * MIDI > OTHER TRACKS: niewybrane ścieżki MULTI: NOTES (jak dotąd) / + BEND, WHEEL, PRESS (P6) */
+       G_CCIN,                           /* (v1.1.0) MIDI > CC IN: OFF (jak dotąd) / ON: CC 21-24 = K1-K4 strony (P7) */
+       G_TUNEK,                          /* (v1.1.0) PLAY > TUNE KNOB: FINE (jak dotąd) / SEMITONES (P9) */
+       G_CHNAME,                         /* (v1.1.0) DISPLAY > CHORD NAME: OFF (jak dotąd) / ON (akordy A) */
+       NGALL };
 #define NGX 8                            /* miejsca glob.gx (zapas na kolejne pola) */
-_Static_assert(NGALL - NGLOB <= NGX, "GLO: pola ponad 64");
-#define GV(q) (*((q) < NGLOB ? &glob.g[q] : &glob.gx[(q) - NGLOB]))
+#define NGX2 8                           /* (v1.1.0) miejsca glob.gx2 */
+_Static_assert(G_MTCTL == NGLOB + NGX, "GLO: gx pełne, dalej gx2 (v1.1.0)");
+#define GV(q) (*((q) < NGLOB ? &glob.g[q] : (q) < NGLOB + NGX ? &glob.gx[(q) - NGLOB] : &glob.gx2[(q) - NGLOB - NGX]))
 _Static_assert(G_MTP0 + 4 == NGLOB, "GLO: PAN T1-T4 w ostatnich polach");
 #define G_ALGO_N 8                       /* miejsca na silniki w jednym bloku (G_ALGO0: 1-8, G_ALGO8: 9-16) */
 _Static_assert(NENG_MAX == 2 * G_ALGO_N && G_ALGO8 + G_ALGO_N <= NGLOB, "GLO: ALGO każdego silnika");
@@ -245,29 +251,31 @@ static const char *const L_CLKIN[] = {"INTERNAL", "AUTO"};
 static const char *const L_INV[] = {"NORMAL", "INVERTED"};
 static const char *const L_HINTS[] = {"ON", "OFF"};
 static const char *const L_MTMST[] = {"OFF", "LIMIT", "COMP"};
+static const char *const L_MTCTL[] = {"NOTES", "+ BEND, WHEEL"};   /* (v1.1.0) G_MTCTL */
+static const char *const L_TUNEK[] = {"FINE", "SEMITONES"};        /* (v1.1.0) G_TUNEK */
 static const pdef_t GDEF[NGALL] = {
-    {"VISUAL HOME", 0, 1, 1, F_LIST, L_ONOFF}, {"VISUAL PAGES", 0, 1, 1, F_LIST, L_ONOFF},
-    {"TUNE A4", 430, 450, 440, F_NUM, 0},      {"MIDI CH", 0, 16, 0, F_LIST, L_MIDICH},
+    {"VISUAL HOME", 0, 1, 1, F_LIST, LI(L_ONOFF)}, {"VISUAL PAGES", 0, 1, 1, F_LIST, LI(L_ONOFF)},
+    {"TUNE A4", 430, 450, 440, F_NUM, 0},      {"MIDI CH", 0, 16, 0, F_LIST, LI(L_MIDICH)},
     {"VELOCITY", -5, 5, 0, F_SIGNED, 0},       {"PRESSURE", -5, 5, 0, F_SIGNED, 0},
-    {"TRANSPOSE", -12, 12, 0, F_SIGNED, 0},    {"KNOB ACCEL", 0, 1, 1, F_LIST, L_ONOFF},
-    {"MIDI OUT", 0, 1, 1, F_LIST, L_ONOFF},    {"LOCAL", 0, 1, 1, F_LIST, L_ONOFF},
-    {"PROG CHANGE", 0, 1, 0, F_LIST, L_ONOFF}, {"SPEAKER EQ", 0, 1, 0, F_LIST, L_ONOFF},
-    {"2ND CORE", 0, 1, 1, F_LIST, L_CPU2},     {"LIGHTS", 0, 2, 2, F_LIST, L_LIGHTS},
-    {"KEY LIGHTS", 0, 3, 0, F_LIST, L_KEYL},   {"SCREEN OFF", 0, 4, 0, F_LIST, L_SCROFF},
-    {"COLOR", 0, 5, 0, F_LIST, L_COLOR},       {"TOP KEYS", 0, 1, 0, F_LIST, L_TOPKEYS},
-    {"CLOCK IN", 0, 1, 1, F_LIST, L_CLKIN},    {"CLOCK OUT", 0, 1, 0, F_LIST, L_ONOFF},
+    {"TRANSPOSE", -12, 12, 0, F_SIGNED, 0},    {"KNOB ACCEL", 0, 1, 1, F_LIST, LI(L_ONOFF)},
+    {"MIDI OUT", 0, 1, 1, F_LIST, LI(L_ONOFF)},    {"LOCAL", 0, 1, 1, F_LIST, LI(L_ONOFF)},
+    {"PROG CHANGE", 0, 1, 0, F_LIST, LI(L_ONOFF)}, {"SPEAKER EQ", 0, 1, 0, F_LIST, LI(L_ONOFF)},
+    {"2ND CORE", 0, 1, 1, F_LIST, LI(L_CPU2)},     {"LIGHTS", 0, 2, 2, F_LIST, LI(L_LIGHTS)},
+    {"KEY LIGHTS", 0, 3, 0, F_LIST, LI(L_KEYL)},   {"SCREEN OFF", 0, 4, 0, F_LIST, LI(L_SCROFF)},
+    {"COLOR", 0, 5, 0, F_LIST, LI(L_COLOR)},       {"TOP KEYS", 0, 1, 0, F_LIST, LI(L_TOPKEYS)},
+    {"CLOCK IN", 0, 1, 1, F_LIST, LI(L_CLKIN)},    {"CLOCK OUT", 0, 1, 0, F_LIST, LI(L_ONOFF)},
     {"FIXED VEL", 0, 127, 0, F_NUM, 0},
 #define GALGO(n) {n, -1, 255, -1, F_CUSTOM, 0}
     GALGO("MINI"), GALGO("FM6"), GALGO("WAVE"), GALGO("PHASE"), GALGO("VCO"), GALGO("SVF"), GALGO("DCO"), GALGO("8BIT"),
-    {"ZOOM", 0, 1, 0, F_LIST, L_INV},          {"K1", 0, 1, 0, F_LIST, L_INV},
+    {"ZOOM", 0, 1, 0, F_LIST, LI(L_INV)},          {"K1", 0, 1, 0, F_LIST, LI(L_INV)},
     {"NEW VEL", 1, 127, 100, F_NUM, 0},        /* 31 (v0.88): G_SQVEL */
     GALGO("LPG"), GALGO("ALPHA"), GALGO("MORPH"), GALGO("88"), GALGO("99"), GALGO("DUAL"), GALGO("PHYS"), GALGO("FORMANT"),   /* G_ALGO8 */
-    {"HINTS", 0, 1, 0, F_LIST, L_HINTS},       /* 40 */
-    {"MULTI MASTER", 0, 2, 0, F_LIST, L_MTMST},   /* 41 (v0.77) */
+    {"HINTS", 0, 1, 0, F_LIST, LI(L_HINTS)},       /* 40 */
+    {"MULTI MASTER", 0, 2, 0, F_LIST, LI(L_MTMST)},   /* 41 (v0.77) */
     {"SEND", 0, 16383, 0, F_NUM, 0}, {"SEND", 0, 16383, 0, F_NUM, 0},   /* 42-45 (v0.82): G_MTS0 */
     {"SEND", 0, 16383, 0, F_NUM, 0}, {"SEND", 0, 16383, 0, F_NUM, 0},
     {"LINK", 0, 511, 0, F_NUM, 0}, {"", 0, 15, 0, F_NUM, 0},   /* 46-47 (v0.88): G_MFXOFF, G_SQUNIT (v0.92: COUNT IN) */
-    {"MULTI", 0, 1, 0, F_LIST, L_ONOFF},     /* 48 (v0.64): MULTI, ścieżki T1-T4 (silnik, NENG = pusta) */
+    {"MULTI", 0, 1, 0, F_LIST, LI(L_ONOFF)},     /* 48 (v0.64): MULTI, ścieżki T1-T4 (silnik, NENG = pusta) */
     {"T1", 0, NENG, ENG_MORPH, F_NUM, 0}, {"T2", 0, NENG, ENG_MOOG, F_NUM, 0}, {"T3", 0, NENG, ENG_VCO, F_NUM, 0},
     {"T4", 0, NENG, ENG_DCO, F_NUM, 0},
     {"VOL", 0, 100, 80, F_NUM, 0}, {"VOL", 0, 100, 80, F_NUM, 0}, {"VOL", 0, 100, 80, F_NUM, 0},
@@ -280,7 +288,10 @@ static const pdef_t GDEF[NGALL] = {
     {"COMP ATTACK", 0, 127, 79, F_CUSTOM, 0}, {"COMP RELEASE", 0, 127, 62, F_CUSTOM, 0},
     {"T1 CHANNEL", 1, 16, 1, F_NUM, 0}, {"T2 CHANNEL", 1, 16, 2, F_NUM, 0},   /* 68-71 (v1.0.1): G_MTCH0 */
     {"T3 CHANNEL", 1, 16, 3, F_NUM, 0}, {"T4 CHANNEL", 1, 16, 4, F_NUM, 0},
+    {"OTHER TRACKS", 0, 1, 0, F_LIST, LI(L_MTCTL)}, {"CC IN", 0, 1, 0, F_LIST, LI(L_ONOFF)},   /* 72-75 (v1.1.0): glob.gx2 */
+    {"TUNE KNOB", 0, 1, 0, F_LIST, LI(L_TUNEK)}, {"CHORD NAME", 0, 1, 0, F_LIST, LI(L_ONOFF)},
 };
+_Static_assert(NGALL <= NGLOB + NGX + NGX2, "GLO: miejsca gx2");
 _Static_assert(G_ALGO0 + G_ALGO_N == G_SQZINV, "GLO: miejsca ALGO");
 /* sekcje GLO: lista (SELECT wybiera, SEL wchodzi, HOME wraca); w sekcji gałki K1-K4, SELECT: strony po 4 */
 enum { GS_PLAY, GS_MIDI, GS_AUDIO, GS_DISPLAY, GS_ALGO, GS_SYSTEM, NGS };
@@ -290,16 +301,16 @@ static const char *const GS_HINT[NGS] = {"TUNE, TRANSPOSE, VELOCITY", "CHANNELS,
                                          "INFO, RESET, BACKUP, HINTS"};
 #define GS_N 16                          /* pozycji w sekcji (ALGO KNOB: jedna na silnik, NENG_MAX) */
 static const int8_t GS_ITEM[NGS][GS_N] = {
-    {G_TUNE, G_TRANSP, G_VEL, G_VELFIX, G_PRESS, G_ACCEL, G_TOPKEYS, -1},
-    {G_MIDICH, G_MIDIOUT, G_LOCAL, G_PROGCH, G_CLKIN, G_CLKOUT, G_MTCH0, G_MTCH0 + 1, G_MTCH0 + 2, G_MTCH0 + 3, -1},
+    {G_TUNE, G_TRANSP, G_VEL, G_VELFIX, G_PRESS, G_ACCEL, G_TOPKEYS, G_TUNEK, -1},
+    {G_MIDICH, G_MIDIOUT, G_LOCAL, G_PROGCH, G_CLKIN, G_CLKOUT, G_MTCH0, G_MTCH0 + 1, G_MTCH0 + 2, G_MTCH0 + 3, G_MTCTL, G_CCIN, -1},
     {G_SPKEQ, G_CPU2, G_MTMST, G_MCTH, G_MCRA, G_MCAT, G_MCRE, -1},
-    {G_VHOME, G_VPAGES, G_LIGHTS, G_KEYL, G_SCROFF, G_COLOR, -1},
+    {G_VHOME, G_VPAGES, G_LIGHTS, G_KEYL, G_SCROFF, G_COLOR, G_CHNAME, -1},
     {G_ALGO0, G_ALGO0 + 1, G_ALGO0 + 2, G_ALGO0 + 3, G_ALGO0 + 4, G_ALGO0 + 5, G_ALGO0 + 6, G_ALGO0 + 7, G_ALGO8, G_ALGO8 + 1, G_ALGO8 + 2, G_ALGO8 + 6, G_ALGO8 + 7, -1},   /* silniki (NENG; od
                                                                                         * dziewiątego: G_ALGO8) */
     {-1},
 };
-enum { SY_INFO, SY_RESET, SY_BACKUP, SY_CALIB, SY_HINTS, NSY };   /* SYSTEM: lista działań (SEL) */
-static const char *const SY_NAME[NSY] = {"INFO", "FACTORY RESET", "BACKUP", "CALIBRATION", "HINTS"};
+enum { SY_INFO, SY_RESET, SY_BACKUP, SY_CALIB, SY_HINTS, SY_UPDATE, NSY };   /* SYSTEM: lista działań (SEL); (v1.1.0, P39) UPDATE MODE */
+static const char *const SY_NAME[NSY] = {"INFO", "FACTORY RESET", "BACKUP", "CALIBRATION", "HINTS", "UPDATE MODE"};
 /* (v0.73) sceny MULTI (multi.md etap 7): 8 miejsc na końcu obiektu GLO (kopia zapasowa je obejmuje; starsza wersja
  * czyta tylko pola GLO): silniki T1-T4, presety (zapisane brzmienia), VOL, PAN, MUTE, wybrana ścieżka; (v0.82) za nimi
  * wysyłki REVERB / DELAY (pola G_MTS0; zapis z v0.73-v0.81 ich nie ma: 0 = jak presety) */
@@ -333,7 +344,10 @@ static struct {
     uint16_t pfs[PF_N];                  /* (v0.90) PERFORM: SYNC, START, LENGTH każdego klawisza (ogs_fx.h ogs_pf_cfg); zapis bez nich: 0 = jak dotąd */
     int16_t gx[NGX];                     /* (v0.91) pola GLO od 64 (GV); zapis bez nich: domyślne */
     uint8_t gbc[PF_NCV * 32 + PF_NCV];   /* (v0.91) PERFORM: krzywe (ogs_fx.h ogs_pf_cvd); zapis bez nich: domyślne */
+    int16_t gx2[NGX2];                   /* (v1.1.0) pola GLO od 72 (GV); zapis bez nich: domyślne */
 } glob;
+_Static_assert(sizeof glob <= 4096u - 256u, "GLO: mieści się w obiekcie pamięci (ST_PAYLOAD_MAX)");
+#define GLOB_V110 ((int32_t)__builtin_offsetof(__typeof__(glob), gx2))   /* zapis do 1.0.2: bez gx2 */
 #define GLOB_V90 ((int32_t)__builtin_offsetof(__typeof__(glob), gx))   /* zapis do v0.90: bez gx */
 static inline uint32_t mt_ch(int32_t t) { return (uint32_t)GV(G_MTCH0 + t) - 1u; }   /* (v1.0.1) kanał MIDI ścieżki t (0-15) */
 #define GLOB_V91C ((int32_t)__builtin_offsetof(__typeof__(glob), gbc) + PF_NCV * 32 + PF_NCV)   /* z krzywymi PERFORM */
@@ -580,10 +594,22 @@ static void mt_lim_on(int32_t t, int32_t note)   /* przed note on: miejsce dla n
     mt_hn++;
 }
 static void mt_kick(int32_t t, int32_t note);
+static char ch_txt[16];                      /* (v1.1.0) CHORD NAME: napis na HOME (chord_name_upd) */
+static volatile uint8_t cc_req[4];          /* (v1.1.0, P7) CC 21-24 z przerwania: 0x80 | wartość, UI wpisuje (cc_knob) */
+static float mt_cb[MT_N], mt_cw[MT_N], mt_cp[MT_N];   /* (v1.1.0, P6) bend, wheel, nacisk niewybranych ścieżek (G_MTCTL) */
 static void mt_midi(int32_t t, uint32_t ty, uint32_t d1, uint32_t d2)   /* przerwanie audio: nuta ścieżki t (nie wybranej) */
 {
-    if (ty != 0x90u && ty != 0x80u)
+    if (ty != 0x90u && ty != 0x80u) {
+        if (!GV(G_MTCTL))                    /* (v1.1.0) OTHER TRACKS + BEND, WHEEL: też sterowniki z kanału ścieżki */
+            return;
+        if (ty == 0xE0u)
+            mt_cb[t] = (float)((int32_t)(d2 << 7 | d1) - 8192) * (1.0f / 8192.0f);
+        else if (ty == 0xB0u && d1 == 1u)
+            mt_cw[t] = (float)d2 / 127.0f;
+        else if (ty == 0xD0u || ty == 0xA0u)
+            mt_cp[t] = (float)(ty == 0xD0u ? d1 : d2) / 127.0f;
         return;
+    }
     mt_at(t);
     if (ty == 0x90u && d2) {
         mt_lim_on(t, (int32_t)d1);
@@ -744,7 +770,7 @@ static void mt_mix(float *l, float *r, uint32_t n)   /* przerwanie audio: blok w
         mt_pr[f] = pr;
     }
     for (j = 0; j < MT_N; j++) {
-        float g, gt, *xl = tl, *xr = tr;
+        float g, gt, *xl = tl, *xr = tr, sb = 0.0f, sw = 0.0f, sp = 0.0f;
         uint32_t from = 0, k;
         t = mini < 0 ? j : j == 0 ? mini : j <= mini ? j - 1 : j;   /* (v0.76) z wysyłkami: MINI pierwsza, obok zadanie */
         if (t == f || mt_eng[t] >= NENG)
@@ -762,6 +788,14 @@ static void mt_mix(float *l, float *r, uint32_t n)   /* przerwanie audio: blok w
             continue;
         }
         ogs_overload = (uint8_t)(mt_ovl >> t & 1u);   /* przeciążenie: ta ścieżka też zrzuca (silnik zeruje znacznik) */
+        if (GV(G_MTCTL)) {                   /* (v1.1.0, P6) sterowniki tej ścieżki na czas jej bloku (ctl wybranej: niżej z powrotem) */
+            sb = ctl.bend;
+            sw = ctl.wheel;
+            sp = ctl.press;
+            ctl.bend = mt_cb[t];
+            ctl.wheel = mt_cw[t];
+            ctl.press = mt_cp[t];
+        }
         if (mt_fx_live(t)) {                 /* (v0.83) z efektami: do swojego bufora */
             xl = ogs_fx_track_buf((uint32_t)t);
             xr = xl + FX_BUS_N;
@@ -778,6 +812,11 @@ static void mt_mix(float *l, float *r, uint32_t n)   /* przerwanie audio: blok w
             }
         if (n > from)
             ENG[mt_eng[t]].render(xl + from, xr + from, n - from);
+        if (GV(G_MTCTL)) {
+            ctl.bend = sb;
+            ctl.wheel = sw;
+            ctl.press = sp;
+        }
         if (!ogs_overload)
             mt_ovl &= ~(1u << t);
         if (!(dm >> t & 1u))
@@ -884,7 +923,7 @@ static int data_write_q(uint32_t off, const void *p, uint32_t n) { out_mute(); r
 
 static void eng_on(const engine_t *e, int32_t key, float v);   /* (v0.39) nuty do silnika: CHORD, SUB (niżej) */
 static void eng_on_m(const engine_t *e, int32_t key, float v, uint32_t m);   /* ... z podanym akordem (1: bez) */
-static uint32_t chord_now(void);             /* akord brzmienia, które gra (bit k = +k półtonów) */
+static uint32_t chord_at(int32_t key);       /* akord brzmienia, które gra, na klawiszu key (bit k = +k półtonów; v1.1.0: KEY 3 / 7) */
 static void eng_off(const engine_t *e, int32_t key);
 #include "ogs_seq.c"
 
@@ -923,10 +962,11 @@ static float dk_g = 1.0f, dk_epk;            /* dk_epk: szczyt wyjścia silnika 
  * zagrał (zmiana CHORD przy trzymanym klawiszu nie zostawia wiszących nut). CHORD OFF: jak do v0.38 (podwójny note on
  * i jeden note off = cisza). */
 enum { CH_OFF, CH_MIN7, CH_MIN9, CH_MAJ7, CH_MAJ9, CH_SUS2, CH_SUS4, CH_MIN, CH_MAJ, CH_DOM7, CH_MIN11, CH_OCT,
-       CH_FIFTH, CH_LEARN, NCHORD };
+       CH_FIFTH, CH_LEARN, CH_KEY3, CH_KEY7, NCHORD };   /* (v1.1.0) KEY 3 / KEY 7: ze skali wzoru (SEQ > KEY; OFF: C-dur) */
+_Static_assert(NCHORD <= 16, "CHORD: rodzaj w bitach 0-3 dodatku [0], VOICING w bitach 4-5 (v1.1.0)");
 static const char *const CHORD_NAME[NCHORD] = {"OFF", "MIN7", "MIN9", "MAJ7", "MAJ9", "SUS2", "SUS4", "MIN", "MAJ", "7",
-                                               "MIN11", "OCT", "FIFTH", "LEARNED"};
-static const uint32_t CHORD_IV[NCHORD - 1] = {   /* bit k = +k półtonów (bit 0: klawisz) */
+                                               "MIN11", "OCT", "FIFTH", "LEARNED", "KEY 3", "KEY 7"};
+static const uint32_t CHORD_IV[CH_LEARN] = {   /* bit k = +k półtonów (bit 0: klawisz) */
     1u, 1u | 1u << 3 | 1u << 7 | 1u << 10, 1u | 1u << 3 | 1u << 7 | 1u << 10 | 1u << 14, 1u | 1u << 4 | 1u << 7 | 1u << 11,
     1u | 1u << 4 | 1u << 7 | 1u << 11 | 1u << 14, 1u | 1u << 2 | 1u << 7, 1u | 1u << 5 | 1u << 7, 1u | 1u << 3 | 1u << 7,
     1u | 1u << 4 | 1u << 7, 1u | 1u << 4 | 1u << 7 | 1u << 10, 1u | 1u << 3 | 1u << 7 | 1u << 10 | 1u << 14 | 1u << 17,
@@ -936,16 +976,44 @@ static uint8_t nt_cnt[128];                  /* ile klawiszy gra tę nutę */
 static uint32_t nt_key[128];                 /* klawisz: akord, z którym zagrał (0: nie gra) */
 static const uint8_t *xt_play(void);         /* dodatki presetu silnika, który gra (niżej) */
 #define XT_SYNC 7                            /* (v0.46) dodatki presetu [7..9]: SYNC efektów (maska po rodzaju, fx_sync_on) */
-static uint32_t chord_mask(const uint8_t *x)
+/* (v1.1.0) KEY 3 / KEY 7: od klawisza w górę po skali wzoru (bez skali: C-dur) druga i czwarta (i szósta) nuta skali =
+ * trójdźwięk / septyma z tonacji; klawisz spoza skali: to samo w górę od niego */
+static uint32_t chord_key(uint32_t key, int seventh)
 {
-    uint32_t t = x[0], m = 1u, k;
+    uint32_t sc = sq_scale(), m = 1u, n = 0, k;
+    if (!sc)
+        sc = 0xAB5u;
+    for (k = 1; k < 24u && n < (seventh ? 6u : 4u); k++)
+        if (sc >> ((key + k) % 12u) & 1u && (++n & 1u) == 0u)
+            m |= 1u << k;
+    return m;
+}
+/* (v1.1.0) VOICING (K2 strony CHORD, bity 4-5 dodatku [0]; stare presety 0 = CLOSE): OPEN = druga nuta oktawę wyżej,
+ * INV 1 / INV 2 = najniższa / dwie najniższe oktawę wyżej */
+static uint32_t chord_voice(uint32_t m, uint32_t vo)
+{
+    uint32_t k, b;
+    for (k = 0; vo && (m & (m - 1u)) && k < (vo == 3u ? 2u : 1u); k++) {
+        b = vo == 1u ? (m & (m - 1u)) & (~(m & (m - 1u)) + 1u) : m & (~m + 1u);
+        if (b >= 1u << 20)
+            break;
+        m = (m & ~b) | b << 12;
+    }
+    return m;
+}
+static uint32_t chord_mask(const uint8_t *x, int32_t key)
+{
+    uint32_t t = x[0] & 15u, m = 1u, k;
     if (t == CH_LEARN) {
         for (k = 1; k <= CHORD_LN && x[k]; k++)
             if (x[k] < 32u)
                 m |= 1u << x[k];
-        return m;
+    } else if (t == CH_KEY3 || t == CH_KEY7) {
+        m = chord_key((uint32_t)key, t == CH_KEY7);
+    } else if (t && t < CH_LEARN) {
+        m = CHORD_IV[t];
     }
-    return t && t < CH_LEARN ? CHORD_IV[t] : 1u;
+    return chord_voice(m, x[0] >> 4 & 3u);
 }
 static void sub_track(void)                  /* SUB: najniższa brzmiąca nuta (z GLO TUNE) */
 {
@@ -980,8 +1048,8 @@ static void eng_off(const engine_t *e, int32_t key)
     nt_key[key & 127] = 0;
     sub_track();
 }
-static uint32_t chord_now(void) { return eng_play < NENG && mt_drum(eng_play) ? 1u : chord_mask(xt_play()); }   /* (v0.92) perkusja: bez CHORD */
-static void eng_on(const engine_t *e, int32_t key, float v) { eng_on_m(e, key, v, chord_now()); }
+static uint32_t chord_at(int32_t key) { return eng_play < NENG && mt_drum(eng_play) ? 1u : chord_mask(xt_play(), key); }   /* (v0.92) perkusja: bez CHORD */
+static void eng_on(const engine_t *e, int32_t key, float v) { eng_on_m(e, key, v, chord_at(key)); }
 static void eng_on_m(const engine_t *e, int32_t key, float v, uint32_t m)
 {
     uint32_t old = nt_key[key & 127], k;
@@ -1101,6 +1169,8 @@ static void events_in(void)              /* przerwanie audio: nuty z panelu i z 
             ctl.bend = (float)((int32_t)(d2 << 7 | d1) - 8192) * (1.0f / 8192.0f);
         else if (ty == 0xB0u && d1 == 1u)
             ctl.wheel = (float)d2 / 127.0f;
+        else if (ty == 0xB0u && d1 >= 21u && d1 <= 24u && GV(G_CCIN))   /* (v1.1.0, P7) CC IN: K1-K4 strony (cc_knob w UI) */
+            cc_req[d1 - 21u] = (uint8_t)(0x80u | d2);
         else if (ty == 0xD0u || ty == 0xA0u)
             press_midi = (float)(ty == 0xD0u ? d1 : d2) / 127.0f;
         else if (ty == 0xB0u && (d1 == 120u || d1 == 123u)) {
@@ -1381,7 +1451,7 @@ static void def_text(const pdef_t *d, int32_t id, int32_t v, char *b)
         c.p[d - &GDEF[G_MCTH]] = (uint8_t)v;
         fx_text(&c, (int32_t)(d - &GDEF[G_MCTH]), b);
     } else if (d->fmt == F_LIST)
-        text_cat(b, d->list[v - d->lo]);
+        text_cat(b, PLIST(d)[v - d->lo]);
     else if (d == &GDEF[G_VELFIX] && !v)
         text_cat(b, "OFF");
     else if (d >= GDEF && d < GDEF + NGLOB && algo_eng((int32_t)(d - GDEF)) >= 0) {   /* ALGO KNOB: nazwa parametru */
@@ -3090,9 +3160,21 @@ static void rec_apply(const uint8_t *r)  /* parametry z rekordu do bieżącego s
     }
 }
 
+/* (v1.1.0, P33) SEL trzymany + PRESETS: nowe brzmienie, ten sam łańcuch efektów (sloty, gałki ponad 8, SYNC, ogon EQ);
+ * ustawia tylko preset_turn, zużywa load_preset (też po przygaszeniu: pend_preset) */
+static uint8_t keep_fx;
 static void load_preset(int32_t i)
 {
     int32_t e = preset_eng(i);
+    const int keep = keep_fx;
+    fx_slot_t kc[FX_SLOTS];
+    uint8_t kx[FX_NX], ks[3];
+    keep_fx = 0;
+    if (keep) {
+        memcpy(kc, fxc.cur[set.eng], sizeof kc);
+        memcpy(kx, fxc.x[set.eng], sizeof kx);
+        memcpy(ks, xtc[set.eng] + XT_SYNC, sizeof ks);
+    }
     engine_switch(e);
     if (i >= ID_XF) {
         E->load(XF[i - ID_XF].base);         /* (zmiany niżej, po CUR) */
@@ -3147,6 +3229,13 @@ static void load_preset(int32_t i)
     xt_dirty = 1;
     set.edited[e] = 0;
     snap_take(e);
+    if (keep) {                              /* (v1.1.0) łańcuch sprzed zmiany: brzmienie zmienione względem presetu (SAVE) */
+        memcpy(fxc.cur[e], kc, sizeof kc);
+        memcpy(fxc.x[e], kx, sizeof kx);
+        memcpy(xtc[e] + XT_SYNC, ks, sizeof ks);
+        eq_pack(e);
+        set.edited[e] = (uint8_t)snap_differs(e);
+    }
     set_dirty = 1;
     {                                        /* (v0.82) MULTI: nowy preset ścieżki: wysyłki znowu od jego MIX */
         int32_t t;
@@ -3841,8 +3930,9 @@ static void store_load(void)             /* wszystko z pamięci: przy starcie i 
             gb_def(glob.gbc);
         ogs_pf_cvd = glob.gbc;
     }
-    for (b = NGLOB; b < NGALL; b++)          /* (v0.91) pola ponad 64: zapis bez nich albo złe = domyślne */
-        if (!ok || k < GLOB_V90 + 2 * NGX || GV(b) < GDEF[b].lo || GV(b) > GDEF[b].hi)   /* (zapis v0.90 ma 2 B wyrównania) */
+    for (b = NGLOB; b < NGALL; b++)          /* (v0.91) pola ponad 64: zapis bez nich albo złe = domyślne; (v1.1.0) gx2 */
+        if (!ok || (b < NGLOB + NGX ? k < GLOB_V90 + 2 * NGX : k < GLOB_V110 + 2 * NGX2)   /* (zapis v0.90 ma 2 B wyrównania) */
+            || GV(b) < GDEF[b].lo || GV(b) > GDEF[b].hi)
             GV(b) = GDEF[b].def;
     glob.magic = GLOB_MAGIC;
     glob_apply();
@@ -4615,6 +4705,7 @@ __attribute__((used, visibility("default"))) int32_t ogs_eng(void) { return set.
 __attribute__((used, visibility("default"))) void ogs_west_hq(int32_t on) { ogs_west_os = on != 0; }   /* (v0.54) testy:
                                                                                                     * LPG x2 (A / B) */
 __attribute__((used, visibility("default"))) uint32_t ogs_midi_non(void) { return midi_non; }   /* testy: licznik 0x19 */
+__attribute__((used, visibility("default"))) const char *ogs_chtxt(void) { return ch_txt; }   /* (v1.1.0) testy: CHORD NAME */
 __attribute__((used, visibility("default"))) int32_t ogs_nt(int32_t n)   /* testy (v0.39): ile klawiszy gra nutę n; -1: SUB */
 {
     return n >= 0 && n < 128 ? nt_cnt[n] : (int32_t)(ogs_fx_sub_gate ? ogs_fx_sub_semi * 100.0f : -1.0f);
@@ -4675,7 +4766,8 @@ __attribute__((used, visibility("default"))) int32_t ogs_sq(int32_t w)
             n += sqp.n[i].vel != 0;
         return n;
     }
-    return w == 0 ? sq.play : w == 1 ? (int32_t)sq.pos : w == 3 ? sqg.arp_on : w == 4 ? ar.nl : w == 5 ? sq.rec
+    return w == 0 ? sq.play : w == 1 ? (int32_t)sq.pos : w == -2 ? (int32_t)sq_scale() : w == 6 ? sqp.rsv[0] | sqp.rsv[1] << 4 | sqp.rsv[2] << 8   /* (v1.1.0) */
+         : w == 3 ? sqg.arp_on : w == 4 ? ar.nl : w == 5 ? sq.rec
          : w == 7 ? sqp.bpm10 : w == 8 ? sqp.grid : w == 9 ? sqg.pat : w == 10 ? sqp_dirty : w == 11 ? sqp.bars : w >= 12 ? ui_sq(w) : -1;
 }
 __attribute__((used, visibility("default"))) int32_t ogs_sqn(int32_t i, int32_t w)   /* nuta i: t, len, note, vel, fl, chance */
@@ -5004,6 +5096,17 @@ static int text_eq(const char *a, const char *b)
 
 /* krok gałki (d: kliki po przyspieszeniu): parametr z własnym tekstem (czasy, podziały taktu, Hz) przeskakuje wartości,
  * które na ekranie wyglądają tak samo — każdy klik coś zmienia (LFO SYNC: 8 BARS -> 4 BARS jednym klikiem) */
+/* (v1.1.0, P9) GLO > PLAY > TUNE KNOB SEMITONES: strojenie w centach (MINI OSC 2-4 TUNE) płynnie do +-1 półtonu, dalej co
+ * półton; zapisane wartości bez zmian (stare presety grają tak samo, np. +350 zostaje, kręcenie idzie do 400 / 300) */
+static int32_t tune_semi(int32_t v, int32_t d)
+{
+    const int32_t t = v + d, f = v >= 0 ? v / 100 * 100 : -((-v + 99) / 100 * 100);   /* f: v w dół do pełnego półtonu */
+    if (t >= -100 && t <= 100)
+        return t;
+    if (v > -100 && v < 100)                     /* z płynnej strefy: najpierw na +-1 półton */
+        return t > 0 ? 100 : -100;
+    return d > 0 ? f + 100 : (f == v ? v - 100 : f);
+}
 static int32_t param_step(int32_t id, int32_t d)
 {
     const pdef_t *df = E->def(id);
@@ -5011,6 +5114,8 @@ static int32_t param_step(int32_t id, int32_t d)
     char a[24], b[24];
     if (E->step && (n = E->step(id, v, d)) >= 0)   /* v0.35: lista w innej kolejności niż numery (WAVE TABLE) */
         return n;
+    if (GV(G_TUNEK) && set.eng == ENG_MOOG && (id == P_O2D || id == P_O3D || id == P_O4D))
+        return clamp(tune_semi(v, d), df->lo, df->hi);
     n = d > 0 ? d : -d;
     if (df->fmt != F_CUSTOM)
         return v + d;
@@ -6144,28 +6249,60 @@ static void fx_mode(void)                /* SEL krótko: włącza / wyłącza (r
  * (v0.90, decyzje użytkownika 2026-11-03; docs/sekwencer.md na górze) SEL + OP1-4 = ścieżka (było SEQ + OP), NOTES: świecą klawisze nut
  * kroku pod kursorem, SEL + K3 długość co tick, SEL + K4 UNDO / REDO, SEL + ALGO długość co GRID,
  * K1 znowu po wysokości (ta sama wysokość: od lewej), VEL RANDOM i QUANTIZE w karcie nuty, sceny MULTI: HOME na głównym ekranie. */
-enum { SQ_NOTES, SQ_PATTERN, SQ_FEEL, SQ_RACK, SQ_OPT, SQ_REC, SQ_NPG };   /* (v0.57) RACK: tylko silniki perkusji; (v0.88) OPT: strona ustawień;
+enum { SQ_NOTES, SQ_PATTERN, SQ_FEEL, SQ_RACK, SQ_OPT, SQ_REC, SQ_KEY, SQ_NPG };   /* (v1.1.0) KEY: tonacja wzoru (za RECORD) */   /* (v0.57) RACK: tylko silniki perkusji; (v0.88) OPT: strona ustawień;
                                                                              * (v0.92) REC: strona nagrywania (REC trzymany) */
-static const char *const SQ_PGNAME[SQ_NPG] = {"NOTES", "PATTERN", "FEEL", "RACK", "OPTIONS", "RECORD"};
+static const char *const SQ_PGNAME[SQ_NPG] = {"NOTES", "PATTERN", "FEEL", "RACK", "OPTIONS", "RECORD", "KEY"};
+/* (v1.1.0, P14) strona KEY (SELECT za RECORD): K1 KEY, K2 SCALE (OFF = bez tonacji, jak dotąd), K3 SNAP (klawisze i MIDI w skali) */
+static const char *const L_PC12[12] = {"C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"};
+static const char *const L_SCALE[12] = {"OFF", "MAJOR", "MINOR", "DORIAN", "PHRYGIAN", "LYDIAN", "MIXOLYDIAN", "HARM MINOR",
+                                        "MEL MINOR", "PENTA MAJOR", "PENTA MINOR", "BLUES"};
+static const pdef_t KYDEF[4] = {{"KEY", 0, 11, 0, F_LIST, LI(L_PC12)}, {"SCALE", 0, 11, 0, F_LIST, LI(L_SCALE)},
+                                {"SNAP", 0, 1, 0, F_LIST, LI(L_ONOFF)}, {"", 0, 0, 0, F_NONE, 0}};
 static const int8_t SQ_OPTG[4] = {-1, G_SQVEL, G_SQK1INV, G_SQZINV};   /* (v0.88) OPTIONS: pola GLO pod K1-K4; (v0.90) K1 pusta: SEL + ALGO już bez wyboru */
 static const char *const L_CLICK[] = {"OFF", "REC", "ON"};
 /* (v0.92, decyzja użytkownika 2026-11-04) REC trzymany: METRONOME (klik wzoru, jak FEEL CLICK), COUNT IN (odliczanie przed nagraniem
- * z PLAY, innym klikiem), COUNT LEN, QUANTIZE (nagrane nuty na końcu: OFF albo wartość; w FEEL SEL: OFF <-> grid wzoru) */
-static const char *const L_CINL[] = {"1 BEAT", "2 BEATS", "1 BAR", "2 BARS"};
+ * z PLAY, innym klikiem), QUANTIZE (nagrane nuty na końcu: OFF albo wartość; w FEEL SEL: OFF <-> grid wzoru).
+ * (v1.1.0, decyzja użytkownika 2026-11-05) K1 BPM (ten sam co PATTERN), K2 METRONOME, K3 COUNT IN z długością na jednej gałce
+ * (OFF, 1 BEAT .. 2 BARS; zapis bez zmian: GLO 47 = ON | LEN, OFF zostawia długość), K4 QUANTIZE; klawisze = TAP TEMPO (rc_tap) */
+static const char *const L_CINL[] = {"OFF", "1 BEAT", "2 BEATS", "1 BAR", "2 BARS"};
 static const char *const L_RECQ[] = {"OFF", "1/4", "1/8", "1/8T", "1/16", "1/16T", "1/32"};
-static const pdef_t RCDEF[4] = {{"METRONOME", 0, 2, 0, F_LIST, L_CLICK}, {"COUNT IN", 0, 1, 0, F_LIST, L_ONOFF},
-                                {"COUNT LEN", 0, 3, 2, F_LIST, L_CINL}, {"QUANTIZE", 0, 6, 0, F_LIST, L_RECQ}};
+static const pdef_t RCDEF[4] = {{"BPM", 40, 300, 120, F_NUM, 0}, {"METRONOME", 0, 2, 0, F_LIST, LI(L_CLICK)},
+                                {"COUNT IN", 0, 4, 0, F_LIST, LI(L_CINL)}, {"QUANTIZE", 0, 6, 0, F_LIST, LI(L_RECQ)}};
 static int32_t rc_cin(void) { return glob.g[G_SQUNIT] >= 8 ? glob.g[G_SQUNIT] & 7 : 4; }   /* bit 0 ON, bity 1-2 LEN (domyślnie 1 BAR) */
 static int32_t rc_get(int32_t k)
 {
-    return k == 0 ? sqp.click : k == 1 ? rc_cin() & 1 : k == 2 ? rc_cin() >> 1 : sqp.recq;
+    return k == 0 ? (sqp.bpm10 + 5) / 10 : k == 1 ? sqp.click : k == 2 ? (rc_cin() & 1 ? (rc_cin() >> 1) + 1 : 0) : sqp.recq;
+}
+static void sq_changed(void);
+/* (v1.1.0) TAP TEMPO na stronie RECORD: klawisz = stuknięcie z klikiem metronomu (nie nuta); BPM = średnia z ostatnich (do 4)
+ * odstępów, co 1 BPM, 40-300; po 2 s przerwy liczenie od nowa */
+static void rc_tap(void)
+{
+    static uint32_t at, n, gap[4];
+    const uint32_t now = plat_ms(), d = now - at;
+    uint32_t i, m, sum = 0;
+    sq.click_cin = 0;                            /* klik jak „raz” metronomu (sq_click_mix) */
+    sq.click_inc = 0.0567f;
+    sq.click_at = 0;
+    at = now;
+    if (d > 2000u || d < 150u) {                 /* pierwsze stuknięcie (albo drgnięcie klawisza): od nowa */
+        n = 0;
+        return;
+    }
+    gap[n++ & 3u] = d;
+    m = n < 4u ? n : 4u;
+    for (i = 0; i < m; i++)
+        sum += gap[i];
+    sqp.bpm10 = (uint16_t)(clamp((int32_t)((60000u * m + sum / 2u) / sum), 40, 300) * 10);
+    sq_changed();
+    ui.redraw = 1;
 }
 static void pt_rescan(void);
 static const pdef_t SQDEF[2][4] = {
     {{"PATTERN", 1, SQ_NPAT, 1, F_NUM, 0}, {"STEPS", 1, SQ_MAXBARS * 16, 16, F_NUM, 0}, {"BPM", 40, 300, 120, F_NUM, 0},
      {"SWING", 50, 75, 50, F_NUM, 0}},
     {{"HUMANIZE", 0, 100, 0, F_NUM, 0}, {"VEL RANDOM", 0, 100, 0, F_NUM, 0}, {"GATE", 25, 200, 100, F_NUM, 0},
-     {"CLICK", 0, 2, 0, F_LIST, L_CLICK}},
+     {"CLICK", 0, 2, 0, F_LIST, LI(L_CLICK)}},
 };
 enum { ST_QUANT, ST_DOUBLE, ST_CLEAR, ST_CLRALL, ST_MOVE, ST_ZINV, ST_K1INV, NST };   /* (v0.66.1) CLEAR: wybrana ścieżka */
 static const char *const ST_NAME[NST] = {"QUANTIZE NOTES", "DOUBLE LENGTH", "CLEAR PATTERN", "CLEAR ALL TRACKS", "MOVE HERE FROM",
@@ -6857,7 +6994,7 @@ static void sq_open(uint32_t pg)                 /* strona sekcji SEQ */
     glob_commit();
     sq_hint_until = pg == SQ_NOTES && hints() ? plat_ms() + 2500u : 0;
     ui.sq_pg = (uint8_t)pg;
-    if (pg == SQ_PATTERN || pg == SQ_FEEL || pg == SQ_OPT || pg == SQ_REC)
+    if (pg == SQ_PATTERN || pg == SQ_FEEL || pg == SQ_OPT || pg == SQ_REC || pg == SQ_KEY)
         ui.sq_set = (uint8_t)pg;
     else if (pg == SQ_NOTES || pg == SQ_RACK)
         ui.sq_rk = (uint8_t)(pg == SQ_RACK);
@@ -6898,6 +7035,10 @@ static void sq_set_turn(int32_t e)               /* SELECT w ustawieniach: PATTE
     else if (e > 0 && ui.sq_pg == SQ_FEEL)
         sq_open(SQ_OPT);
     else if (e > 0 && ui.sq_pg == SQ_OPT)
+        sq_open(SQ_REC);
+    else if (e > 0 && ui.sq_pg == SQ_REC)        /* (v1.1.0) KEY za RECORD */
+        sq_open(SQ_KEY);
+    else if (e < 0 && ui.sq_pg == SQ_KEY)
         sq_open(SQ_REC);
     else if (e < 0 && ui.sq_pg == SQ_REC)
         sq_open(SQ_OPT);
@@ -7311,16 +7452,33 @@ static void sq_knob(uint32_t k, int32_t e)
         sq_changed();
         return;
     }
-    if (ui.sq_pg == SQ_REC) {                    /* (v0.92) RECORD */
-        const int32_t v = clamp(rc_get((int32_t)k) + (e > 0 ? 1 : -1), RCDEF[k].lo, RCDEF[k].hi);
+    if (ui.sq_pg == SQ_KEY) {                    /* (v1.1.0) KEY, SCALE, SNAP wzoru; SNAP / inna skala przy SNAP: nuty od nowa */
+        if (k < 3u) {
+            const int32_t v = clamp((int32_t)sqp.rsv[k] + (e > 0 ? 1 : -1), KYDEF[k].lo, KYDEF[k].hi);
+            if (v != sqp.rsv[k]) {
+                if (sqp.rsv[SQ_SNP_] || k == SQ_SNP_)
+                    ev_push(EV_ALL_OFF);     /* (puszczenie klawisza po zmianie SNAP trafiłoby w inną nutę) */
+                sqp.rsv[k] = (uint8_t)v;
+                sq_changed();
+            }
+        }
+        return;
+    }
+    if (ui.sq_pg == SQ_REC) {                    /* (v0.92) RECORD; (v1.1.0) K1 BPM, K3 COUNT IN z długością */
+        const int32_t v = clamp(rc_get((int32_t)k) + (k == 0 ? accel(EN_K1, e, 260) : e > 0 ? 1 : -1), RCDEF[k].lo, RCDEF[k].hi);
         if (k == 0) {
+            if (v == rc_get(0))
+                return;
+            sqp.bpm10 = (uint16_t)(v * 10);
+            sq_changed();
+        } else if (k == 1) {
             sqp.click = (uint8_t)v;
             sq_changed();
         } else if (k == 3) {
             sqp.recq = (uint8_t)v;
             sq_changed();
         } else {
-            const int32_t c = k == 1 ? (rc_cin() & 6) | v : (rc_cin() & 1) | v << 1;
+            const int32_t c = v ? 1 | (v - 1) << 1 : rc_cin() & 6;   /* OFF: długość zostaje */
             glob.g[G_SQUNIT] = (int16_t)(8 | c);
             glob_dirty = 1;
         }
@@ -7600,7 +7758,7 @@ static void sqn_ok(void)                         /* karta: SEL (na wszystkich ed
 static void sq_sel_short(void)                   /* SEL krótko: NOTES = GLIDE, PATTERN / RACK = narzędzia, FEEL = REC QUANTIZE */
 {
     uint32_t i, all = 1;
-    if (ui.sq_pg == SQ_OPT || ui.sq_pg == SQ_REC)   /* (v0.88) OPTIONS, (v0.92) RECORD: same gałki */
+    if (ui.sq_pg == SQ_OPT || ui.sq_pg == SQ_REC || ui.sq_pg == SQ_KEY)   /* (v0.88) OPTIONS, (v0.92) RECORD, (v1.1.0) KEY: same gałki */
         return;
     if (ui.sq_pg == SQ_PATTERN || ui.sq_pg == SQ_RACK) {
         ui.page = V_SQT;
@@ -8254,6 +8412,25 @@ static void knob_turn(uint32_t k, int32_t e)
     set_param(id, param_step(id, accel(EN_K1 + k, e, E->def(id)->hi - E->def(id)->lo)));
 }
 
+/* (v1.1.0, P7) GLO > MIDI > CC IN: CC 21-24 = K1-K4 strony silnika (z HOME: strona szybka, jak gałki), wartość wprost:
+ * 0-127 na cały zakres parametru. Inne ekrany: nic. */
+static void cc_knob(uint32_t k, uint32_t v)
+{
+    int32_t id;
+    const pdef_t *d;
+    if (ui.page == V_HOME && !mt_ui())
+        quick_show();
+    if (ui.page < 0 || ui.page == PG_CHORD || ui.gest || (id = knob_id((int32_t)k)) < 0)
+        return;
+    if (ui.quick)
+        ui.quick_at = plat_ms();
+    d = E->def(id);
+    set_param(id, d->lo + ((d->hi - d->lo) * (int32_t)v + 63) / 127);
+    ui.knob = (int32_t)k;
+    ui.knob_at = plat_ms();
+    ui.redraw = 1;
+}
+
 static void algo_turn(int32_t e)         /* ALGO: parametr silnika (MOOG: CUTOFF, DX7: ALGORITHM) */
 {
     char t[16];
@@ -8493,6 +8670,8 @@ static void save_ok(void)               /* SEL w oknach: zatwierdza (HOME anuluj
             app_say("RESET", W[ui.reset_opt]);
         }
         ui.redraw = 1;
+    } else if (ui.page == V_NOTE && ui.note == SY_UPDATE) {   /* (v1.1.0, P39) SEL drugi raz: tryb aktualizacji (jak REC przy włączaniu) */
+        plat_uboot();
     } else if (ui.page == V_INFO || ui.page == V_NOTE) {
         ui.page = V_GLO;
         ui.redraw = 1;
@@ -8637,6 +8816,9 @@ static void preset_turn(int32_t e, int all)   /* PRESETS: w silniku; all (HOME t
         all = 0;
     if (ui.page == V_HOME && mt_ui() && ui.sel_hold)   /* (v0.86) SEL trzymany + PRESETS: bez listy silników i MUTE */
         ui.sel_used = 1;
+    if (ui.sel_hold)                         /* (v1.1.0, P33) SEL trzymany: efekty zostają (load_preset) */
+        ui.sel_used = 1;
+    keep_fx = (uint8_t)(ui.sel_hold != 0);
     if (ui.page == V_HOME && mt_ui() && glob.g[G_MT0 + mt_at_cur()] >= NENG)   /* (v0.85) pusta ścieżka: bez brzmienia */
         return;
     if (ui.page == V_ENGP) {                 /* okno ENGINE: PRESETS = brzmienie tego silnika (gra od razu, okno zostaje) */
@@ -9255,7 +9437,7 @@ static const char *mod_name(int32_t j)   /* nazwa celu: matryca — z listy DEST
     if (a0 >= 0) {
         const pdef_t *dd = E->def(a0 - 1);      /* wiersz: SOURCE, DEST, AMOUNT, VIA */
         if (dd->list && mod_keys[j] >= dd->lo && mod_keys[j] <= dd->hi)
-            return dd->list[mod_keys[j] - dd->lo];
+            return PLIST(dd)[mod_keys[j] - dd->lo];
         return E->def(mod_ids[j])->name;
     }
     a = E->gest(ui.mod_src, mod_ids[j], GEST_ASK, 0);
@@ -9332,7 +9514,9 @@ static void mod_knob(uint32_t k, int32_t e)   /* K1-K4: ilość modulacji celu (
 }
 
 /* (v0.45) strona CHORD: K1 rodzaj, SEL = LEARN (trzymane klawisze FM1: najniższy = klawisz, reszta nad nim, do 6) */
-static const pdef_t CH_DEF = {"TYPE", 0, NCHORD - 1, 0, F_LIST, CHORD_NAME};
+static const pdef_t CH_DEF = {"TYPE", 0, NCHORD - 1, 0, F_LIST, LI(CHORD_NAME)};
+static const char *const L_VOICE[] = {"CLOSE", "OPEN", "INV 1", "INV 2"};
+static const pdef_t CV_DEF = {"VOICING", 0, 3, 0, F_LIST, LI(L_VOICE)};   /* (v1.1.0) K2 strony CHORD */
 static void chord_set(const uint8_t *x)
 {
     uint32_t i;
@@ -9346,17 +9530,20 @@ static void chord_turn(uint32_t k, int32_t e)
 {
     uint8_t x[CHORD_LN + 1];
     uint32_t i;
-    if (k)
+    if (k > 1u)
         return;
     for (i = 0; i <= CHORD_LN; i++)
         x[i] = xtc[set.eng][i];
-    x[0] = (uint8_t)clamp((int32_t)(x[0] % NCHORD) + (e > 0 ? 1 : -1), 0, NCHORD - 1);
+    if (k == 1)                              /* (v1.1.0) K2: VOICING (bity 4-5) */
+        x[0] = (uint8_t)((x[0] & 15u) | (uint32_t)clamp((int32_t)(x[0] >> 4 & 3u) + (e > 0 ? 1 : -1), 0, 3) << 4);
+    else
+        x[0] = (uint8_t)((x[0] & 0x30u) | (uint32_t)clamp((int32_t)(x[0] & 15u) + (e > 0 ? 1 : -1), 0, NCHORD - 1));
     chord_set(x);
 }
 static void chord_learn(void)
 {
     uint32_t keys = touch_keys(), k, n = 0, lo = 32;
-    uint8_t x[CHORD_LN + 1] = {CH_LEARN};
+    uint8_t x[CHORD_LN + 1] = {(uint8_t)(CH_LEARN | (xtc[set.eng][0] & 0x30u))};   /* (v1.1.0) VOICING zostaje */
     for (k = 0; k < NKEYS; k++)
         if (keys >> k & 1u) {
             if (lo == 32u)
@@ -9482,6 +9669,11 @@ static void input(void)
             eaten |= bit;                        /* NOTES: SEL trzymany + klawisz = nuta w kursorze (dodaj / usuń); (v0.90) w MULTI OP1-4: ścieżka (wyżej) */
             sq_toggle((uint32_t)note, key_vel(k));
             ui.sel_used = 1;
+            continue;
+        }
+        if (ui.page == V_SEQ && ui.sq_pg == SQ_REC && !(sq.rec && sq.play) && (keys & bit) && !(ui.keys & bit)) {
+            eaten |= bit;                        /* (v1.1.0) RECORD: klawisz = TAP TEMPO, bez nuty (nagrywanie na żywo: gra jak zawsze) */
+            rc_tap();
             continue;
         }
         if (ENG_GRP[set.eng] == EG_DRUM && !rk_on() && (keys & bit) && !(ui.keys & bit)
@@ -10171,8 +10363,8 @@ static void body_blit(void)
 #include "ogs_formant_ui.c"
 
 /* silniki: strony sekcji (ALL = SELECT z HOME: ENV, LFO, EDIT) */
-static const uint8_t MG_EDIT[] = {0, 1, 2, 3, 12, 4, 5, 6, 7, 13}, MG_ENV[] = {8, 9}, MG_LFO[] = {10, 11},
-                     MG_ALL[] = {8, 9, 10, 11, 0, 1, 2, 3, 12, 4, 5, 6, 7, 13};
+static const uint8_t MG_EDIT[] = {0, 1, 2, 3, 12, 4, 5, 6, 7, 13, 14}, MG_ENV[] = {8, 9}, MG_LFO[] = {10, 11},
+                     MG_ALL[] = {8, 9, 10, 11, 0, 1, 2, 3, 12, 4, 5, 6, 7, 13, 14};   /* (v1.1.0) 14 TUNE na końcu: reszta bez przesunięcia */
 static const uint8_t XG_EDIT[] = {0, 1, 2, 3, 4, 5, XP_OPLVL, XP_OPVOL, 6, 7, XP_UNI, XP_FILT, XP_VINT},   /* (v0.68) */
                      XG_ENV[] = {8, 9, 10, 11, 12, 13, 14, XP_FENV}, XG_LFO[] = {15, 16, 17},
                      XG_ALL[] = {8, 9, 10, 11, 12, 13, 14, XP_FENV, 15, 16, 17, 0, 1, 2, 3, 4, 5, XP_OPLVL, XP_OPVOL, 6, 7,
@@ -10204,7 +10396,7 @@ static const uint8_t BG_EDIT[] = {0, 1, 2, 4, 3, 5, 10}, BG_ENV[] = {6, 7}, BG_L
 static const uint8_t QG_EDIT[] = {0, 1, 2, 3, 6, 4, 5, 10}, QG_ENV[] = {7, 11}, QG_LFO[] = {8, 9},   /* (v0.69) 11 ENV 2 */
                      QG_ALL[] = {7, 11, 8, 9, 0, 1, 2, 3, 6, 4, 5, 10};
 static const engine_t ENG[NENG] = {
-    {"MINI", P, NP, NPAGES, NPRESETS, PAGE_NAME, {MG_EDIT, MG_ENV, MG_LFO, MG_ALL}, {10, 2, 2, 14}, 7, P_MODE,
+    {"MINI", P, NP, NPAGES, NPRESETS, PAGE_NAME, {MG_EDIT, MG_ENV, MG_LFO, MG_ALL}, {11, 2, 2, 15}, 7, P_MODE,
      P_CUT, {P_MODE, P_PRIO, -1}, 0, moog_reset, moog_load_preset, moog_preset_name, moog_note_on, moog_note_off,
      moog_all_off, moog_render, moog_knob, moog_sel, moog_more, moog_def, moog_vget, moog_vset, moog_text, moog_label_page, moog_page_label,
      moog_has_graph, moog_graph, moog_held_note, moog_scope_semi, moog_sounding, 0, 0, moog_gest, moog_moddepth},
@@ -10461,6 +10653,67 @@ static void mt_cols(int32_t y)           /* (v0.82) HOME w MULTI: K1-K4 = VOL, P
     }
 }
 
+/* (v1.1.0, akordy A; GLO > DISPLAY > CHORD NAME, domyślnie OFF) nazwa granego akordu na HOME (SOLO, pierwszy wiersz z prawej,
+ * zamiast PRESET n / m): klasy dźwięków z nt_cnt (klawisze, MIDI, SEQ, CHORD), bas = najniższa; najprostszy pasujący kształt
+ * na basie, inaczej na innej nucie akordu z „/BAS”; nieznany: bez napisu; znika 1 s po puszczeniu. Czcionki bez małych liter:
+ * MIN / MAJ zamiast m / M, -5 / -9 / +9 zamiast b5 / b9 / #9 */
+static const struct { uint16_t iv; char q[8]; } CHN[] = {   /* bit i: i półtonów nad prymą; najprostsze najpierw */
+    {0x091, ""}, {0x089, "MIN"}, {0x049, "DIM"}, {0x111, "AUG"}, {0x0A1, "SUS4"}, {0x085, "SUS2"}, {0x081, "5"},
+    {0x491, "7"}, {0x891, "MAJ7"}, {0x489, "MIN7"}, {0x449, "MIN7-5"}, {0x249, "DIM7"}, {0x4A1, "7SUS4"}, {0x291, "6"},
+    {0x289, "MIN6"}, {0x889, "MINMAJ7"}, {0x095, "ADD9"}, {0x08D, "MINADD9"}, {0x495, "9"}, {0x895, "MAJ9"}, {0x48D, "MIN9"},
+    {0x295, "6/9"}, {0x4B5, "11"}, {0x4AD, "MIN11"}, {0x695, "13"}, {0x8D1, "MAJ7+11"}, {0x493, "7-9"}, {0x499, "7+9"},
+    {0x411, "7"}, {0x811, "MAJ7"}, {0x409, "MIN7"}, {0x415, "9"}, {0x40D, "MIN9"},
+};
+#define NCHN (uint32_t)(sizeof CHN / sizeof CHN[0])
+static uint32_t ch_sig, ch_last;
+static void chord_name_upd(uint32_t now)
+{
+    uint32_t n, pcs = 0, bass = 12u, sig, r, i, k, best = NCHN, root = 0;
+    if (!GV(G_CHNAME) || mt_ui()) {
+        ch_txt[0] = 0;
+        return;
+    }
+    for (n = 0; n < 128u; n++)
+        if (nt_cnt[n]) {
+            if (bass == 12u)
+                bass = n % 12u;
+            pcs |= 1u << (n % 12u);
+        }
+    if (pcs & (pcs - 1u))
+        ch_last = now;
+    else if (ch_txt[0] && now - ch_last > 1000u) {   /* puszczony: napis jeszcze 1 s */
+        ch_txt[0] = 0;
+        ch_sig = 0;
+        ui.redraw = 1;
+    }
+    sig = pcs | bass << 12;
+    if (!(pcs & (pcs - 1u)) || sig == ch_sig)
+        return;
+    ch_sig = sig;
+    for (i = 0; i < 12u; i++) {
+        r = (bass + i) % 12u;
+        if (pcs >> r & 1u)
+            for (k = 0; k < best; k++)
+                if (CHN[k].iv == ((pcs >> r | pcs << (12u - r)) & 0xFFFu)) {
+                    best = k;
+                    root = r;
+                    break;
+                }
+        if (!i && best < NCHN)
+            break;                               /* na basie: bez ukośnika */
+    }
+    ch_txt[0] = 0;
+    if (best < NCHN) {
+        text_cat(ch_txt, L_PC12[root]);
+        text_cat(ch_txt, CHN[best].q);
+        if (root != bass) {
+            text_cat(ch_txt, "/");
+            text_cat(ch_txt, L_PC12[bass]);
+        }
+    }
+    ui.redraw = 1;
+}
+
 static void draw_home(void)            /* bez górnego paska: wiersz informacji, oscyloskop, na dole nazwa presetu na silniku */
 {
     char t[24], n[8], name[24];
@@ -10515,8 +10768,13 @@ static void draw_home(void)            /* bez górnego paska: wiersz informacji,
             cv_text(x + 8, 2, &FONT_B, ui.msg[1], C_HI);
         } else {
             cv_text(8, 6, &FONT_XS, E->name, C_HI);
-            x = 232 - text_w(&FONT_XS, t);
-            cv_text(x, 6, &FONT_XS, t, C_GRAY);
+            if (ch_txt[0]) {                 /* (v1.1.0) CHORD NAME: grany akord zamiast PRESET n / m */
+                x = 232 - text_w(&FONT_B, ch_txt);
+                cv_text(x, 2, &FONT_B, ch_txt, C_WHITE);
+            } else {
+                x = 232 - text_w(&FONT_XS, t);
+                cv_text(x, 6, &FONT_XS, t, C_GRAY);
+            }
             if (set.edited[set.eng])         /* zmienione względem presetu (jak SAVE) */
                 cv_text(x - 6 - text_w(&FONT_B, "*"), 2, &FONT_B, "*", C_HI);
         }
@@ -10677,7 +10935,7 @@ static void chord_graph(void)            /* klawiatura 3 oktawy od C: nuty akord
 {
     static const uint8_t WK[7] = {0, 2, 4, 5, 7, 9, 11}, BK[5] = {1, 3, 6, 8, 10}, BX[5] = {1, 2, 4, 5, 6};
     const int32_t y = GRAPH_Y, h = GRAPH_H, ww = GW / 21;
-    uint32_t m = chord_mask(xtc[set.eng]);
+    uint32_t m = chord_mask(xtc[set.eng], 60);   /* (od C) */
     int32_t o, i;
     for (o = 0; o < 3; o++)
         for (i = 0; i < 7; i++) {
@@ -10714,9 +10972,9 @@ static void draw_page(void)
     if (ui.page == V_GLO && ui.glo_sec == GS_SYSTEM) {   /* SYSTEM: działania pod SEL */
         cv_text(8, 4, &FONT_M, "SYSTEM", C_WHITE);
         for (i = 0; i < NSY; i++) {
-            int on = i == ui.sy_cur, y = 34 + i * 24;   /* pięć pozycji nad paskiem podpowiedzi */
+            int on = i == ui.sy_cur, y = 30 + i * 20;   /* sześć pozycji nad paskiem podpowiedzi (v1.1.0: + UPDATE MODE) */
             if (on)
-                cv_rect(4, y - 4, 232, 22, C_DIM);
+                cv_rect(4, y - 2, 232, 20, C_DIM);
             cv_text(12, y, &FONT_S, SY_NAME[i], on ? C_WHITE : C_GRAY);
             if (i == SY_HINTS)
                 cv_text(232 - text_w(&FONT_S, L_HINTS[glob.g[G_HINTS]]), y, &FONT_S, L_HINTS[glob.g[G_HINTS]], C_HI);
@@ -10807,8 +11065,11 @@ static void draw_page(void)
     }
     if (ui.page == PG_CHORD) {               /* K1: rodzaj akordu */
         d[0] = &CH_DEF;
-        v[0] = (int16_t)(xtc[set.eng][0] % NCHORD);
+        v[0] = (int16_t)(xtc[set.eng][0] & 15u);
         def_text(&CH_DEF, -1, v[0], txt[0]);
+        d[1] = &CV_DEF;                      /* (v1.1.0) K2: VOICING */
+        v[1] = (int16_t)(xtc[set.eng][0] >> 4 & 3u);
+        def_text(&CV_DEF, -1, v[1], txt[1]);
     }
     if (hints()) {                           /* wyższy pasek: niższe kolumny / wykres */
         page_hint(more);
@@ -11878,12 +12139,14 @@ static void draw_notes_page(void)                /* NOTES: piano roll na całą 
     uint32_t L = sq_len(), V = sq_span(), bar0 = sq_bar0(), g = sq_grid(), i, r, pass;
     int32_t low = ui.sq_low, cx = rx(ui.sq_cur, bar0), cw = (int32_t)(g * RW / V), rows = RROWS, rh = RH;
     int dense = cw < 5;                          /* gęsto: grid tylko na ćwierćnutach */
+    const uint32_t sc = sq_scale();              /* (v1.1.0) SEQ > KEY: wiersze nut w skali jaśniejsze, tonika najjaśniej */
     sq_ac_new();
     for (r = 0; r < rows; r++) {                /* klawiatura z lewej, tło wierszy: czarne klawisze ciemniejsze */
         int32_t note = low + rows - 1 - (int32_t)r, pc = note % 12, y = (int32_t)r * rh;
         int blk = pc == 1 || pc == 3 || pc == 6 || pc == 8 || pc == 10;
         cv_rect(0, y, 20, rh - 1, blk ? RGB(14, 14, 17) : RGB(150, 152, 158));
-        cv_rect(RX, y, RW, rh, blk ? RGB(8, 8, 10) : RGB(20, 21, 25));
+        cv_rect(RX, y, RW, rh, sc >> pc & 1u ? (pc == sqp.rsv[SQ_KEY_] % 12 ? RGB(48, 38, 76) : RGB(28, 31, 48))
+                               : blk ? RGB(8, 8, 10) : RGB(20, 21, 25));
         if (pc == 0) {                           /* C: podpis na klawiszu (gdy się mieści) i mocniejsza linia */
             note_name(note, t);
             if (rh >= 10)
@@ -12214,7 +12477,26 @@ static void draw_seq(void)
         col_h = hints() ? 120 : 120 + FOOT_TALL;
         draw_cols(d, v, txt, 0);
         col_y = col_h = -1;
-        foot_hint = "REC: ARM   PLAY: START   SELECT: PAGE";
+        foot_hint = "KEYS: TAP   REC: ARM   PLAY: START   SELECT: PAGE";   /* (v1.1.0) klawisze = TAP TEMPO */
+    } else if (ui.sq_pg == SQ_KEY) {             /* (v1.1.0) KEY */
+        const pdef_t *d[4];
+        int16_t v[4];
+        char txt[4][16], t[24];
+        int32_t k;
+        sq_state(t);
+        sq_title(SQ_PGNAME[SQ_KEY], t);
+        for (k = 0; k < 4; k++) {
+            d[k] = k < 3 ? &KYDEF[k] : 0;
+            v[k] = (int16_t)(k < 3 ? sqp.rsv[k] : 0);
+            txt[k][0] = 0;
+            if (k < 3)
+                def_text(d[k], -1, v[k], txt[k]);
+        }
+        col_y = 34;
+        col_h = hints() ? 120 : 120 + FOOT_TALL;
+        draw_cols(d, v, txt, 0);
+        col_y = col_h = -1;
+        foot_hint = "SELECT: PAGE   SEQ / HOME: BACK";
     } else if (ui.sq_pg == SQ_OPT) {             /* (v0.88) OPTIONS; (v0.89) zwykła strona ustawień */
         const pdef_t *d[4];
         int16_t v[4];
@@ -12264,7 +12546,7 @@ static void draw_seq(void)
             v[k] = (int16_t)x;
             if (d[k]->fmt == F_LIST) {
                 txt[k][0] = 0;
-                text_cat(txt[k], d[k]->list[x]);
+                text_cat(txt[k], PLIST(d[k])[x]);
             } else {
                 int_text(pg == SQ_PATTERN && k == 3 ? swing_pct(x) : x, txt[k], 0);
                 if ((pg == SQ_PATTERN && k == 3) || (pg == SQ_FEEL && k != 3))
@@ -12312,7 +12594,7 @@ static void draw_arp(void)                       /* ARP: 4 gałki (MORE: 4 nast�
         txt[k][0] = 0;
         if (j >= AR_NP) {
         } else if (ARDEF[j].fmt == F_LIST) {
-            text_cat(txt[k], ARDEF[j].list[x]);
+            text_cat(txt[k], PLIST(&ARDEF[j])[x]);
         } else {
             int_text(j == AR_SWING ? swing_pct(x) : x, txt[k], 0);
             if (j >= AR_GATE)
@@ -12341,7 +12623,7 @@ static void draw_arp(void)                       /* ARP: 4 gałki (MORE: 4 nast�
         cv_rect(bx, 136 - h, 12, h, last ? rgb_light(C_HI) : C_AMB);
     }
     if (more == 2)                               /* CHORD: co robi; brzmienie bez akordu: gdzie go włączyć */
-        center(140, &FONT_XS, chord_now() == 1u ? "NO CHORD IN THIS SOUND (EDIT: CHORD)" : CHW[sqg.a[AR_CHORD] % 3u],
+        center(140, &FONT_XS, chord_at(60) == 1u ? "NO CHORD IN THIS SOUND (EDIT: CHORD)" : CHW[sqg.a[AR_CHORD] % 3u],
                C_HI);
     else
         center(140, &FONT_XS, !sqg.arp_on ? "ARP: TURN THE ARPEGGIATOR ON"
@@ -12351,6 +12633,7 @@ static void draw_arp(void)                       /* ARP: 4 gałki (MORE: 4 nast�
     body_blit();
 }
 
+static const char *const L_SYNC[2] = {"BPM", "KEY"}, *const L_LEN[5] = {"", "BEAT", "BAR", "2 BARS", "4 BARS"};   /* PERFORM: ustawienia klawisza (ogs_lists) */
 static void draw_perf(void)              /* PERFORM: 4 gałki, klawiatura (trzymane / zatrzaśnięte), nazwa efektu; (v0.47.2)
                                           * bez pamięci: klawisze, które nie grają, ciemnoczerwone + powód */
 {
@@ -12366,8 +12649,7 @@ static void draw_perf(void)              /* PERFORM: 4 gałki, klawiatura (trzym
     uint32_t act = ui.pf_keys | ui.pf_lat, mem = ogs_pf_mem < 3u ? ogs_pf_mem : 0u, off = mem ? PF_NEEDMEM : 0u;
     const char *line = act ? PF_NAME[ui.pf_last % PF_N] : "HOLD FX + KEY: REPEAT, TAPE, FILTER ...";
     uint16_t lc = act && ogs_pf_red && ui.pf_last <= PF_R32 ? RGB(255, 60, 50) : act ? C_HI : C_GRAY;
-    static const char *const L_SYNC[2] = {"BPM", "KEY"}, *const L_LEN[5] = {"", "BEAT", "BAR", "2 BARS", "4 BARS"};
-    static const pdef_t PC[4] = {{"SYNC", 0, 1, 0, F_LIST, L_SYNC}, {"START", 0, 99, 0, F_NUM, 0}, {"LENGTH", 1, 4, 1, F_LIST, L_LEN},
+    static const pdef_t PC[4] = {{"SYNC", 0, 1, 0, F_LIST, LI(L_SYNC)}, {"START", 0, 99, 0, F_NUM, 0}, {"LENGTH", 1, 4, 1, F_LIST, LI(L_LEN)},
                                  {"", 0, 0, 0, F_NONE, 0}};
     int32_t ed = pf_edit();
     const int32_t ce = cv_edit();
@@ -12626,6 +12908,12 @@ static void draw_note(void)            /* SYSTEM > BACKUP / CALIBRATION: jak to 
         center(52, &FONT_XS, "TO AND FROM THE COMPUTER (.SYX STAY THERE)", C_GRAY);
         center(76, &FONT_XS, "CONNECT USB, THEN ON THE COMPUTER:", C_HI);
         center(92, &FONT_XS, "OG SYNTH MANAGER > BACKUP", C_WHITE);
+    } else if (ui.note == SY_UPDATE) {       /* (v1.1.0, P39) tryb aktualizacji chipu bez REC przy włączaniu */
+        cv_text(8, 4, &FONT_M, "UPDATE MODE", C_WHITE);
+        center(36, &FONT_XS, "FOR M-UPGRADE AND OTHER INSTALLERS", C_GRAY);
+        center(52, &FONT_XS, "(THE SAME AS REC AT POWER-ON)", C_GRAY);
+        center(76, &FONT_XS, "THE SCREEN GOES DARK", C_HI);
+        center(92, &FONT_XS, "TO LEAVE: TURN THE FM-1 OFF AND ON", C_WHITE);
     } else {
         cv_text(8, 4, &FONT_M, "CALIBRATION", C_WHITE);
         center(36, &FONT_XS, "KEYS, KNOBS AND BUTTONS", C_GRAY);
@@ -12633,7 +12921,7 @@ static void draw_note(void)            /* SYSTEM > BACKUP / CALIBRATION: jak to 
         center(76, &FONT_XS, "OCT-  AND  OCT+", C_WHITE);
         center(92, &FONT_XS, "WHILE TURNING IT ON", C_HI);
     }
-    foot_hint = "SEL / HOME: BACK";
+    foot_hint = ui.note == SY_UPDATE ? "SEL: UPDATE MODE   HOME: BACK" : "SEL / HOME: BACK";
     body_blit();
 }
 
@@ -12802,6 +13090,17 @@ void app_frame(void)
         }
     }
     out_unmute();                            /* zapisy flasha z poprzedniej klatki zrobione: dźwięk wraca płynnie */
+    if (ui.page == V_HOME || ch_txt[0])      /* (v1.1.0) CHORD NAME na HOME */
+        chord_name_upd(plat_ms());
+    {                                        /* (v1.1.0, P7) CC IN z przerwania */
+        uint32_t q;
+        for (q = 0; q < 4u; q++)
+            if (cc_req[q]) {
+                const uint32_t v = cc_req[q] & 0x7Fu;
+                cc_req[q] = 0;
+                cc_knob(q, v);
+            }
+    }
     if (pend_preset >= 0 && (dk_quiet || !eng_sounding() || preset_eng(pend_preset) != set.eng)) {
         int32_t id = pend_preset;            /* preset czekał na przygaszenie: teraz (cisza, bez trzasku) */
         preset_go(id);
@@ -13058,7 +13357,8 @@ void app_frame(void)
     }
     scope_on = (ui.page == V_HOME && glob.g[G_VHOME] && !ui.mode_until)   /* (v0.92) też widmo EQ */
             || (ui.page == V_FX && fx_cur()->type == FX_EQ && !fxc.x[set.eng][FX_X_EQ + EQX_AN]);
-    if (scope_on && !ui.redraw && now - ui.scope_at >= 40u) {   /* oscyloskop: 25 klatek/s, tylko gdy gra */
+    if (scope_on && ui.page == V_HOME && !ui.redraw && now - ui.scope_at >= 40u) {   /* oscyloskop: 25 klatek/s, tylko gdy gra;
+                                                         * (v1.1.0) tylko HOME: przy EQ bufor dla widma, bez rysowania na FX */
         if (eng_sounding())
             ui.scope_tail = 4;
         if (ui.scope_tail) {
@@ -13115,3 +13415,166 @@ int app_expect(const char *what, int *got)
     return 1;
 }
 #endif
+
+/* (v1.1.0) listy wartosci parametrow (ogs_lists.h): pdef_t.list = numer w tej tabeli */
+const char *const *const ogs_lists[LI_N] = {
+    [LI_L_ONOFF] = L_ONOFF,
+    [LI_L_MIDICH] = L_MIDICH,
+    [LI_L_CPU2] = L_CPU2,
+    [LI_L_LIGHTS] = L_LIGHTS,
+    [LI_L_KEYL] = L_KEYL,
+    [LI_L_SCROFF] = L_SCROFF,
+    [LI_L_COLOR] = L_COLOR,
+    [LI_L_TOPKEYS] = L_TOPKEYS,
+    [LI_L_CLKIN] = L_CLKIN,
+    [LI_L_INV] = L_INV,
+    [LI_L_HINTS] = L_HINTS,
+    [LI_L_MTMST] = L_MTMST,
+    [LI_L_MTCTL] = L_MTCTL,
+    [LI_L_TUNEK] = L_TUNEK,
+    [LI_L_CLICK] = L_CLICK,
+    [LI_L_CINL] = L_CINL,
+    [LI_L_RECQ] = L_RECQ,
+    [LI_L_PC12] = L_PC12,
+    [LI_L_SCALE] = L_SCALE,
+    [LI_L_VOICE] = L_VOICE,
+    [LI_CHORD_NAME] = CHORD_NAME,
+    [LI_L_SYNC] = L_SYNC,
+    [LI_L_LEN] = L_LEN,
+    [LI_LB_WAVE] = LB_WAVE,
+    [LI_LB_COMB] = LB_COMB,
+    [LI_LB_MODE] = LB_MODE,
+    [LI_LB_KTRK] = LB_KTRK,
+    [LI_LB_LW] = LB_LW,
+    [LI_LB_FT] = LB_FT,
+    [LI_LB_LM] = LB_LM,
+    [LI_LB_GT] = LB_GT,
+    [LI_LB_MXS] = LB_MXS,
+    [LI_LJ_MODE] = LJ_MODE,
+    [LI_LJ_CHO] = LJ_CHO,
+    [LI_LJ_LW] = LJ_LW,
+    [LI_LJ_SUB] = LJ_SUB,
+    [LI_LJ_MODEL] = LJ_MODEL,
+    [LI_LJ_VCA] = LJ_VCA,
+    [LI_LJ_LM] = LJ_LM,
+    [LI_LA_SAW] = LA_SAW,
+    [LI_LJ_MXS] = LJ_MXS,
+    [LI_LDM_CHOKE] = LDM_CHOKE,
+    [LI_LDM_HATS] = LDM_HATS,
+    [LI_LDM_MODE] = LDM_MODE,
+    [LI_LDU_SRC] = LDU_SRC,
+    [LI_LDU_MOD] = LDU_MOD,
+    [LI_LDU_EG] = LDU_EG,
+    [LI_LDU_CHOKE] = LDU_CHOKE,
+    [LI_LDU_UP] = LDU_UP,
+    [LI_LDU_WG] = LDU_WG,
+    [LI_LDU_MODE] = LDU_MODE,
+    [LI_LX_MXS] = LX_MXS,
+    [LI_LX_CURVE] = LX_CURVE,
+    [LI_LX_MODE] = LX_MODE,
+    [LI_LX_WAVE] = LX_WAVE,
+    [LI_LX_LFW] = LX_LFW,
+    [LI_LX_VMODE] = LX_VMODE,
+    [LI_LX_PRIO] = LX_PRIO,
+    [LI_LX_GMODE] = LX_GMODE,
+    [LI_LX_FTYPE] = LX_FTYPE,
+    [LI_LX_KTRK] = LX_KTRK,
+    [LI_LX_VIEW] = LX_VIEW,
+    [LI_LX_VIEW_1] = LX_VIEW + 1,
+    [LI_LX_OPS] = LX_OPS,
+    [LI_LX_CSRC] = LX_CSRC,
+    [LI_LX_KTYPE] = LX_KTYPE,
+    [LI_LFM_SINGER] = LFM_SINGER,
+    [LI_LFM_SRC] = LFM_SRC,
+    [LI_LFM_MODE] = LFM_MODE,
+    [LI_LFM_LW] = LFM_LW,
+    [LI_LFM_LM] = LFM_LM,
+    [LI_LFM_CONS] = LFM_CONS,
+    [LI_LFM_MXS] = LFM_MXS,
+    [LI_LM_WAVE] = LM_WAVE,
+    [LI_LM_FLT] = LM_FLT,
+    [LI_LM_PM] = LM_PM,
+    [LI_LM_NENV] = LM_NENV,
+    [LI_LM_CHOKE] = LM_CHOKE,
+    [LI_LM_MODE] = LM_MODE,
+    [LI_LM_UPPER] = LM_UPPER,
+    [LI_L_WAVE] = L_WAVE,
+    [LI_L_RANGE] = L_RANGE,
+    [LI_L_RANGE4] = L_RANGE4,
+    [LI_L_MODE] = L_MODE,
+    [LI_L_PRIO] = L_PRIO,
+    [LI_L_RTRG] = L_RTRG,
+    [LI_L_DTYPE] = L_DTYPE,
+    [LI_L_FTYPE] = L_FTYPE,
+    [LI_L_MSRC] = L_MSRC,
+    [LI_L_KTRK] = L_KTRK,
+    [LI_L_NOISE] = L_NOISE,
+    [LI_L_CHORUS] = L_CHORUS,
+    [LI_L_LWAVE] = L_LWAVE,
+    [LI_L_MDEST] = L_MDEST,
+    [LI_L_MXS] = L_MXS,
+    [LI_LZ_W] = LZ_W,
+    [LI_LZ_W2] = LZ_W2,
+    [LI_LW_LSH] = LW_LSH,
+    [LI_LZ_SRC] = LZ_SRC,
+    [LI_LZ_DST] = LZ_DST,
+    [LI_LZ_VIA] = LZ_VIA,
+    [LI_LZ_KF] = LZ_KF,
+    [LI_LW_VM] = LW_VM,
+    [LI_LW_DT] = LW_DT,
+    [LI_LZ_FT] = LZ_FT,
+    [LI_LZ_PT] = LZ_PT,
+    [LI_LW_LM] = LW_LM,
+    [LI_LZ_EM] = LZ_EM,
+    [LI_LZ_SUS] = LZ_SUS,
+    [LI_LPH_EXC] = LPH_EXC,
+    [LI_LPH_MODEL] = LPH_MODEL,
+    [LI_LPH_MODE] = LPH_MODE,
+    [LI_LPH_LW] = LPH_LW,
+    [LI_LPH_LM] = LPH_LM,
+    [LI_LPH_BOW] = LPH_BOW,
+    [LI_LPH_MXS] = LPH_MXS,
+    [LI_LS_AW] = LS_AW,
+    [LI_LS_BW] = LS_BW,
+    [LI_LS_MODE] = LS_MODE,
+    [LI_LS_LW] = LS_LW,
+    [LI_LS_LM] = LS_LM,
+    [LI_LS_LT] = LS_LT,
+    [LI_LS_KTRK] = LS_KTRK,
+    [LI_LV_PMD] = LV_PMD,
+    [LI_LS_MXS] = LS_MXS,
+    [LI_L_ARMODE] = L_ARMODE,
+    [LI_L_GRID] = L_GRID,
+    [LI_L_ARCHORD] = L_ARCHORD,
+    [LI_LV_AW] = LV_AW,
+    [LI_LV_BW] = LV_BW,
+    [LI_LV_MODE] = LV_MODE,
+    [LI_LV_KTRK] = LV_KTRK,
+    [LI_LV_LW] = LV_LW,
+    [LI_LV_REV] = LV_REV,
+    [LI_LV_LM] = LV_LM,
+    [LI_LV_LT] = LV_LT,
+    [LI_LV_MXS] = LV_MXS,
+    [LI_LW_WAVE] = LW_WAVE,
+    [LI_LW_LPG] = LW_LPG,
+    [LI_LWS_MODE] = LWS_MODE,
+    [LI_LWS_LW] = LWS_LW,
+    [LI_LWS_LM] = LWS_LM,
+    [LI_LWS_RANGE] = LWS_RANGE,
+    [LI_LWS_ESRC] = LWS_ESRC,
+    [LI_LWS_MXS] = LWS_MXS,
+    [LI_LW_TAB] = LW_TAB,
+    [LI_LW_SSH] = LW_SSH,
+    [LI_LW_SOCT] = LW_SOCT,
+    [LI_LW_SRC] = LW_SRC,
+    [LI_LW_DST] = LW_DST,
+    [LI_LW_VIA] = LW_VIA,
+    [LI_LW_WM] = LW_WM,
+    [LI_LW_NT] = LW_NT,
+    [LI_LW_PH] = LW_PH,
+    [LI_LW_FT] = LW_FT,
+    [LI_LW_STK] = LW_STK,
+    [LI_LW_UM] = LW_UM,
+    [LI_LW_F2T] = LW_F2T,
+    [LI_LW_DSM] = LW_DSM,
+};
