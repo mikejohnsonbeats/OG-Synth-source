@@ -103,10 +103,18 @@ index 4d4f45c..b83da6c 100644
                  if (!a || (uint32_t)px >= cv_w || py < cv_y0 || py >= cv_y1)
                      continue;
 diff --git a/device/main_fm1.c b/device/main_fm1.c
-index dd7cde2..56728f5 100644
+index dd7cde2..bedf876 100644
 --- a/device/main_fm1.c
 +++ b/device/main_fm1.c
-@@ -844,7 +844,13 @@ static void fm1_main(void)
+@@ -722,6 +722,7 @@ static void fm1_fault(const fm1_crash_t *c)
+     fm1_reboot();
+ }
+ 
++volatile uint8_t app_uboot_req;                    /* OGS 1.1.0: plat_uboot (the app asks; the main loop enters) */
+ static void enter_uboot(const char *why)
+ {
+     fm1_audio_stop();
+@@ -844,7 +845,13 @@ static void fm1_main(void)
                                                       * VDDIO 3.2 V, WiFi's regulator automatic (fm1_sys.h) */
          fm1_clock_read(clock_boot);
          clock_fix = (int8_t)fm1_clock_stock();      /* the stock 360 MHz, whichever bootloader started us (fm1_clock.h) */
@@ -121,7 +129,7 @@ index dd7cde2..56728f5 100644
  #if FM1B_WIFI
          if (flash_ok)
              FL_FAR(fl_uid_ram)(flash_uid);
-@@ -937,8 +943,9 @@ static void fm1_main(void)
+@@ -937,8 +944,9 @@ static void fm1_main(void)
                  master_pos = mirror_in_master(remote.master >= 0 ? (uint32_t)remote.master : (uint32_t)(knob / 4));
              }
          }
@@ -133,8 +141,17 @@ index dd7cde2..56728f5 100644
              batt_t = fm1_ms;
              if (b > 0)
                  batt_raw = batt_raw ? batt_raw + (b - batt_raw) / 16 : b;
+@@ -983,6 +991,8 @@ static void fm1_main(void)
+         }
+         if (usb.uboot_req)
+             enter_uboot("UBOOT (USB)");
++        if (app_uboot_req)
++            enter_uboot("UPDATE MODE");
+ #if FM1B_CDC
+         cdc_task();
+ #endif
 diff --git a/device/plat_fm1.c b/device/plat_fm1.c
-index 9d462de..a23dab9 100644
+index 9d462de..b278e0e 100644
 --- a/device/plat_fm1.c
 +++ b/device/plat_fm1.c
 @@ -46,6 +46,7 @@ uint32_t plat_master(void) { return master_pos; }
@@ -167,10 +184,11 @@ index 9d462de..a23dab9 100644
  }
  /* a pull from the host in the update's framing (ota.c ota_read), and how long it may take */
  int plat_host_read(uint32_t addr, uint8_t *dst, uint32_t n) { return n > 512u ? -1 : ota_read(addr, dst, n); }
-@@ -314,6 +313,60 @@ int plat_store_load(uint32_t obj, void *dst, uint32_t max) { return flash_ok ? s
+@@ -314,6 +313,61 @@ int plat_store_load(uint32_t obj, void *dst, uint32_t max) { return flash_ok ? s
  int plat_store_head(uint32_t obj, void *dst, uint32_t n) { return flash_ok ? st_load_head(obj, dst, n) : -1; }
  int plat_store_size(uint32_t obj) { return flash_ok ? st_size(obj) : -1; }
  int plat_store_save(uint32_t obj, const void *src, uint32_t len) { return flash_ok ? st_save(obj, src, len) : -9; }
++void plat_uboot(void) { extern volatile uint8_t app_uboot_req; app_uboot_req = 1; }   /* OGS 1.1.0 (main_fm1.c) */
 +int plat_store_patch(uint32_t obj, uint32_t len, uint32_t off, const void *src, uint32_t n)
 +{
 +    return flash_ok ? st_patch(obj, len, off, src, n) : -9;
@@ -409,7 +427,7 @@ index 512374b..2adf572 100644
  
  struct bootguard_s { uint32_t magic, failed, pending; };
 diff --git a/host/plat_host.c b/host/plat_host.c
-index 85620fd..5bd4805 100644
+index 85620fd..c17be01 100644
 --- a/host/plat_host.c
 +++ b/host/plat_host.c
 @@ -169,6 +169,7 @@ int32_t plat_enc(int role)
@@ -420,7 +438,15 @@ index 85620fd..5bd4805 100644
  int plat_battery(void) { return 3; }   /* (the host and the emulator: full) */
  /* the lights ("leds"): bright, and dim (glow 0: none); PLAY's green counts as PLAY */
  void plat_lights(uint32_t b, uint32_t k, uint32_t db, uint32_t dk, int glow)
-@@ -557,6 +558,29 @@ int plat_store_save(uint32_t obj, const void *src, uint32_t len)
+@@ -546,6 +547,7 @@ int plat_store_size(uint32_t obj)
+     store_ready();
+     return obj >= OBJ_NOBJ || store_len[obj] <= 0 ? -1 : store_len[obj];
+ }
++void plat_uboot(void) {}                           /* OGS 1.1.0: the simulator has no update mode */
+ int plat_store_save(uint32_t obj, const void *src, uint32_t len)
+ {
+     store_ready();
+@@ -557,6 +559,29 @@ int plat_store_save(uint32_t obj, const void *src, uint32_t len)
      store_writes++;
      return 0;
  }
@@ -451,18 +477,19 @@ index 85620fd..5bd4805 100644
  static uint32_t cpu_pct;
  uint32_t plat_cpu_pct(void) { return cpu_pct; }
 diff --git a/include/plat.h b/include/plat.h
-index 2140404..0164b0c 100644
+index 2140404..a242ddf 100644
 --- a/include/plat.h
 +++ b/include/plat.h
-@@ -35,6 +35,7 @@ uint32_t plat_buttons(void);           /* held: bit B_* */
+@@ -35,6 +35,8 @@ uint32_t plat_buttons(void);           /* held: bit B_* */
  uint32_t plat_keys(void);              /* held: bit k = key k (0 = F3) */
  int32_t plat_enc(int role);            /* detents since the last call, + = clockwise; EN_* */
  uint32_t plat_master(void);            /* MASTER pot's position, 0..4096 (the render gets it as a gain: APP_GAIN) */
++void plat_uboot(void);                 /* OGS 1.1.0: the chip's update mode (UBOOT), as REC at power-on (GLO > SYSTEM) */
 +int plat_battery_raw(void);            /* the battery's averaged reading, 0..1023 (0: none yet; INFO) */
  int plat_battery(void);                /* the battery: 0 (empty) .. 3 (full), 4 a USB host powers the FM-1, -1 not read
                                          * yet (the keys' readings own the converter: APP_KEY_SENSE) */
  
-@@ -200,6 +201,12 @@ int plat_store_size(uint32_t obj);                           /* its length in by
+@@ -200,6 +202,12 @@ int plat_store_size(uint32_t obj);                           /* its length in by
                                                                 * wants it whole or not at all checks it first) */
  int plat_store_save(uint32_t obj, const void *src, uint32_t len);   /* 0 = ok */
  #define PLAT_STORE_MAX 3840u           /* bytes per object */

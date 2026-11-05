@@ -398,6 +398,11 @@ static void input(void)
             ui.sel_used = 1;
             continue;
         }
+        if (ui.page == V_SEQ && ui.sq_pg == SQ_REC && !(sq.rec && sq.play) && (keys & bit) && !(ui.keys & bit)) {
+            eaten |= bit;                        /* (v1.1.0) RECORD: klawisz = TAP TEMPO, bez nuty (nagrywanie na żywo: gra jak zawsze) */
+            rc_tap();
+            continue;
+        }
         if (ENG_GRP[set.eng] == EG_DRUM && !rk_on() && (keys & bit) && !(ui.keys & bit)
             && (ui.sel_hold || ui.page >= V_HOME)) {   /* perkusja: SEL trzymany + biały klawisz = wybór dźwięku bez grania;
                                                           * (v0.90, decyzja użytkownika 2026-11-03) napis też przy graniu (HOME, strony) */
@@ -963,6 +968,17 @@ void app_frame(void)
         }
     }
     out_unmute();                            /* zapisy flasha z poprzedniej klatki zrobione: dźwięk wraca płynnie */
+    if (ui.page == V_HOME || ch_txt[0])      /* (v1.1.0) CHORD NAME na HOME */
+        chord_name_upd(plat_ms());
+    {                                        /* (v1.1.0, P7) CC IN z przerwania */
+        uint32_t q;
+        for (q = 0; q < 4u; q++)
+            if (cc_req[q]) {
+                const uint32_t v = cc_req[q] & 0x7Fu;
+                cc_req[q] = 0;
+                cc_knob(q, v);
+            }
+    }
     if (pend_preset >= 0 && (dk_quiet || !eng_sounding() || preset_eng(pend_preset) != set.eng)) {
         int32_t id = pend_preset;            /* preset czekał na przygaszenie: teraz (cisza, bez trzasku) */
         preset_go(id);
@@ -1219,7 +1235,8 @@ void app_frame(void)
     }
     scope_on = (ui.page == V_HOME && glob.g[G_VHOME] && !ui.mode_until)   /* (v0.92) też widmo EQ */
             || (ui.page == V_FX && fx_cur()->type == FX_EQ && !fxc.x[set.eng][FX_X_EQ + EQX_AN]);
-    if (scope_on && !ui.redraw && now - ui.scope_at >= 40u) {   /* oscyloskop: 25 klatek/s, tylko gdy gra */
+    if (scope_on && ui.page == V_HOME && !ui.redraw && now - ui.scope_at >= 40u) {   /* oscyloskop: 25 klatek/s, tylko gdy gra;
+                                                         * (v1.1.0) tylko HOME: przy EQ bufor dla widma, bez rysowania na FX */
         if (eng_sounding())
             ui.scope_tail = 4;
         if (ui.scope_tail) {
@@ -1276,3 +1293,4 @@ int app_expect(const char *what, int *got)
     return 1;
 }
 #endif
+#include "ogs_app_13.c"
