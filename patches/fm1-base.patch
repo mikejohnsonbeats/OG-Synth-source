@@ -103,7 +103,7 @@ index 4d4f45c..b83da6c 100644
                  if (!a || (uint32_t)px >= cv_w || py < cv_y0 || py >= cv_y1)
                      continue;
 diff --git a/device/main_fm1.c b/device/main_fm1.c
-index dd7cde2..bedf876 100644
+index dd7cde2..f9db7e6 100644
 --- a/device/main_fm1.c
 +++ b/device/main_fm1.c
 @@ -722,6 +722,7 @@ static void fm1_fault(const fm1_crash_t *c)
@@ -129,8 +129,18 @@ index dd7cde2..bedf876 100644
  #if FM1B_WIFI
          if (flash_ok)
              FL_FAR(fl_uid_ram)(flash_uid);
-@@ -937,8 +944,9 @@ static void fm1_main(void)
-                 master_pos = mirror_in_master(remote.master >= 0 ? (uint32_t)remote.master : (uint32_t)(knob / 4));
+@@ -934,11 +941,18 @@ static void fm1_main(void)
+             int32_t a = fm1_an.con || fm1_an.pend ? (int32_t)fm1_an.master : fm1_adc_read(FM1_ADC_MASTER);
+             if (a >= 0) {
+                 knob += (a * 16 - knob) / 8;
+-                master_pos = mirror_in_master(remote.master >= 0 ? (uint32_t)remote.master : (uint32_t)(knob / 4));
++                const int32_t p = knob / 4;          /* (OGS) MIDI's MASTER until the pot moves 96 / 4096 */
++                if (master_midi >= 0 && master_midi_pot < 0)
++                    master_midi_pot = p;
++                else if (master_midi >= 0 && (p > master_midi_pot + 96 || p < master_midi_pot - 96))
++                    master_midi = -1;
++                master_pos = mirror_in_master(remote.master >= 0 ? (uint32_t)remote.master
++                                              : master_midi >= 0 ? (uint32_t)master_midi : (uint32_t)p);
              }
          }
 -        if (!fm1_an.con && !fm1_an.pend && fm1_ms - batt_t >= 100u) {   /* the battery, ten times a second (plat_battery) */
@@ -141,7 +151,7 @@ index dd7cde2..bedf876 100644
              batt_t = fm1_ms;
              if (b > 0)
                  batt_raw = batt_raw ? batt_raw + (b - batt_raw) / 16 : b;
-@@ -983,6 +991,8 @@ static void fm1_main(void)
+@@ -983,6 +997,8 @@ static void fm1_main(void)
          }
          if (usb.uboot_req)
              enter_uboot("UBOOT (USB)");
@@ -151,10 +161,17 @@ index dd7cde2..bedf876 100644
          cdc_task();
  #endif
 diff --git a/device/plat_fm1.c b/device/plat_fm1.c
-index 9d462de..b278e0e 100644
+index 9d462de..d97a6d9 100644
 --- a/device/plat_fm1.c
 +++ b/device/plat_fm1.c
-@@ -46,6 +46,7 @@ uint32_t plat_master(void) { return master_pos; }
+@@ -41,11 +41,14 @@ int32_t plat_enc(int role)
+ static volatile uint32_t master_pos = 2048;   /* MASTER's position, 0..4096 (main_fm1.c reads the pot; the remote's
+                                                * or the mirror's when they set it) */
+ uint32_t plat_master(void) { return master_pos; }
++static volatile int32_t master_midi = -1, master_midi_pot = -1;   /* (OGS) MASTER from MIDI; the pot where it was set */
++void plat_master_midi(int32_t v) { master_midi_pot = -1; master_midi = v > 4096 ? 4096 : v; }
+ 
+ /* the battery: ADC ch3 (its divider), a slow average by the main loop. The stock firmware's thresholds, as X0X, melodee
   * and dxsloop use them, give 0-3 bars; there is no charger line, so a USB host means power */
  static int32_t batt_raw;
  static int8_t batt_bars = -1;
@@ -162,7 +179,7 @@ index 9d462de..b278e0e 100644
  int plat_battery(void)                           /* (a level moves once the reading is 4 past its threshold) */
  {
      static const int16_t AT[3] = {531, 561, 591};
-@@ -177,18 +178,16 @@ const uint8_t *plat_data(uint32_t off)
+@@ -177,18 +180,16 @@ const uint8_t *plat_data(uint32_t off)
  {
      return flash_ok && PLAT_DATA_OK(off, 1u) ? (const uint8_t *)FL_XIP(off) : 0;
  }
@@ -184,7 +201,7 @@ index 9d462de..b278e0e 100644
  }
  /* a pull from the host in the update's framing (ota.c ota_read), and how long it may take */
  int plat_host_read(uint32_t addr, uint8_t *dst, uint32_t n) { return n > 512u ? -1 : ota_read(addr, dst, n); }
-@@ -314,6 +313,61 @@ int plat_store_load(uint32_t obj, void *dst, uint32_t max) { return flash_ok ? s
+@@ -314,6 +315,61 @@ int plat_store_load(uint32_t obj, void *dst, uint32_t max) { return flash_ok ? s
  int plat_store_head(uint32_t obj, void *dst, uint32_t n) { return flash_ok ? st_load_head(obj, dst, n) : -1; }
  int plat_store_size(uint32_t obj) { return flash_ok ? st_size(obj) : -1; }
  int plat_store_save(uint32_t obj, const void *src, uint32_t len) { return flash_ok ? st_save(obj, src, len) : -9; }
@@ -427,18 +444,23 @@ index 512374b..2adf572 100644
  
  struct bootguard_s { uint32_t magic, failed, pending; };
 diff --git a/host/plat_host.c b/host/plat_host.c
-index 85620fd..c17be01 100644
+index 85620fd..f3a3e8a 100644
 --- a/host/plat_host.c
 +++ b/host/plat_host.c
-@@ -169,6 +169,7 @@ int32_t plat_enc(int role)
+@@ -168,7 +168,11 @@ int32_t plat_enc(int role)
+         mirror_enc(role, v);
      return v;
  }
- uint32_t plat_master(void) { return mirror_in_master(master); }
+-uint32_t plat_master(void) { return mirror_in_master(master); }
++static int32_t master_midi = -1;           /* (OGS) MASTER from MIDI until the pot moves */
++void plat_master_midi(int32_t v) { master_midi = v > 4096 ? 4096 : v; }
++static uint32_t master_now(void) { return master_midi >= 0 ? (uint32_t)master_midi : master; }
++uint32_t plat_master(void) { return mirror_in_master(master_now()); }
 +int plat_battery_raw(void) { return 600; }
  int plat_battery(void) { return 3; }   /* (the host and the emulator: full) */
  /* the lights ("leds"): bright, and dim (glow 0: none); PLAY's green counts as PLAY */
  void plat_lights(uint32_t b, uint32_t k, uint32_t db, uint32_t dk, int glow)
-@@ -546,6 +547,7 @@ int plat_store_size(uint32_t obj)
+@@ -546,6 +550,7 @@ int plat_store_size(uint32_t obj)
      store_ready();
      return obj >= OBJ_NOBJ || store_len[obj] <= 0 ? -1 : store_len[obj];
  }
@@ -446,7 +468,7 @@ index 85620fd..c17be01 100644
  int plat_store_save(uint32_t obj, const void *src, uint32_t len)
  {
      store_ready();
-@@ -557,6 +559,29 @@ int plat_store_save(uint32_t obj, const void *src, uint32_t len)
+@@ -557,6 +562,29 @@ int plat_store_save(uint32_t obj, const void *src, uint32_t len)
      store_writes++;
      return 0;
  }
@@ -476,20 +498,42 @@ index 85620fd..c17be01 100644
  
  static uint32_t cpu_pct;
  uint32_t plat_cpu_pct(void) { return cpu_pct; }
+@@ -957,9 +985,9 @@ static void run_ms(uint32_t ms)
+ #endif
+         while (audio_due_ms <= (double)now_ms) {      /* APP_BLOCK-frame blocks, as the device renders them */
+             double t0 = now_ns(), dt;
+-            app_render(blk, APP_BLOCK, uac_full ? 4096u : APP_GAIN(master));
++            app_render(blk, APP_BLOCK, uac_full ? 4096u : APP_GAIN(master_now()));
+             if (uac_full) {                         /* (the USB audio input took it at full level) the speaker: MASTER */
+-                const float g = (float)APP_GAIN(master) * (1.0f / 4096.0f);
++                const float g = (float)APP_GAIN(master_now()) * (1.0f / 4096.0f);
+                 for (k = 0; k < 2u * APP_BLOCK; k++)
+                     blk[k] = (int32_t)((float)blk[k] * g);
+             }
+@@ -1339,6 +1367,7 @@ int main(int argc, char **argv)
+             plat_host_exact = 0;
+         } else if (!strcmp(cmd, "master")) {
+             master = (uint32_t)atoi(a);
++            master_midi = -1;
+             run_ms(40);                         /* as the device's smoothing settles */
+         } else if (!strcmp(cmd, "midi")) {
+             int dev = !strcmp(a, "BLE-DEV"), p = dev ? PORT_BLE : find_name(PORT_N, NPORTS, a);
 diff --git a/include/plat.h b/include/plat.h
-index 2140404..a242ddf 100644
+index 2140404..7f369fa 100644
 --- a/include/plat.h
 +++ b/include/plat.h
-@@ -35,6 +35,8 @@ uint32_t plat_buttons(void);           /* held: bit B_* */
+@@ -34,7 +34,10 @@ uint32_t plat_ms(void);
+ uint32_t plat_buttons(void);           /* held: bit B_* */
  uint32_t plat_keys(void);              /* held: bit k = key k (0 = F3) */
  int32_t plat_enc(int role);            /* detents since the last call, + = clockwise; EN_* */
++void plat_master_midi(int32_t v);    /* (OGS) MASTER from MIDI (a learned knob): 0..4096 until the pot moves; -1: the pot's */
  uint32_t plat_master(void);            /* MASTER pot's position, 0..4096 (the render gets it as a gain: APP_GAIN) */
 +void plat_uboot(void);                 /* OGS 1.1.0: the chip's update mode (UBOOT), as REC at power-on (GLO > SYSTEM) */
 +int plat_battery_raw(void);            /* the battery's averaged reading, 0..1023 (0: none yet; INFO) */
  int plat_battery(void);                /* the battery: 0 (empty) .. 3 (full), 4 a USB host powers the FM-1, -1 not read
                                          * yet (the keys' readings own the converter: APP_KEY_SENSE) */
  
-@@ -200,6 +202,12 @@ int plat_store_size(uint32_t obj);                           /* its length in by
+@@ -200,6 +203,12 @@ int plat_store_size(uint32_t obj);                           /* its length in by
                                                                 * wants it whole or not at all checks it first) */
  int plat_store_save(uint32_t obj, const void *src, uint32_t len);   /* 0 = ok */
  #define PLAT_STORE_MAX 3840u           /* bytes per object */
@@ -634,6 +678,19 @@ index f3e945c..fa3364e 100644
      const sections = [];
      for (const ex of EXTRAS) {
        say(`Receiving ${esc(ex.what)} from ${esc(FW.name)}&hellip;`);
+diff --git a/web/emu/emu_web.c b/web/emu/emu_web.c
+index 4e182de..a02d6f7 100644
+--- a/web/emu/emu_web.c
++++ b/web/emu/emu_web.c
+@@ -108,7 +108,7 @@ __attribute__((used, visibility("default"))) void web_enc(int role, int32_t n)
+     if (role >= 0 && role < NE)
+         enc_acc[role] += n;
+ }
+-__attribute__((used, visibility("default"))) void web_master(uint32_t v) { master = v > 4096u ? 4096u : v; }
++__attribute__((used, visibility("default"))) void web_master(uint32_t v) { master = v > 4096u ? 4096u : v; master_midi = -1; }
+ __attribute__((used, visibility("default"))) uint32_t web_lit_buttons(void) { return lit_btn; }
+ __attribute__((used, visibility("default"))) uint32_t web_lit_keys(void) { return lit_keys; }
+ __attribute__((used, visibility("default"))) uint32_t web_dim_buttons(void) { return dim_btn; }
 diff --git a/web/fm1ota.js b/web/fm1ota.js
 index 482c784..9ee7033 100644
 --- a/web/fm1ota.js

@@ -23,6 +23,7 @@ enum {
     LI_LW_LPG, LI_LWS_MODE, LI_LWS_LW, LI_LWS_LM, LI_LWS_RANGE, LI_LWS_ESRC, LI_LWS_MXS, LI_LW_TAB, LI_LW_SSH,
     LI_LW_SOCT, LI_LW_SRC, LI_LW_DST, LI_LW_VIA, LI_LW_WM, LI_LW_NT, LI_LW_PH, LI_LW_FT, LI_LW_STK, LI_LW_UM,
     LI_LW_F2T, LI_LW_DSM,
+    LI_L_PICK,                                   /* (v1.3.0) GLO MIDI KNOB PICKUP */
     LI_N
 };
 extern const char *const *const ogs_lists[LI_N];
