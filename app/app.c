@@ -860,6 +860,18 @@ static void input(void)
                 if (kl == 1 ? pc == 0u : (0xAB5u >> pc & 1u))
                     kd |= 1u << k;
             }
+        if (sqg.a[AR_KLIGHT] && sq_scale() && ENG_GRP[set.eng] != EG_DRUM && ui.page != V_PERF
+            && !(ui.page == V_SEQ && ui.sq_pg == SQ_NOTES)) {   /* (v1.2.0) ARP > KEY > LIGHTS (zamiast GLO KEY LIGHTS): klawisze
+                                                                 * skali przygaszone, tonika jaśniej; RACK / NOTES / PERFORM: swoje */
+            kd = 0;
+            for (k = 0; k < NKEYS; k++) {
+                const uint32_t pc = (uint32_t)key_note(k) % 12u;
+                if (pc == sqg.a[AR_KEY])
+                    kmid |= 1u << k;
+                else if (sq_scale() >> pc & 1u)
+                    kd |= 1u << k;
+            }
+        }
         if (rk_on()) {                           /* (v0.87) RACK zamiast KEY LIGHTS: krok z nutą średnio, grający pusty najciemniej,
                                                   * grający z nutą pełnym światłem */
             rk_leds();
@@ -1094,12 +1106,8 @@ void app_frame(void)
             } else if (rk_on() && now - ui.arp_at >= 400u) {   /* (v0.57) RACK: trzymany bez klawisza = ustawienia (przy
                                                               * puszczeniu: ARP + klawisz = SOLO) */
                 go_arp();
-            } else if (ui.page == V_ARP) {   /* w ustawieniach ARP: MORE (jak w każdej sekcji; ON / OFF poza nimi); (v0.91, decyzja
-                                              * użytkownika 2026-11-03) tylko 1 <-> MORE, CHORD pod SELECT */
-                ui.arp_more = (uint8_t)(ui.arp_more == 0u ? 1u : 0u);
-                ui.knob = -1;
-                ui.redraw = 1;
-            } else {
+            } else {                         /* (v1.2.0, decyzja użytkownika 2026-11-06) także w ustawieniach ARP: ON / OFF (strony:
+                                              * SELECT; v0.91 - v1.1.2 tam 1 <-> MORE) */
                 arp_toggle();
             }
         } else if (!ui.arp_done && now - ui.arp_at >= 400u && !rk_on()) {
