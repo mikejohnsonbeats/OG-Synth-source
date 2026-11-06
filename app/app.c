@@ -339,7 +339,7 @@ OGS_UI static void input(void)
         if (ui.cp_k == k + 1u && !(keys & bit))   /* (v0.92) kopia dźwięku: pierwszy klawisz puszczony */
             ui.cp_k = 0;
         if (ENG_GRP[set.eng] == EG_DRUM && ui.sel_hold && (keys & bit) && !(ui.keys & bit) && rk_row_of((uint32_t)note) >= 0
-            && !(ui.page == V_SEQ && ui.sq_pg == SQ_NOTES)) {   /* (NOTES: SEL + klawisze = nuty w kursorze) */
+            && !(ui.page == V_SEQ && ui.sq_pg == SQ_NOTES) && !sel_keys_own()) {   /* (NOTES: SEL + klawisze = nuty w kursorze) */
             if (ui.cp_k && (keys >> (ui.cp_k - 1u) & 1u)) {   /* (v0.92, decyzja użytkownika 2026-11-04) SEL + trzymany + ten: kopia */
                 eaten |= bit;
                 ui.sel_used = 1;
@@ -374,10 +374,13 @@ OGS_UI static void input(void)
                     ui.arp_done = 1;
                 continue;
             }
-            if (!ui.sel_hold) {                  /* klawisz: krok strony (czarny: nic) */
+            if (!ui.sel_hold) {                  /* klawisz: krok strony; (v1.3.1, decyzja użytkownika 2026-11-06) czarny z nadrukiem:
+                                                  * strona perkusji od razu (jak SEL + klawisz, koło tak samo) */
                 eaten |= bit;
                 if (w >= 0)
                     rk_toggle((uint32_t)w);
+                else if (label_pages() & bit)
+                    label_key(key_label(k));
                 continue;
             }
             if (w >= 0) {                        /* SEL + klawisz: wiersz tego dźwięku; dalej gra jak zwykle (REC: nagrywa) */
@@ -394,6 +397,12 @@ OGS_UI static void input(void)
         }
         if (((ui.pf_keys | ui.cv_held) & bit) && !(keys & bit))   /* puszczony klawisz PERFORM (FX już może być puszczony) */
             pf_key(k, 0);
+        if (ENG_GRP[set.eng] == EG_DRUM && k == LABEL_KEY[K_AENV] && (keys & bit) && !(ui.keys & bit) && !ui.sel_hold
+            && ui.page >= V_HOME && !ui.gest) {   /* (v1.3.1, decyzja użytkownika 2026-11-06) perkusja: F#5 bez SEL = ENV od razu */
+            eaten |= bit;
+            label_key(K_AENV);
+            continue;
+        }
         if ((bit & avail) && (keys & bit) && !(ui.keys & bit)) {
             eaten |= bit;
             label_key(key_label(k));
@@ -411,7 +420,7 @@ OGS_UI static void input(void)
             rc_tap();
             continue;
         }
-        if (ENG_GRP[set.eng] == EG_DRUM && !rk_on() && (keys & bit) && !(ui.keys & bit)
+        if (ENG_GRP[set.eng] == EG_DRUM && !rk_on() && (keys & bit) && !(ui.keys & bit) && !sel_keys_own()
             && (ui.sel_hold || ui.page >= V_HOME)) {   /* perkusja: SEL trzymany + biały klawisz = wybór dźwięku bez grania;
                                                           * (v0.90, decyzja użytkownika 2026-11-03) napis też przy graniu (HOME, strony) */
             int32_t L = set.eng == ENG_MORPH ? mp_select(note) : set.eng == ENG_DUAL ? du_select(note) : dm_select(note);
@@ -892,12 +901,14 @@ OGS_UI static void input(void)
                     kd |= 1u << k;
             }
         }
+        if (ENG_GRP[set.eng] == EG_DRUM && ui.page >= V_HOME && AENV_PG[set.eng][0] >= 0)
+            kd |= 1u << LABEL_KEY[K_AENV];   /* (v1.3.1) perkusja: F#5 = ENV, przygaszony */
         if (rk_on()) {                           /* (v0.87) RACK zamiast KEY LIGHTS: krok z nutą średnio, grający pusty najciemniej,
                                                   * grający z nutą pełnym światłem */
             rk_leds();
             kb |= rk_keys(rk_led_note & rk_led_play);
             kmid = rk_keys(rk_led_note & ~rk_led_play);
-            kd = rk_keys(rk_led_play & ~rk_led_note);
+            kd = rk_keys(rk_led_play & ~rk_led_note) | label_pages();   /* (v1.3.1) klawisze stron perkusji: przygaszone */
         }
         if (ui.page == V_SEQ && ui.sq_pg == SQ_NOTES) {   /* (v0.90) NOTES: nuty kroku pod kursorem */
             sq_leds();
