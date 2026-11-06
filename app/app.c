@@ -187,6 +187,7 @@ static struct {
     uint32_t quick_at;
     int32_t knob;                        /* ostatnio kręcona gałka K1..K4 (0..3), -1 żadna */
     uint32_t knob_at, enc_at[NE];
+    uint8_t lr_cur, lr_on;               /* (v1.3.0) MIDI LEARN: wiersz listy; nauka trwa (czeka na kontroler) */
     uint32_t scope_at;                   /* ostatnia klatka oscyloskopu HOME */
     uint32_t browse_until;               /* SELECT z HOME: do kiedy czeka na akcję */
     uint32_t dirty_at;                   /* ostatnia zmiana do zapisania samemu */
@@ -294,7 +295,7 @@ void app_say(const char *a, const char *b)
     }
 }
 #include "ogs_app_07.c"
-static void input(void)
+OGS_UI static void input(void)
 {
     static uint32_t eaten;                   /* klawisze zużyte jako skróty: ich puszczenie nie gasi nuty */
     static uint8_t knote[NKEYS];             /* nuta z chwili naciśnięcia: puszczenie gasi tę samą (zmiana oktawy w
@@ -304,6 +305,13 @@ static void input(void)
     uint32_t chan = mt_ui() ? mt_ch(glob.g[G_MTFOC])   /* (v0.66.1) MULTI: MIDI OUT na kanale wybranej ścieżki (v1.0.1: z GLO) */
                   : glob.g[G_MIDICH] ? (uint32_t)glob.g[G_MIDICH] - 1u : 0u;
     int32_t e;
+    for (k = 0; k < NB; k++)                 /* (v1.3.0) MIDI LEARN: przyciski z kontrolera; kliknięcie = jedna klatka (kolejne: co drugą) */
+        if (lr_pc[k] != lr_ps[k] && !(ui.btn >> k & 1u)) {
+            lr_ps[k]++;
+            btn |= 1u << k;
+        }
+    btn |= lr_hold;
+    lr_frame(btn);
     touch_poll();
     keys = touch_keys();
     if (mt_ui() && ui.page != V_HOME && ui.page != V_ENGP && ui.page != V_MTL && ui.page != V_SCN)   /* (v0.85) poza głównym ekranem i oknami: kursor na wybranej (strony jej silnika) */
@@ -450,8 +458,8 @@ static void input(void)
         uint32_t bit = 1u << B_SEL;
         if ((btn & bit) && !(ui.btn & bit)) {
             ui.browse = 0;
-            if (ui.page == V_ALLP || ui.page == V_SCN) {   /* (v1.0.2) ALL PRESETS: OK przy puszczeniu, trzymany = usuń USER; w oknie
-                                                            * DELETE?: tak; (v1.1.2) lista scen tak samo */
+            if (ui.page == V_ALLP || ui.page == V_SCN || ui.page == V_LRN) {   /* (v1.0.2) ALL PRESETS: OK przy puszczeniu, trzymany = usuń
+                                                            * USER; w oknie DELETE?: tak; (v1.1.2) lista scen tak samo; (v1.3.0) MIDI LEARN */
                 if (ui.allp_del) {
                     if (ui.page == V_SCN)
                         scn_del();
@@ -473,7 +481,7 @@ static void input(void)
             }
         } else if (!(btn & bit) && (ui.btn & bit) && ui.allp_sel) {
             ui.allp_sel = 0;                 /* (v1.0.2) krótko (albo trzymany na nie-USER): OK; trzymany na USER: okno DELETE? */
-            if (ui.page == V_ALLP || ui.page == V_SCN)
+            if (ui.page == V_ALLP || ui.page == V_SCN || ui.page == V_LRN)
                 save_ok();
         } else if (!(btn & bit) && (ui.btn & bit) && ui.sel_hold) {
             ui.sel_hold = 0;
@@ -536,7 +544,7 @@ static void input(void)
             break;
         case B_GLO:                          /* GLO: wejście; drugi raz: powrót do poprzedniej sekcji i strony */
             if (ui.page >= V_HOME || PANEL_PAGE(ui.page) || ui.page == V_GLO || ui.page == V_INFO || ui.page == V_RESET
-                || ui.page == V_NOTE)
+                || ui.page == V_NOTE || ui.page == V_LRN)
                 go_glo();
             break;
         case B_FX:                           /* (v0.47) krótko: przy puszczeniu, trzymany: PERFORM; (v0.74) PERFORM tylko w MULTI —
@@ -579,7 +587,13 @@ static void input(void)
         }
     }
     for (k = 0; k < NE; k++) {
-        if ((e = plat_enc((int)k)) == 0)
+        const int32_t m = (int8_t)(lr_ec[k] - lr_es[k]), s = lr_stp[k];   /* (v1.3.0) MIDI LEARN: enkodery; kroki z gałek ze stopem bez
+                                                                      * przyspieszenia */
+        lr_es[k] = (uint8_t)(lr_es[k] + m);
+        lr_stp[k] = 0;
+        if (s)
+            ui.enc_at[k] = 0;
+        if ((e = plat_enc((int)k) + m + s) == 0)
             continue;
         ui.input_at = plat_ms();                 /* GLO SCREEN OFF: każdy ruch budzi */
         if (ui.allp_del && (ui.page == V_ALLP || ui.page == V_SCN))   /* (v1.0.2) okno DELETE?: gałki stoją */
@@ -683,6 +697,12 @@ static void input(void)
             }
             if (ui.page == V_INFO || ui.page == V_NOTE)
                 continue;
+            if (ui.page == V_LRN) {          /* (v1.3.0) MIDI LEARN: wiersz */
+                if (!ui.lr_on)
+                    ui.lr_cur = (uint8_t)clamp((int32_t)ui.lr_cur + (e > 0 ? 1 : -1), 0, LR_N - 1);
+                ui.redraw = 1;
+                continue;
+            }
             if (ui.page == V_NAME) {         /* okno nazwy: SELECT zmienia literę */
                 name_char(e);
                 continue;
@@ -831,7 +851,7 @@ static void input(void)
         uint32_t bl = btn
                     | (set.octave > 0 ? 1u << B_OCTUP : set.octave < 0 ? 1u << B_OCTDN : 0u)   /* oktawa poza 0 */
                     | (ui.page == V_HOME || ui.page == V_ALLP || ui.page == V_ENGP ? 1u << B_HOME
-                       : ui.page == V_GLO || ui.page == V_INFO || ui.page == V_RESET || ui.page == V_NOTE ? 1u << B_GLO
+                       : ui.page == V_GLO || ui.page == V_INFO || ui.page == V_RESET || ui.page == V_NOTE || ui.page == V_LRN ? 1u << B_GLO
                        : ui.page == V_FX || ui.page == V_FXL || ui.page == V_PERF ? 1u << B_FX
                        : ui.page == V_SCN ? 1u << B_HOME
                        : ui.page == V_SEQ || ui.page == V_SQT || ui.page == V_SQN ? 1u << B_SEQ : ui.page == V_ARP ? 0u
@@ -943,7 +963,7 @@ void app_ui_init(void)
     ui.redraw = 1;
 }
 #include "ogs_app_11.c"
-void app_frame(void)
+OGS_UI void app_frame(void)
 {
     static uint32_t last_pct, lit;
     static int32_t last_note = -2;
@@ -986,15 +1006,6 @@ void app_frame(void)
     out_unmute();                            /* zapisy flasha z poprzedniej klatki zrobione: dźwięk wraca płynnie */
     if (ui.page == V_HOME || ch_txt[0])      /* (v1.1.0) CHORD NAME na HOME */
         chord_name_upd(plat_ms());
-    {                                        /* (v1.1.0, P7) CC IN z przerwania */
-        uint32_t q;
-        for (q = 0; q < 4u; q++)
-            if (cc_req[q]) {
-                const uint32_t v = cc_req[q] & 0x7Fu;
-                cc_req[q] = 0;
-                cc_knob(q, v);
-            }
-    }
     if (pend_preset >= 0 && (dk_quiet || !eng_sounding() || preset_eng(pend_preset) != set.eng)) {
         int32_t id = pend_preset;            /* preset czekał na przygaszenie: teraz (cisza, bez trzasku) */
         preset_go(id);
@@ -1023,6 +1034,10 @@ void app_frame(void)
         ui.allp_sel = 0;                     /* (v1.0.2) ALL PRESETS: SEL trzymany 0,8 s na USER = okno DELETE? */
         ui.allp_del = 1;
         ui.redraw = 1;
+    }
+    if (ui.allp_sel && ui.page == V_LRN && !ui.lr_on && now - ui.sel_at >= SEL_EQ_MS) {   /* (v1.3.0) MIDI LEARN: SEL trzymany = wyczyść */
+        ui.allp_sel = 0;
+        lr_clear();
     }
     if (ui.page == V_FX && ui.sel_hold && !ui.sel_used
         && now - ui.sel_at >= SEL_EQ_MS) {   /* SEL trzymany: lista efektów; (v0.92, decyzja użytkownika 2026-11-04) wszędzie 0,8 s jak na EQ
@@ -1067,7 +1082,7 @@ void app_frame(void)
         }
     }
     if (ui.rec_hold) {                       /* (v0.92) REC: puszczony przed 400 ms = nagrywanie, trzymany = RECORD (drugi raz: z powrotem) */
-        int up = !(plat_buttons() >> B_REC & 1u);
+        int up = !(btn_now() >> B_REC & 1u);
         if (up || now - ui.rec_at >= 400u) {
             ui.rec_hold = 0;
             if (up)
@@ -1079,7 +1094,7 @@ void app_frame(void)
         }
     }
     if (ui.play_hold) {                      /* PLAY w NOTES: puszczony przed 400 ms = od kursora */
-        int up = !(plat_buttons() >> B_PLAY & 1u);
+        int up = !(btn_now() >> B_PLAY & 1u);
         if (up || now - ui.play_at >= 400u) {
             ui.play_hold = 0;
             sq.from = up ? ui.sq_cur : 0u;
@@ -1089,7 +1104,7 @@ void app_frame(void)
         }
     }
     if (ui.pf_hold) {                        /* (v0.47) FX: trzymany 300 ms = PERFORM; krótko (puszczenie) = FX / MORE */
-        if (!(plat_buttons() >> B_FX & 1u)) {
+        if (!(btn_now() >> B_FX & 1u)) {
             ui.pf_hold = 0;
             if (ui.page == V_PERF && !ui.pf_keys && !ui.cv_held)   /* (v0.90) klawisz efektu trzymany: strona zostaje (gałki ustawiają efekt) */
                 pf_leave();
@@ -1100,7 +1115,7 @@ void app_frame(void)
         }
     }
     if (ui.arp_hold) {                       /* ARP: trzymany 400 ms = ustawienia / powrót; krótko = ON / OFF */
-        if (!(plat_buttons() >> B_ARP & 1u)) {
+        if (!(btn_now() >> B_ARP & 1u)) {
             ui.arp_hold = 0;
             if (ui.arp_done) {
             } else if (rk_on() && now - ui.arp_at >= 400u) {   /* (v0.57) RACK: trzymany bez klawisza = ustawienia (przy
@@ -1118,7 +1133,7 @@ void app_frame(void)
     }
     if (ui.grp_hold) {                       /* EDIT / ENV / LFO trzymany: pierwsza strona sekcji */
         uint32_t b = ui.grp_hold - 1u;
-        if (!(plat_buttons() >> b & 1u)) {
+        if (!(btn_now() >> b & 1u)) {
             ui.grp_hold = 0;
             if (b == B_SEQ && !ui.grp_done)
                 go_seq();

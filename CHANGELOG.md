@@ -1,5 +1,9 @@
 # Changelog
 
+## v1.3.0 — 2026-11-06
+Źródła MPL OG Synth 1.3.0 „MIDI learn” (GLO > MIDI > SEL: gałki i przyciski FM1 z kontrolera MIDI; patches/fm1-base.patch:
+plat_master_midi — MASTER z MIDI do ruszenia gałki).
+
 ## v1.1.2 — 2026-11-05
 Źródła MPL OG Synth 1.1.2 „Clean scenes” (lista scen MULTI: SEL trzymany usuwa scenę, pusta scena czyści ścieżki;
 HOME: PRESET n / m fabrycznych presetów z efektami, issue #2).
