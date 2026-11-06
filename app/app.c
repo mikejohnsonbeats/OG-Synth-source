@@ -7489,6 +7489,17 @@ static void rk_knob(uint32_t k, int32_t e)       /* K1 VEL, K2 CHANCE, K3 RATCHE
     sq_changed();
 }
 
+static void octave_step(int32_t d);
+/* (v1.2.2, decyzja użytkownika 2026-11-06) NOTES: nuta z K2 poza klawiaturą (27 klawiszy od F3 + OCT + TRANSPOSE) -> oktawa
+ * klawiatury sama za nią (jak OCT: napis, światło OCT, zostaje po wyjściu), więc światła nut kroku znowu ją pokazują; perkusja:
+ * OCT = strój w półtonach, bez zmian */
+static void sq_oct_follow(int32_t note)
+{
+    const int32_t lo = 53 + 12 * set.octave + glob.g[G_TRANSP];
+    if (ENG_GRP[set.eng] != EG_DRUM && (note < lo || note >= lo + (int32_t)NKEYS))
+        octave_step(note < lo ? -((lo - note + 11) / 12) : (note - lo - (int32_t)NKEYS) / 12 + 1);
+}
+
 static void sq_knob(uint32_t k, int32_t e)
 {
     uint32_t i, L = sq_len();
@@ -7597,6 +7608,7 @@ static void sq_knob(uint32_t k, int32_t e)
         ui.sq_note = sq_add((uint32_t)ui.sq_pitch, 0u);
         sq_pick(0);
         sq_view_sel();
+        sq_oct_follow(ui.sq_pitch);
         return;
     }
     if (k == 2) {                                /* K3 LENGTH co krok GRID (v0.91; było co 1/4 kroku); (v0.90) SEL + K3: dowolnie (co tick) */
@@ -7617,8 +7629,10 @@ static void sq_knob(uint32_t k, int32_t e)
             n->vel = (uint8_t)clamp((int32_t)n->vel + d, 1, 127);
         }
     }
-    if (k == 1)
+    if (k == 1) {
         sq_view_sel();
+        sq_oct_follow(ui.sq_pitch);
+    }
     sq_changed();
 }
 
