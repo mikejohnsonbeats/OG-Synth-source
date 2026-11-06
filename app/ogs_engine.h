@@ -53,7 +53,9 @@ extern uint8_t *ogs_eram, *ogs_epool;
 
 enum { G_EDIT, G_ENV, G_LFO, G_ALL, NG };   /* sekcje stron; ALL = SELECT z HOME */
 /* podpisane czarne klawisze FM1 (skróty) */
-enum { K_OP1, K_OP2, K_OP3, K_OP4, K_OP5, K_OP6, K_PITCH, K_GLOBAL, K_MONO, K_POLY, NLABEL };
+enum { K_OP1, K_OP2, K_OP3, K_OP4, K_OP5, K_OP6, K_PITCH, K_GLOBAL, K_MONO, K_POLY,
+       K_AENV,                       /* (v1.3.1) F#5 bez nadruku: obwiednia głośności (app.c AENV_PG, nie w tablicach silników) */
+       NLABEL };
 /* (v0.64.5) skróty SEL + klawisz: silnik daje koła stron t[OP1..GLOBAL][KEY_CYC] (-1 = koniec / brak). Klawisz z
  * innej strony = pierwsza strona koła, ze strony koła = następna (po ostatniej pierwsza); świeci na stronach koła */
 #define KEY_CYC 5

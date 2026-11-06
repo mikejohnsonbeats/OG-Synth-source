@@ -1,5 +1,9 @@
 # Changelog
 
+## v1.3.1 — 2026-11-06
+Źródła MPL OG Synth 1.3.1 „Env key” (F#5 = obwiednia głośności, RACK: klawisze z nadrukiem na strony perkusji,
+CHORD LEARN w perkusji, engine_switch bez strony spoza silnika; app/ogs_engine.h: K_AENV).
+
 ## v1.3.0 — 2026-11-06
 Źródła MPL OG Synth 1.3.0 „MIDI learn” (GLO > MIDI > SEL: gałki i przyciski FM1 z kontrolera MIDI; patches/fm1-base.patch:
 plat_master_midi — MASTER z MIDI do ruszenia gałki).

@@ -3196,6 +3196,7 @@ static void mt_focus_go(int32_t t)           /* wybrana ścieżka: jej silnik na
         set_dirty = 1;
     }
 }
+static void page_fix(int32_t e);
 static void engine_switch(int32_t e)
 {
     if (e == set.eng)
@@ -3210,6 +3211,7 @@ static void engine_switch(int32_t e)
     ev_push(EV_ALL_OFF);
     set.eng = (uint8_t)e;                    /* przerwanie audio wymienia wspólny RAM: stary cichnie, nowy od zera */
     set_dirty = 1;
+    page_fix(e);
 }
 
 /* (v0.53) brzmienia FM1 w bankach DX7 (decyzja użytkownika 2026-10-29: z 8 banków DX7 na start 4 = FM1, do podmiany):
@@ -4845,10 +4847,11 @@ __attribute__((used, visibility("default"))) void ogs_splash_skip(void) { splash
 static int32_t grp_n(int32_t g);
 static int32_t grp_at(int32_t g, int32_t i);
 static const char *pg_name(int32_t page);
+static int32_t lbl_page(int32_t l, int32_t page);
 __attribute__((used, visibility("default"))) int32_t ogs_label(int32_t l, int32_t page)   /* testy: skrót SEL + klawisz */
 {
     (void)page;                                 /* (tools/op_keys.mjs; v0.64.4: skróty stałe, jak z HOME) */
-    return E->label_page(l, G_ALL, -1);         /* (-1 = V_HOME, zdefiniowane dalej) */
+    return lbl_page(l, -1);                     /* (-1 = V_HOME, zdefiniowane dalej); (v1.3.1) l 10 = F#5 */
 }
 __attribute__((used, visibility("default"))) int32_t ogs_grp(int32_t g, int32_t i) { return i < 0 ? grp_n(g) : grp_at(g, i); }
 __attribute__((used, visibility("default"))) const char *ogs_pgname(int32_t page) { return page < 0 ? "HOME" : pg_name(page); }
@@ -5113,6 +5116,15 @@ static struct {
     uint8_t redraw_roll;                 /* odtwarzanie: tylko piano roll (bez paska i chipów: mniej przesyłania) */
     uint8_t redraw;
 } ui = {.page = V_HOME, .knob = -1, .sq_low = 55, .sq_note = -1, .sq_pitch = 60, .sq_zv = 1, .sq_zh = 2, .pf_mac = {0, 0, 0, 100}};
+static void page_fix(int32_t e)          /* (v1.3.1) zmiana silnika na stronie, której nowy silnik nie ma (import CZ z WAVE
+                                          * VINTAGE, pomiar): HOME zamiast odczytu poza tabelą stron */
+{
+    if (ui.page >= ENG[e].npages) {
+        ui.page = V_HOME;
+        ui.quick = 0;
+        ui.redraw = 1;
+    }
+}
 OGS_UIN static void lr_knob(uint32_t k, int32_t e);   /* (v1.3.0) MIDI LEARN (niżej, za preset_turn) */
 OGS_UIN static void lr_ok(void);
 OGS_UIN static void lr_clear(void);
@@ -8599,7 +8611,24 @@ static void algo_turn(int32_t e)         /* ALGO: parametr silnika (MOOG: CUTOFF
 }
 
 /* podpisane czarne klawisze FM1 (OP1..OP6, PITCH, GLOBAL, MONO, POLY): skróty z trzymanym SEL */
-static const uint8_t LABEL_KEY[NLABEL] = {1, 3, 5, 8, 10, 13, 15, 17, 20, 22};   /* klawisz 0 = F3 */
+static const uint8_t LABEL_KEY[NLABEL] = {1, 3, 5, 8, 10, 13, 15, 17, 20, 22, 25};   /* klawisz 0 = F3; (v1.3.1) 25 = F#5 */
+/* (v1.3.1, decyzja użytkownika 2026-11-06) F#5 (czarny bez nadruku) = obwiednia głośności w każdym silniku, druga strona przy
+ * kolejnym naciśnięciu; FM6 bez (każdy OP ma swoją). Numery stron jak w tabelach silników (test tools/v131_test.mjs: nazwy). */
+static const int8_t AENV_PG[NENG][2] = {
+    [ENG_MOOG] = {9, -1}, [ENG_DX7] = {-1, -1}, [ENG_WT] = {8, -1}, [ENG_PD] = {7, 9},   /* AMP ENV, -, AMP ENV, DCA 1 > DCA 2 */
+    [ENG_VCO] = {6, -1}, [ENG_SEM] = {6, -1}, [ENG_DCO] = {6, -1}, [ENG_BIT] = {7, -1},   /* AMP ENV, AMP ENV, AMP, AMP ENV */
+    [ENG_WEST] = {7, 11}, [ENG_ALPHA] = {6, -1}, [ENG_MORPH] = {5, -1}, [ENG_88] = {3, -1},   /* ENV 1 > ENV 2, AMP, ENV, ENV */
+    [ENG_99] = {3, -1}, [ENG_DUAL] = {5, 6}, [ENG_PHYS] = {4, -1}, [ENG_FORMANT] = {7, -1},   /* ENV, ENV 1 > ENV 2, AMP ENV, AMP ENV */
+};
+static int32_t aenv_page(int32_t page)   /* F#5: obwiednia głośności (na pierwszej: druga, jeśli jest) */
+{
+    const int8_t *a = AENV_PG[set.eng];
+    return a[0] >= 0 && page == a[0] && a[1] >= 0 ? a[1] : a[0];
+}
+static int32_t lbl_page(int32_t l, int32_t page)   /* strona pod klawiszem z nadrukiem (i F#5) */
+{
+    return l == K_AENV ? aenv_page(page) : E->label_page(l, G_ALL, page);
+}
 
 static int32_t key_label(uint32_t key)
 {
@@ -8609,19 +8638,23 @@ static int32_t key_label(uint32_t key)
     return l;
 }
 
-static uint32_t label_avail(void)        /* klawisze, które przy trzymanym SEL coś robią */
+static uint32_t label_pages(void)        /* (v1.3.1) klawisze z nadrukiem, pod którymi jest strona silnika */
 {
     uint32_t b = 0;
     int32_t l;
     for (l = 0; l < NLABEL; l++)
-        if (E->label_page(l, G_ALL, V_HOME) >= 0 || l == K_MONO || l == K_POLY)   /* (v0.64.4) stałe skróty */
+        if (lbl_page(l, V_HOME) >= 0)
             b |= 1u << LABEL_KEY[l];
     return b;
+}
+static uint32_t label_avail(void)        /* klawisze, które przy trzymanym SEL coś robią: strony i (v0.64.4) MONO / POLY */
+{
+    return label_pages() | 1u << LABEL_KEY[K_MONO] | 1u << LABEL_KEY[K_POLY];
 }
 
 static void label_key(int32_t l)
 {
-    int32_t pg = E->label_page(l, G_ALL, ui.page);   /* (v0.64.4) z każdej strony tam, gdzie z HOME; (v0.64.5)
+    int32_t pg = lbl_page(l, ui.page);       /* (v0.64.4) z każdej strony tam, gdzie z HOME; (v0.64.5)
                                                      * strona podana tylko dla koła pod klawiszem (WAVE PITCH: LFO 1-4) */
     if (l == K_MONO || l == K_POLY) {
         char t[12];
@@ -8644,7 +8677,9 @@ static uint32_t label_lit(void)          /* jasno: klawisz bieżącej strony (OP
 {
     int32_t l = ui.page >= 0 ? E->page_label(ui.page) : -1;
     const int32_t d = drum_page_lane();
-    return (l >= 0 ? 1u << LABEL_KEY[l] : 0u) | (d >= 0 ? 1u << (RK_NOTE[d] - 53u) : 0u);
+    const int8_t *a = AENV_PG[set.eng];
+    return (l >= 0 ? 1u << LABEL_KEY[l] : 0u) | (d >= 0 ? 1u << (RK_NOTE[d] - 53u) : 0u)
+         | (ui.page >= 0 && (ui.page == a[0] || ui.page == a[1]) ? 1u << LABEL_KEY[K_AENV] : 0u);   /* (v1.3.1) F#5 */
 }
 
 /* SAVE: na INIT od razu nowy preset; na innym okno NADPISZ / NOWY (SELECT wybiera, SEL zatwierdza, HOME nie) */
@@ -9920,6 +9955,13 @@ static int sel_usable(void)              /* SEL coś tu robi: opcja strony / MOR
     return ui.page != V_HOME || mt_ui();     /* (v0.86) główny ekran MULTI: MUTE / lista */
 }
 
+/* (v1.3.1, prośba użytkownika 2026-11-06) SEL + klawisze mają tu swoje znaczenie: ARP > CHORD (LEARN: trzymane klawisze + SEL),
+ * PERFORM (klawisze = efekty) — bez kopii i wyboru dźwięku perkusji (SEL + klawisz) */
+static int sel_keys_own(void)
+{
+    return (ui.page == V_ARP && ui.arp_more == ARP_CHPG) || ui.pf_hold || ui.page == V_PERF;
+}
+
 OGS_UI static void input(void)
 {
     static uint32_t eaten;                   /* klawisze zużyte jako skróty: ich puszczenie nie gasi nuty */
@@ -9964,7 +10006,7 @@ OGS_UI static void input(void)
         if (ui.cp_k == k + 1u && !(keys & bit))   /* (v0.92) kopia dźwięku: pierwszy klawisz puszczony */
             ui.cp_k = 0;
         if (ENG_GRP[set.eng] == EG_DRUM && ui.sel_hold && (keys & bit) && !(ui.keys & bit) && rk_row_of((uint32_t)note) >= 0
-            && !(ui.page == V_SEQ && ui.sq_pg == SQ_NOTES)) {   /* (NOTES: SEL + klawisze = nuty w kursorze) */
+            && !(ui.page == V_SEQ && ui.sq_pg == SQ_NOTES) && !sel_keys_own()) {   /* (NOTES: SEL + klawisze = nuty w kursorze) */
             if (ui.cp_k && (keys >> (ui.cp_k - 1u) & 1u)) {   /* (v0.92, decyzja użytkownika 2026-11-04) SEL + trzymany + ten: kopia */
                 eaten |= bit;
                 ui.sel_used = 1;
@@ -9999,10 +10041,13 @@ OGS_UI static void input(void)
                     ui.arp_done = 1;
                 continue;
             }
-            if (!ui.sel_hold) {                  /* klawisz: krok strony (czarny: nic) */
+            if (!ui.sel_hold) {                  /* klawisz: krok strony; (v1.3.1, decyzja użytkownika 2026-11-06) czarny z nadrukiem:
+                                                  * strona perkusji od razu (jak SEL + klawisz, koło tak samo) */
                 eaten |= bit;
                 if (w >= 0)
                     rk_toggle((uint32_t)w);
+                else if (label_pages() & bit)
+                    label_key(key_label(k));
                 continue;
             }
             if (w >= 0) {                        /* SEL + klawisz: wiersz tego dźwięku; dalej gra jak zwykle (REC: nagrywa) */
@@ -10019,6 +10064,12 @@ OGS_UI static void input(void)
         }
         if (((ui.pf_keys | ui.cv_held) & bit) && !(keys & bit))   /* puszczony klawisz PERFORM (FX już może być puszczony) */
             pf_key(k, 0);
+        if (ENG_GRP[set.eng] == EG_DRUM && k == LABEL_KEY[K_AENV] && (keys & bit) && !(ui.keys & bit) && !ui.sel_hold
+            && ui.page >= V_HOME && !ui.gest) {   /* (v1.3.1, decyzja użytkownika 2026-11-06) perkusja: F#5 bez SEL = ENV od razu */
+            eaten |= bit;
+            label_key(K_AENV);
+            continue;
+        }
         if ((bit & avail) && (keys & bit) && !(ui.keys & bit)) {
             eaten |= bit;
             label_key(key_label(k));
@@ -10036,7 +10087,7 @@ OGS_UI static void input(void)
             rc_tap();
             continue;
         }
-        if (ENG_GRP[set.eng] == EG_DRUM && !rk_on() && (keys & bit) && !(ui.keys & bit)
+        if (ENG_GRP[set.eng] == EG_DRUM && !rk_on() && (keys & bit) && !(ui.keys & bit) && !sel_keys_own()
             && (ui.sel_hold || ui.page >= V_HOME)) {   /* perkusja: SEL trzymany + biały klawisz = wybór dźwięku bez grania;
                                                           * (v0.90, decyzja użytkownika 2026-11-03) napis też przy graniu (HOME, strony) */
             int32_t L = set.eng == ENG_MORPH ? mp_select(note) : set.eng == ENG_DUAL ? du_select(note) : dm_select(note);
@@ -10517,12 +10568,14 @@ OGS_UI static void input(void)
                     kd |= 1u << k;
             }
         }
+        if (ENG_GRP[set.eng] == EG_DRUM && ui.page >= V_HOME && AENV_PG[set.eng][0] >= 0)
+            kd |= 1u << LABEL_KEY[K_AENV];   /* (v1.3.1) perkusja: F#5 = ENV, przygaszony */
         if (rk_on()) {                           /* (v0.87) RACK zamiast KEY LIGHTS: krok z nutą średnio, grający pusty najciemniej,
                                                   * grający z nutą pełnym światłem */
             rk_leds();
             kb |= rk_keys(rk_led_note & rk_led_play);
             kmid = rk_keys(rk_led_note & ~rk_led_play);
-            kd = rk_keys(rk_led_play & ~rk_led_note);
+            kd = rk_keys(rk_led_play & ~rk_led_note) | label_pages();   /* (v1.3.1) klawisze stron perkusji: przygaszone */
         }
         if (ui.page == V_SEQ && ui.sq_pg == SQ_NOTES) {   /* (v0.90) NOTES: nuty kroku pod kursorem */
             sq_leds();
@@ -11304,6 +11357,8 @@ OGS_UI static void page_hint(int more)
             text_cat(page_buf, "PITCH   ");
         if (E->label_page(K_GLOBAL, G_ALL, V_HOME) >= 0)
             text_cat(page_buf, "VOICE   ");
+        if (AENV_PG[set.eng][0] >= 0 && !draw)   /* (v1.3.1) F#5 (WAVE DRAW: KNOBS: Q, nie mieści się) */
+            text_cat(page_buf, "ENV   ");
         text_cat(page_buf, "MONO / POLY");
     } else {
         if (more || has_more(ui.page)) {     /* (bez MORE: SELECT się nie mieści, a trzymanie sekcji to skrót) */
