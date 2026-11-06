@@ -13329,6 +13329,19 @@ void app_frame(void)
         }
         was_live = (uint8_t)live;
     }
+    {                                        /* (v1.2.3, decyzja użytkownika 2026-11-06) wyjście z NOTES (i karty nuty): oktawa sprzed
+                                              * wejścia — zmiany z K2 (sq_oct_follow) i z OCT w NOTES tylko na czas edycji; perkusja:
+                                              * OCT = strój, zostaje */
+        static int8_t nt_oct = -128;
+        const int in = (ui.page == V_SEQ && ui.sq_pg == SQ_NOTES) || ui.page == V_SQN;
+        if (in && nt_oct == -128) {
+            nt_oct = set.octave;
+        } else if (!in && nt_oct != -128) {
+            if (ENG_GRP[set.eng] != EG_DRUM)
+                octave_step(nt_oct - set.octave);
+            nt_oct = -128;
+        }
+    }
     sq_autosave(now);
     if (ui.page == V_INFO && now - ui.knob_at >= 500u) {   /* INFO: liczby na żywo */
         ui.knob_at = now;
