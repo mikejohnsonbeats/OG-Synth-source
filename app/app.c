@@ -210,7 +210,8 @@ enum { G_VHOME, G_VPAGES, G_TUNE, G_MIDICH, G_VEL, G_PRESS, G_TRANSP, G_ACCEL, G
                                           * MIDI > OTHER TRACKS: niewybrane ścieżki MULTI: NOTES (jak dotąd) / + BEND, WHEEL, PRESS (P6) */
        G_CCIN,                           /* (v1.1.0) MIDI > CC IN: OFF (jak dotąd) / ON: CC 21-24 = K1-K4 strony (P7) */
        G_TUNEK,                          /* (v1.1.0) PLAY > TUNE KNOB: FINE (jak dotąd) / SEMITONES (P9) */
-       G_CHNAME,                         /* (v1.1.0) DISPLAY > CHORD NAME: OFF (jak dotąd) / ON (akordy A) */
+       G_CHNAME,                         /* (v1.1.0) DISPLAY > CHORD NAME: OFF (jak dotąd) / ON (akordy A); (v1.2.0) nieużywane:
+                                          * ARP > CHORD > NAME (sqg.a[AR_CHNAME]) */
        NGALL };
 #define NGX 8                            /* miejsca glob.gx (zapas na kolejne pola) */
 #define NGX2 8                           /* (v1.1.0) miejsca glob.gx2 */
@@ -314,7 +315,7 @@ static const int8_t GS_ITEM[NGS][GS_N] = {
     {G_TUNE, G_TRANSP, G_VEL, G_VELFIX, G_PRESS, G_ACCEL, G_TOPKEYS, G_TUNEK, -1},
     {G_MIDICH, G_MIDIOUT, G_LOCAL, G_PROGCH, G_CLKIN, G_CLKOUT, G_MTCH0, G_MTCH0 + 1, G_MTCH0 + 2, G_MTCH0 + 3, G_MTCTL, G_CCIN, -1},
     {G_SPKEQ, G_CPU2, G_MTMST, G_MCTH, G_MCRA, G_MCAT, G_MCRE, -1},
-    {G_VHOME, G_VPAGES, G_LIGHTS, G_KEYL, G_SCROFF, G_COLOR, G_CHNAME, -1},
+    {G_VHOME, G_VPAGES, G_LIGHTS, G_KEYL, G_SCROFF, G_COLOR, -1},   /* (v1.2.0: CHORD NAME do ARP > CHORD, pole G_CHNAME wolne) */
     {G_ALGO0, G_ALGO0 + 1, G_ALGO0 + 2, G_ALGO0 + 3, G_ALGO0 + 4, G_ALGO0 + 5, G_ALGO0 + 6, G_ALGO0 + 7, G_ALGO8, G_ALGO8 + 1, G_ALGO8 + 2, G_ALGO8 + 6, G_ALGO8 + 7, -1},   /* silniki (NENG; od
                                                                                         * dziewiątego: G_ALGO8) */
     {-1},
@@ -975,8 +976,8 @@ static float dk_g = 1.0f, dk_epk;            /* dk_epk: szczyt wyjścia silnika 
  * zagrał (zmiana CHORD przy trzymanym klawiszu nie zostawia wiszących nut). CHORD OFF: jak do v0.38 (podwójny note on
  * i jeden note off = cisza). */
 enum { CH_OFF, CH_MIN7, CH_MIN9, CH_MAJ7, CH_MAJ9, CH_SUS2, CH_SUS4, CH_MIN, CH_MAJ, CH_DOM7, CH_MIN11, CH_OCT,
-       CH_FIFTH, CH_LEARN, CH_KEY3, CH_KEY7, NCHORD };   /* (v1.1.0) KEY 3 / KEY 7: ze skali wzoru (SEQ > KEY; OFF: C-dur) */
-_Static_assert(NCHORD <= 16, "CHORD: rodzaj w bitach 0-3 dodatku [0], VOICING w bitach 4-5 (v1.1.0)");
+       CH_FIFTH, CH_LEARN, CH_KEY3, CH_KEY7, NCHORD };   /* (v1.1.0) KEY 3 / KEY 7: ze skali (v1.2.0: ARP > KEY; OFF: C-dur) */
+_Static_assert(NCHORD == 16, "CHORD: rodzaj w bitach 0-3 dodatku [0], VOICING w bitach 4-5 (v1.1.0); ARDEF TYPE hi 15 (v1.2.0)");
 static const char *const CHORD_NAME[NCHORD] = {"OFF", "MIN7", "MIN9", "MAJ7", "MAJ9", "SUS2", "SUS4", "MIN", "MAJ", "7",
                                                "MIN11", "OCT", "FIFTH", "LEARNED", "KEY 3", "KEY 7"};
 static const uint32_t CHORD_IV[CH_LEARN] = {   /* bit k = +k półtonów (bit 0: klawisz) */
@@ -1014,19 +1015,27 @@ static uint32_t chord_voice(uint32_t m, uint32_t vo)
     }
     return m;
 }
-static uint32_t chord_mask(const uint8_t *x, int32_t key)
+/* (v1.2.0) t rodzaj, vo VOICING, ln nauczony (do CHORD_LN półtonów, 0 kończy) */
+static uint32_t chord_m(uint32_t t, uint32_t vo, const uint8_t *ln, int32_t key)
 {
-    uint32_t t = x[0] & 15u, m = 1u, k;
+    uint32_t m = 1u, k;
     if (t == CH_LEARN) {
-        for (k = 1; k <= CHORD_LN && x[k]; k++)
-            if (x[k] < 32u)
-                m |= 1u << x[k];
+        for (k = 0; k < CHORD_LN && ln[k]; k++)
+            if (ln[k] < 32u)
+                m |= 1u << ln[k];
     } else if (t == CH_KEY3 || t == CH_KEY7) {
         m = chord_key((uint32_t)key, t == CH_KEY7);
     } else if (t && t < CH_LEARN) {
         m = CHORD_IV[t];
     }
-    return chord_voice(m, x[0] >> 4 & 3u);
+    return chord_voice(m, vo);
+}
+/* (v1.2.0, decyzje użytkownika 2026-11-06) akord systemowo z ARP > CHORD; preset z akordem w dodatkach (fabryczne GARAGE STAB /
+ * LIQUID PAD, USER sprzed 1.2.0) gra swój, dopóki jest wczytany (następny preset bez akordu: znowu ten z ARP) */
+static uint32_t chord_of(const uint8_t *x, int32_t key)
+{
+    return x[0] & 15u ? chord_m(x[0] & 15u, x[0] >> 4 & 3u, x + 1, key)
+                      : chord_m(sqg.a[AR_CHT], sqg.a[AR_CHV], sqg.learn, key);
 }
 static void sub_track(void)                  /* SUB: najniższa brzmiąca nuta (z GLO TUNE) */
 {
@@ -1061,7 +1070,7 @@ static void eng_off(const engine_t *e, int32_t key)
     nt_key[key & 127] = 0;
     sub_track();
 }
-static uint32_t chord_at(int32_t key) { return eng_play < NENG && mt_drum(eng_play) ? 1u : chord_mask(xt_play(), key); }   /* (v0.92) perkusja: bez CHORD */
+static uint32_t chord_at(int32_t key) { return eng_play < NENG && mt_drum(eng_play) ? 1u : chord_of(xt_play(), key); }   /* (v0.92) perkusja: bez CHORD */
 static void eng_on(const engine_t *e, int32_t key, float v) { eng_on_m(e, key, v, chord_at(key)); }
 static void eng_on_m(const engine_t *e, int32_t key, float v, uint32_t m)
 {
@@ -4787,7 +4796,9 @@ __attribute__((used, visibility("default"))) int32_t ogs_sq(int32_t w)
             n += sqp.n[i].vel != 0;
         return n;
     }
-    return w == 0 ? sq.play : w == 1 ? (int32_t)sq.pos : w == -2 ? (int32_t)sq_scale() : w == 6 ? sqp.rsv[0] | sqp.rsv[1] << 4 | sqp.rsv[2] << 8   /* (v1.1.0) */
+    return w <= -100 && w > -100 - AR_NP ? sqg.a[-100 - w]   /* (v1.2.0) ustawienia ARP (testy) */
+         : w == 0 ? sq.play : w == 1 ? (int32_t)sq.pos : w == -2 ? (int32_t)sq_scale()
+         : w == 6 ? sqg.a[AR_KEY] | sqg.a[AR_SCALE] << 4 | sqg.a[AR_KEYS] << 8   /* (v1.1.0; v1.2.0: z ARP) */
          : w == 3 ? sqg.arp_on : w == 4 ? ar.nl : w == 5 ? sq.rec
          : w == 7 ? sqp.bpm10 : w == 8 ? sqp.grid : w == 9 ? sqg.pat : w == 10 ? sqp_dirty : w == 11 ? sqp.bars : w >= 12 ? ui_sq(w) : -1;
 }
@@ -5152,29 +5163,10 @@ static int32_t param_step(int32_t id, int32_t d)
     return v;
 }
 
-/* (v0.45) CHORD: wspólna strona EDIT każdego silnika, za VOICE (decyzja użytkownika 2026-10-28). Numer PG_CHORD leży
- * poza stronami silników — silnik o niej nie wie: sekcje (grp_n / grp_at), gałka, SEL, ekran robi app.c. Akord to
- * dodatki presetu (xtc: [0] rodzaj, [1..6] nauczony), jak dotąd. */
-#define PG_CHORD 100
-static int32_t chord_slot(int32_t g)     /* w sekcji g CHORD stoi za tą pozycją (-1: nie w tej sekcji) */
-{
-    int32_t v = E->label_page(K_GLOBAL, G_EDIT, -1), i;
-    if ((g != G_EDIT && g != G_ALL) || ENG_GRP[set.eng] == EG_DRUM)   /* (v0.92, decyzja użytkownika 2026-11-04) perkusja: bez strony CHORD */
-        return -1;
-    for (i = 0; i < E->ngrp[g]; i++)
-        if (E->grp[g][i] == v)
-            return i;
-    return E->ngrp[g] - 1;
-}
-static int32_t grp_n(int32_t g) { return E->ngrp[g] + (chord_slot(g) >= 0); }
-static int32_t grp_at(int32_t g, int32_t i)
-{
-    int32_t a = chord_slot(g);
-    return a < 0 || i <= a ? E->grp[g][i] : i == a + 1 ? PG_CHORD : E->grp[g][i - 1];
-}
-static const char *pg_name(int32_t page) { return page == PG_CHORD ? "CHORD" : E->page_name[page]; }
-static void chord_turn(uint32_t k, int32_t e);
-static void chord_learn(void);
+/* (v0.45 - v1.1.2 w EDIT każdego silnika była strona CHORD (PG_CHORD); v1.2.0: CHORD w ustawieniach ARP, systemowo) */
+static int32_t grp_n(int32_t g) { return E->ngrp[g]; }
+static int32_t grp_at(int32_t g, int32_t i) { return E->grp[g][i]; }
+static const char *pg_name(int32_t page) { return E->page_name[page]; }
 
 static int32_t page_group(int32_t page)
 {
@@ -5189,8 +5181,6 @@ static int32_t page_group(int32_t page)
 static int has_more(int32_t page)
 {
     int32_t k;
-    if (page == PG_CHORD)
-        return 0;
     for (k = 0; E->more && k < 4; k++)
         if (E->more(page, k) >= 0)
             return 1;
@@ -5205,8 +5195,6 @@ static int32_t knob_id(int32_t k)        /* parametr pod gałką na bieżącej s
 {
     if (set.eng == ENG_WT && ui.sel_hold && (ui.page == WP_DRAW1 || ui.page == WP_DRAW2))
         return W_DRAWQ + (ui.page == WP_DRAW2 ? 4 : 0) + k;
-    if (ui.page == PG_CHORD)                 /* (gałka CHORD: chord_turn) */
-        return -1;
     return more_on() ? E->more(ui.page, k) : E->knob(ui.page, k);
 }
 
@@ -6270,15 +6258,15 @@ static void fx_mode(void)                /* SEL krótko: włącza / wyłącza (r
  * (v0.90, decyzje użytkownika 2026-11-03; docs/sekwencer.md na górze) SEL + OP1-4 = ścieżka (było SEQ + OP), NOTES: świecą klawisze nut
  * kroku pod kursorem, SEL + K3 długość co tick, SEL + K4 UNDO / REDO, SEL + ALGO długość co GRID,
  * K1 znowu po wysokości (ta sama wysokość: od lewej), VEL RANDOM i QUANTIZE w karcie nuty, sceny MULTI: HOME na głównym ekranie. */
-enum { SQ_NOTES, SQ_PATTERN, SQ_FEEL, SQ_RACK, SQ_OPT, SQ_REC, SQ_KEY, SQ_NPG };   /* (v1.1.0) KEY: tonacja wzoru (za RECORD) */   /* (v0.57) RACK: tylko silniki perkusji; (v0.88) OPT: strona ustawień;
-                                                                             * (v0.92) REC: strona nagrywania (REC trzymany) */
-static const char *const SQ_PGNAME[SQ_NPG] = {"NOTES", "PATTERN", "FEEL", "RACK", "OPTIONS", "RECORD", "KEY"};
-/* (v1.1.0, P14) strona KEY (SELECT za RECORD): K1 KEY, K2 SCALE (OFF = bez tonacji, jak dotąd), K3 SNAP (klawisze i MIDI w skali) */
+enum { SQ_NOTES, SQ_PATTERN, SQ_FEEL, SQ_RACK, SQ_OPT, SQ_REC, SQ_NPG };   /* (v0.57) RACK: tylko silniki perkusji; (v0.88) OPT: strona ustawień;
+                                                                     * (v0.92) REC: strona nagrywania (REC trzymany); (v1.1.0 - v1.1.2
+                                                                     * za RECORD strona KEY; v1.2.0: KEY w ustawieniach ARP) */
+static const char *const SQ_PGNAME[SQ_NPG] = {"NOTES", "PATTERN", "FEEL", "RACK", "OPTIONS", "RECORD"};
+/* (v1.1.0, P14) tonacja: KEY, SCALE (OFF = bez tonacji, jak dotąd); (v1.2.0) w ustawieniach ARP (ARDEF) */
 static const char *const L_PC12[12] = {"C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"};
 static const char *const L_SCALE[12] = {"OFF", "MAJOR", "MINOR", "DORIAN", "PHRYGIAN", "LYDIAN", "MIXOLYDIAN", "HARM MINOR",
                                         "MEL MINOR", "PENTA MAJOR", "PENTA MINOR", "BLUES"};
-static const pdef_t KYDEF[4] = {{"KEY", 0, 11, 0, F_LIST, LI(L_PC12)}, {"SCALE", 0, 11, 0, F_LIST, LI(L_SCALE)},
-                                {"SNAP", 0, 1, 0, F_LIST, LI(L_ONOFF)}, {"", 0, 0, 0, F_NONE, 0}};
+static const char *const L_VOICE[] = {"CLOSE", "OPEN", "INV 1", "INV 2"};   /* (v1.1.0) CHORD VOICING; (v1.2.0) ARP > CHORD K2 */
 static const int8_t SQ_OPTG[4] = {-1, G_SQVEL, G_SQK1INV, G_SQZINV};   /* (v0.88) OPTIONS: pola GLO pod K1-K4; (v0.90) K1 pusta: SEL + ALGO już bez wyboru */
 static const char *const L_CLICK[] = {"OFF", "REC", "ON"};
 /* (v0.92, decyzja użytkownika 2026-11-04) REC trzymany: METRONOME (klik wzoru, jak FEEL CLICK), COUNT IN (odliczanie przed nagraniem
@@ -7015,7 +7003,7 @@ static void sq_open(uint32_t pg)                 /* strona sekcji SEQ */
     glob_commit();
     sq_hint_until = pg == SQ_NOTES && hints() ? plat_ms() + 2500u : 0;
     ui.sq_pg = (uint8_t)pg;
-    if (pg == SQ_PATTERN || pg == SQ_FEEL || pg == SQ_OPT || pg == SQ_REC || pg == SQ_KEY)
+    if (pg == SQ_PATTERN || pg == SQ_FEEL || pg == SQ_OPT || pg == SQ_REC)
         ui.sq_set = (uint8_t)pg;
     else if (pg == SQ_NOTES || pg == SQ_RACK)
         ui.sq_rk = (uint8_t)(pg == SQ_RACK);
@@ -7056,10 +7044,6 @@ static void sq_set_turn(int32_t e)               /* SELECT w ustawieniach: PATTE
     else if (e > 0 && ui.sq_pg == SQ_FEEL)
         sq_open(SQ_OPT);
     else if (e > 0 && ui.sq_pg == SQ_OPT)
-        sq_open(SQ_REC);
-    else if (e > 0 && ui.sq_pg == SQ_REC)        /* (v1.1.0) KEY za RECORD */
-        sq_open(SQ_KEY);
-    else if (e < 0 && ui.sq_pg == SQ_KEY)
         sq_open(SQ_REC);
     else if (e < 0 && ui.sq_pg == SQ_REC)
         sq_open(SQ_OPT);
@@ -7126,26 +7110,79 @@ static void sqg_changed(void)
     ui.redraw = 1;
 }
 
+/* (v1.2.0, decyzje użytkownika 2026-11-06) strony ustawień ARP (SELECT): ARP, MORE, CHORD, KEY; kolumna -> parametr.
+ * CHORD: K1 rodzaj, K2 VOICING, K3 ARP (STAB / SPLIT / OFF), K4 NAME (nazwa akordu na HOME); KEY: KEY, SCALE, KEYS, LIGHTS */
+#define ARP_CHPG 2
+#define ARP_KYPG 3
+static const uint8_t ARPG[ARP_NPG * 4] = {AR_MODE, AR_RATE, AR_OCT, AR_GATE, AR_SWING, AR_CHANCE, AR_RATCH, AR_MUTATE,
+                                          AR_CHT, AR_CHV, AR_CHORD, AR_CHNAME, AR_KEY, AR_SCALE, AR_KEYS, AR_KLIGHT};
+static int chord_pre(void) { return (xtc[set.eng][0] & 15u) != 0u; }   /* wczytany preset gra swój akord (chord_of) */
+static void chord_take(void)                     /* zmiana akordu w ARP przy presecie z akordem: akord presetu przechodzi do ARP,
+                                                  * preset go traci (zmieniony: gwiazdka, SAVE) */
+{
+    uint32_t i;
+    if (!chord_pre())
+        return;
+    sqg.a[AR_CHT] = xtc[set.eng][0] & 15u;
+    sqg.a[AR_CHV] = xtc[set.eng][0] >> 4 & 3u;
+    for (i = 0; i < CHORD_LN; i++)
+        sqg.learn[i] = xtc[set.eng][1u + i];
+    for (i = 0; i <= CHORD_LN; i++)
+        xtc[set.eng][i] = 0;
+    xt_dirty = set_dirty = 1;
+    set.edited[set.eng] = (uint8_t)snap_differs(set.eng);
+}
+static void chord_learn(void)                    /* (v0.45) CHORD, SEL = LEARN: trzymane klawisze FM1 (najniższy = klawisz,
+                                                  * reszta nad nim, do 6); VOICING zostaje */
+{
+    uint32_t keys = touch_keys(), k, n = 0, lo = 32;
+    uint8_t ln[CHORD_LN] = {0};
+    for (k = 0; k < NKEYS; k++)
+        if (keys >> k & 1u) {
+            if (lo == 32u)
+                lo = k;
+            else if (n < CHORD_LN && k - lo < 32u)
+                ln[n++] = (uint8_t)(k - lo);
+        }
+    if (!n) {
+        app_say("CHORD", "HOLD KEYS + SEL");
+        return;
+    }
+    chord_take();
+    sqg.a[AR_CHT] = CH_LEARN;
+    for (k = 0; k < CHORD_LN; k++)
+        sqg.learn[k] = ln[k];
+    sqg_changed();
+    app_say("CHORD", "LEARNED");
+}
+
 static void arp_knob(uint32_t k, int32_t e)
 {
-    int32_t j = (int32_t)k + ui.arp_more * 4, v;
+    const int32_t j = ARPG[(k + ui.arp_more * 4u) & 15u];
     const pdef_t *d = &ARDEF[j];
-    if (j >= AR_NP)                              /* strona 3: tylko CHORD */
-        return;
+    int32_t v;
     ui.knob = (int32_t)k;
     ui.knob_at = plat_ms();
     ui.redraw = 1;
+    if (j == AR_CHT || j == AR_CHV)
+        chord_take();
     v = clamp((int32_t)sqg.a[j] + (d->fmt == F_LIST || d->hi - d->lo < 10 ? (e > 0 ? 1 : -1)
                                                                         : accel(EN_K1 + k, e, d->hi - d->lo)),
               d->lo, d->hi);
     if (v != sqg.a[j]) {
+        if (j >= AR_KEY && j <= AR_KEYS && (sqg.a[AR_KEYS] != ARK_ALL || j == AR_KEYS))
+            ev_push(EV_ALL_OFF);                 /* (v1.1.0) puszczenie klawisza po zmianie SNAP / LOCK trafiłoby w inną nutę */
         sqg.a[j] = (uint8_t)v;
         sqg_changed();
     }
 }
 
-static void arp_sel(void)                        /* SEL w ustawieniach ARP: LATCH */
+static void arp_sel(void)                        /* SEL w ustawieniach ARP: LATCH; (v1.2.0) na stronie CHORD: LEARN */
 {
+    if (ui.arp_more == ARP_CHPG) {
+        chord_learn();
+        return;
+    }
     sqg.latch ^= 1u;
     if (!sqg.latch)
         ev_push(EV_ARP_OFF);                     /* puszczone akordy przestają grać */
@@ -7473,18 +7510,6 @@ static void sq_knob(uint32_t k, int32_t e)
         sq_changed();
         return;
     }
-    if (ui.sq_pg == SQ_KEY) {                    /* (v1.1.0) KEY, SCALE, SNAP wzoru; SNAP / inna skala przy SNAP: nuty od nowa */
-        if (k < 3u) {
-            const int32_t v = clamp((int32_t)sqp.rsv[k] + (e > 0 ? 1 : -1), KYDEF[k].lo, KYDEF[k].hi);
-            if (v != sqp.rsv[k]) {
-                if (sqp.rsv[SQ_SNP_] || k == SQ_SNP_)
-                    ev_push(EV_ALL_OFF);     /* (puszczenie klawisza po zmianie SNAP trafiłoby w inną nutę) */
-                sqp.rsv[k] = (uint8_t)v;
-                sq_changed();
-            }
-        }
-        return;
-    }
     if (ui.sq_pg == SQ_REC) {                    /* (v0.92) RECORD; (v1.1.0) K1 BPM, K3 COUNT IN z długością */
         const int32_t v = clamp(rc_get((int32_t)k) + (k == 0 ? accel(EN_K1, e, 260) : e > 0 ? 1 : -1), RCDEF[k].lo, RCDEF[k].hi);
         if (k == 0) {
@@ -7779,7 +7804,7 @@ static void sqn_ok(void)                         /* karta: SEL (na wszystkich ed
 static void sq_sel_short(void)                   /* SEL krótko: NOTES = GLIDE, PATTERN / RACK = narzędzia, FEEL = REC QUANTIZE */
 {
     uint32_t i, all = 1;
-    if (ui.sq_pg == SQ_OPT || ui.sq_pg == SQ_REC || ui.sq_pg == SQ_KEY)   /* (v0.88) OPTIONS, (v0.92) RECORD, (v1.1.0) KEY: same gałki */
+    if (ui.sq_pg == SQ_OPT || ui.sq_pg == SQ_REC)   /* (v0.88) OPTIONS, (v0.92) RECORD: same gałki */
         return;
     if (ui.sq_pg == SQ_PATTERN || ui.sq_pg == SQ_RACK) {
         ui.page = V_SQT;
@@ -8424,10 +8449,6 @@ static void knob_turn(uint32_t k, int32_t e)
     ui.knob = (int32_t)k;
     ui.knob_at = plat_ms();
     ui.redraw = 1;
-    if (ui.page == PG_CHORD) {
-        chord_turn(k, e);
-        return;
-    }
     if ((id = knob_id((int32_t)k)) < 0)
         return;
     set_param(id, param_step(id, accel(EN_K1 + k, e, E->def(id)->hi - E->def(id)->lo)));
@@ -8441,7 +8462,7 @@ static void cc_knob(uint32_t k, uint32_t v)
     const pdef_t *d;
     if (ui.page == V_HOME && !mt_ui())
         quick_show();
-    if (ui.page < 0 || ui.page == PG_CHORD || ui.gest || (id = knob_id((int32_t)k)) < 0)
+    if (ui.page < 0 || ui.gest || (id = knob_id((int32_t)k)) < 0)
         return;
     if (ui.quick)
         ui.quick_at = plat_ms();
@@ -8508,13 +8529,13 @@ static void label_key(int32_t l)
 
 static int32_t drum_page_lane(void)      /* (v0.88) perkusja: dźwięk tej strony silnika (0..), -1: inna strona / silnik, KIT (cały zestaw) */
 {
-    if (ui.page < 0 || ui.page == PG_CHORD || ENG_GRP[set.eng] != EG_DRUM || ui.page == E->quick)
+    if (ui.page < 0 || ENG_GRP[set.eng] != EG_DRUM || ui.page == E->quick)
         return -1;
     return set.eng == ENG_MORPH ? mp_lane : set.eng == ENG_DUAL ? du_lane : dm_lane;
 }
 static uint32_t label_lit(void)          /* jasno: klawisz bieżącej strony (OP2 na OSC 2 / OP 2 ...); (v0.88) perkusja: klawisz dźwięku */
 {
-    int32_t l = ui.page >= 0 && ui.page != PG_CHORD ? E->page_label(ui.page) : -1;
+    int32_t l = ui.page >= 0 ? E->page_label(ui.page) : -1;
     const int32_t d = drum_page_lane();
     return (l >= 0 ? 1u << LABEL_KEY[l] : 0u) | (d >= 0 ? 1u << (RK_NOTE[d] - 53u) : 0u);
 }
@@ -8815,10 +8836,6 @@ static void sel_cycle(void)              /* SEL: opcja strony w pętli (FILTER: 
     int32_t id, v;
     const pdef_t *d;
     char t[24];
-    if (ui.page == PG_CHORD) {
-        chord_learn();
-        return;
-    }
     if (ui.page < 0 || (id = E->sel(ui.page)) < 0)
         return;
     d = E->def(id);
@@ -9540,57 +9557,12 @@ static void mod_knob(uint32_t k, int32_t e)   /* K1-K4: ilość modulacji celu (
     app_say(t, v);
 }
 
-/* (v0.45) strona CHORD: K1 rodzaj, SEL = LEARN (trzymane klawisze FM1: najniższy = klawisz, reszta nad nim, do 6) */
-static const pdef_t CH_DEF = {"TYPE", 0, NCHORD - 1, 0, F_LIST, LI(CHORD_NAME)};
-static const char *const L_VOICE[] = {"CLOSE", "OPEN", "INV 1", "INV 2"};
-static const pdef_t CV_DEF = {"VOICING", 0, 3, 0, F_LIST, LI(L_VOICE)};   /* (v1.1.0) K2 strony CHORD */
-static void chord_set(const uint8_t *x)
-{
-    uint32_t i;
-    for (i = 0; i < XT_N && i <= CHORD_LN; i++)
-        xtc[set.eng][i] = x[i];
-    xt_dirty = set_dirty = 1;
-    set.edited[set.eng] = (uint8_t)snap_differs(set.eng);
-    ui.redraw = 1;
-}
-static void chord_turn(uint32_t k, int32_t e)
-{
-    uint8_t x[CHORD_LN + 1];
-    uint32_t i;
-    if (k > 1u)
-        return;
-    for (i = 0; i <= CHORD_LN; i++)
-        x[i] = xtc[set.eng][i];
-    if (k == 1)                              /* (v1.1.0) K2: VOICING (bity 4-5) */
-        x[0] = (uint8_t)((x[0] & 15u) | (uint32_t)clamp((int32_t)(x[0] >> 4 & 3u) + (e > 0 ? 1 : -1), 0, 3) << 4);
-    else
-        x[0] = (uint8_t)((x[0] & 0x30u) | (uint32_t)clamp((int32_t)(x[0] & 15u) + (e > 0 ? 1 : -1), 0, NCHORD - 1));
-    chord_set(x);
-}
-static void chord_learn(void)
-{
-    uint32_t keys = touch_keys(), k, n = 0, lo = 32;
-    uint8_t x[CHORD_LN + 1] = {(uint8_t)(CH_LEARN | (xtc[set.eng][0] & 0x30u))};   /* (v1.1.0) VOICING zostaje */
-    for (k = 0; k < NKEYS; k++)
-        if (keys >> k & 1u) {
-            if (lo == 32u)
-                lo = k;
-            else if (n < CHORD_LN && k - lo < 32u)
-                x[1u + n++] = (uint8_t)(k - lo);
-        }
-    if (!n) {
-        app_say("CHORD", "HOLD KEYS + SEL");
-        return;
-    }
-    chord_set(x);
-    app_say("CHORD", "LEARNED");
-}
 static int sel_usable(void)              /* SEL coś tu robi: opcja strony / MORE, GLO, FX, okna (zatwierdza) */
 {
     if (ui.sel_hold)
         return 0;                            /* trzymany i tak świeci */
     if (ui.page >= 0)
-        return ui.page == PG_CHORD || E->sel(ui.page) >= 0;   /* (MORE nie jest pod SEL: tylko przełącznik strony) */
+        return E->sel(ui.page) >= 0;         /* (MORE nie jest pod SEL: tylko przełącznik strony) */
     return ui.page != V_HOME || mt_ui();     /* (v0.86) główny ekran MULTI: MUTE / lista */
 }
 
@@ -10160,6 +10132,18 @@ static void input(void)
                 if (kl == 1 ? pc == 0u : (0xAB5u >> pc & 1u))
                     kd |= 1u << k;
             }
+        if (sqg.a[AR_KLIGHT] && sq_scale() && ENG_GRP[set.eng] != EG_DRUM && ui.page != V_PERF
+            && !(ui.page == V_SEQ && ui.sq_pg == SQ_NOTES)) {   /* (v1.2.0) ARP > KEY > LIGHTS (zamiast GLO KEY LIGHTS): klawisze
+                                                                 * skali przygaszone, tonika jaśniej; RACK / NOTES / PERFORM: swoje */
+            kd = 0;
+            for (k = 0; k < NKEYS; k++) {
+                const uint32_t pc = (uint32_t)key_note(k) % 12u;
+                if (pc == sqg.a[AR_KEY])
+                    kmid |= 1u << k;
+                else if (sq_scale() >> pc & 1u)
+                    kd |= 1u << k;
+            }
+        }
         if (rk_on()) {                           /* (v0.87) RACK zamiast KEY LIGHTS: krok z nutą średnio, grający pusty najciemniej,
                                                   * grający z nutą pełnym światłem */
             rk_leds();
@@ -10700,7 +10684,7 @@ static uint32_t ch_sig, ch_last;
 static void chord_name_upd(uint32_t now)
 {
     uint32_t n, pcs = 0, bass = 12u, sig, r, i, k, best = NCHN, root = 0;
-    if (!GV(G_CHNAME) || mt_ui()) {
+    if (!sqg.a[AR_CHNAME] || mt_ui()) {          /* (v1.2.0) ARP > CHORD > NAME (było GLO > DISPLAY > CHORD NAME) */
         ch_txt[0] = 0;
         return;
     }
@@ -10963,21 +10947,42 @@ static void page_hint(int more)
     foot_hint = page_buf;
 }
 
-static void chord_graph(void)            /* klawiatura 3 oktawy od C: nuty akordu od C (klawisz biały) */
+/* (v0.90, decyzje użytkownika 2026-11-03) opcja pod SEL w nagłówku: "SEL KEY TRK 1/3", do prawej (do right); za długie obok tytułu
+ * (koniec tend): najpierw mniejsza czcionka, nazwa opcji znika dopiero, gdy i tak się nie mieści; „SEL” (przycisk) i wartość
+ * zostają zawsze. (v1.2.0) wspólne ze stronami ARP */
+static void sel_hdr(int32_t right, int32_t tend, const char *nm, const char *t)
+{
+    const felucca_font_t *f = &FONT_XS;
+    int32_t sp = 4, k, x = 0, y;
+    for (k = 0; k < 3; k++) {
+        f = k ? &FONT_T : &FONT_XS;
+        sp = k ? 3 : 4;
+        if (k == 2)
+            nm = "";
+        x = right - text_w(f, "SEL") - text_w(f, nm) - text_w(f, t) - (nm[0] ? 2 * sp : sp);
+        if (x >= tend)
+            break;
+    }
+    y = f == &FONT_T ? 13 : 12;
+    x = cv_text(x, y, f, "SEL", C_DIM) + sp;
+    if (nm[0])
+        x = cv_text(x, y, f, nm, C_GRAY) + sp;
+    cv_text(x, y, f, t, C_HI);
+}
+
+/* klawiatura 3 oktawy od C pod gałkami ARP (v1.2.0: CHORD = akord na C, KEY = skala): m = nuty (bit n od C; pc: klasy dźwięków,
+ * każda oktawa), r = prima / tonika (biała) */
+static void kb_graph(uint32_t m, uint32_t r, int pc)
 {
     static const uint8_t WK[7] = {0, 2, 4, 5, 7, 9, 11}, BK[5] = {1, 3, 6, 8, 10}, BX[5] = {1, 2, 4, 5, 6};
-    const int32_t y = GRAPH_Y, h = GRAPH_H, ww = GW / 21;
-    uint32_t m = chord_mask(xtc[set.eng], 60);   /* (od C) */
+    const int32_t ww = GW / 21;
     int32_t o, i;
     for (o = 0; o < 3; o++)
-        for (i = 0; i < 7; i++) {
-            int32_t n = o * 12 + WK[i], x = GX + (o * 7 + i) * ww;
-            cv_rect(x, y, ww - 1, h, !n ? C_WHITE : m >> n & 1u ? C_HI : C_LINE);
-        }
-    for (o = 0; o < 3; o++)
-        for (i = 0; i < 5; i++) {
-            int32_t n = o * 12 + BK[i], x = GX + (o * 7 + BX[i]) * ww - ww / 3;   /* BX: biały klawisz po prawej */
-            cv_rect(x, y, ww * 2 / 3, h * 3 / 5, m >> n & 1u ? C_HI : C_BLACK);
+        for (i = 0; i < 12; i++) {                /* 7 białych, potem 5 czarnych (BX: biały klawisz po prawej) */
+            const int blk = i >= 7;
+            const uint32_t n = (uint32_t)(o * 12 + (blk ? BK[i - 7] : WK[i])), b = pc ? n % 12u : n;
+            cv_rect(GX + (o * 7 + (blk ? BX[i - 7] : i)) * ww - (blk ? ww / 3 : 0), 98, blk ? ww * 2 / 3 : ww - 1, blk ? 22 : 38,
+                    b < 32u && r >> b & 1u ? C_WHITE : b < 32u && m >> b & 1u ? C_HI : blk ? C_BLACK : C_LINE);
         }
 }
 
@@ -11039,7 +11044,7 @@ static void draw_page(void)
         body_blit();
         return;
     }
-    vis = glob.g[G_VPAGES] && (ui.page == PG_CHORD || E->has_graph(ui.page));
+    vis = glob.g[G_VPAGES] && E->has_graph(ui.page);
     x = 8;
     if ((id = drum_page_lane()) >= 0) {      /* (v0.88, decyzja użytkownika 2026-11-02) perkusja: numer dźwięku przed tytułem */
         int_text(id + 1, t, 0);
@@ -11061,30 +11066,9 @@ static void draw_page(void)
         cv_text(right, 12, &FONT_XS, t, C_GRAY);
         right -= 8;
     }
-    if (ui.page == PG_CHORD) {               /* CHORD: SEL = LEARN (trzymane klawisze) */
-        x = right - text_w(&FONT_XS, "SEL") - text_w(&FONT_XS, "LEARN") - 4;
-        x = cv_text(x, 12, &FONT_XS, "SEL", C_DIM);
-        cv_text(x + 4, 12, &FONT_XS, "LEARN", C_HI);
-    } else if (!more && (id = E->sel(ui.page)) >= 0) {   /* opcja pod SEL: "SEL KEY TRK 1/3", do prawej przed numerem */
-        /* (v0.90, decyzje użytkownika 2026-11-03) za długie obok tytułu: najpierw mniejsza czcionka, nazwa opcji znika dopiero, gdy
-         * i tak się nie mieści; „SEL” (przycisk) i wartość zostają zawsze */
-        const char *nm = E->def(id)->name;
-        const felucca_font_t *f = &FONT_XS;
-        int32_t sp = 4, k;
+    if (!more && (id = E->sel(ui.page)) >= 0) {   /* opcja pod SEL: "SEL KEY TRK 1/3", do prawej przed numerem */
         value_text(id, pget(id), t);
-        for (k = 0; k < 3; k++) {
-            f = k ? &FONT_T : &FONT_XS;
-            sp = k ? 3 : 4;
-            if (k == 2)
-                nm = "";
-            x = right - text_w(f, "SEL") - text_w(f, nm) - text_w(f, t) - (nm[0] ? 2 * sp : sp);
-            if (x >= tend)
-                break;
-        }
-        x = cv_text(x, f == &FONT_T ? 13 : 12, f, "SEL", C_DIM) + sp;
-        if (nm[0])
-            x = cv_text(x, f == &FONT_T ? 13 : 12, f, nm, C_GRAY) + sp;
-        cv_text(x, f == &FONT_T ? 13 : 12, f, t, C_HI);
+        sel_hdr(right, tend, E->def(id)->name, t);
     }
     for (i = 0; i < 4; i++) {
         id = knob_id(i);
@@ -11094,14 +11078,6 @@ static void draw_page(void)
         if (id >= 0)
             value_text(id, v[i], txt[i]);
         col_mod[i] = (int8_t)(id >= 0 && E->moddepth ? E->moddepth(id) : 0);
-    }
-    if (ui.page == PG_CHORD) {               /* K1: rodzaj akordu */
-        d[0] = &CH_DEF;
-        v[0] = (int16_t)(xtc[set.eng][0] & 15u);
-        def_text(&CH_DEF, -1, v[0], txt[0]);
-        d[1] = &CV_DEF;                      /* (v1.1.0) K2: VOICING */
-        v[1] = (int16_t)(xtc[set.eng][0] >> 4 & 3u);
-        def_text(&CV_DEF, -1, v[1], txt[1]);
     }
     if (hints()) {                           /* wyższy pasek: niższe kolumny / wykres */
         page_hint(more);
@@ -11113,9 +11089,7 @@ static void draw_page(void)
     col_h = -1;
     for (i = 0; i < 4; i++)
         col_mod[i] = 0;
-    if (vis && ui.page == PG_CHORD)
-        chord_graph();
-    else if (vis)
+    if (vis)
         draw_graph(ui.page);
     graph_h = 76;
     body_blit();
@@ -12184,14 +12158,13 @@ static void draw_notes_page(void)                /* NOTES: piano roll na całą 
     uint32_t L = sq_len(), V = sq_span(), bar0 = sq_bar0(), g = sq_grid(), i, r, pass;
     int32_t low = ui.sq_low, cx = rx(ui.sq_cur, bar0), cw = (int32_t)(g * RW / V), rows = RROWS, rh = RH;
     int dense = cw < 5;                          /* gęsto: grid tylko na ćwierćnutach */
-    const uint32_t sc = sq_scale();              /* (v1.1.0) SEQ > KEY: wiersze nut w skali jaśniejsze, tonika najjaśniej */
     sq_ac_new();
-    for (r = 0; r < rows; r++) {                /* klawiatura z lewej, tło wierszy: czarne klawisze ciemniejsze */
+    for (r = 0; r < rows; r++) {                /* klawiatura z lewej, tło wierszy: czarne klawisze ciemniejsze (v1.1.0 - v1.1.2:
+                                                  * wiersze skali jaśniejsze; v1.2.0 usunięte, decyzja użytkownika) */
         int32_t note = low + rows - 1 - (int32_t)r, pc = note % 12, y = (int32_t)r * rh;
         int blk = pc == 1 || pc == 3 || pc == 6 || pc == 8 || pc == 10;
         cv_rect(0, y, 20, rh - 1, blk ? RGB(14, 14, 17) : RGB(150, 152, 158));
-        cv_rect(RX, y, RW, rh, sc >> pc & 1u ? (pc == sqp.rsv[SQ_KEY_] % 12 ? RGB(48, 38, 76) : RGB(28, 31, 48))
-                               : blk ? RGB(8, 8, 10) : RGB(20, 21, 25));
+        cv_rect(RX, y, RW, rh, blk ? RGB(8, 8, 10) : RGB(20, 21, 25));
         if (pc == 0) {                           /* C: podpis na klawiszu (gdy się mieści) i mocniejsza linia */
             note_name(note, t);
             if (rh >= 10)
@@ -12523,25 +12496,6 @@ static void draw_seq(void)
         draw_cols(d, v, txt, 0);
         col_y = col_h = -1;
         foot_hint = "KEYS: TAP   REC: ARM   PLAY: START   SELECT: PAGE";   /* (v1.1.0) klawisze = TAP TEMPO */
-    } else if (ui.sq_pg == SQ_KEY) {             /* (v1.1.0) KEY */
-        const pdef_t *d[4];
-        int16_t v[4];
-        char txt[4][16], t[24];
-        int32_t k;
-        sq_state(t);
-        sq_title(SQ_PGNAME[SQ_KEY], t);
-        for (k = 0; k < 4; k++) {
-            d[k] = k < 3 ? &KYDEF[k] : 0;
-            v[k] = (int16_t)(k < 3 ? sqp.rsv[k] : 0);
-            txt[k][0] = 0;
-            if (k < 3)
-                def_text(d[k], -1, v[k], txt[k]);
-        }
-        col_y = 34;
-        col_h = hints() ? 120 : 120 + FOOT_TALL;
-        draw_cols(d, v, txt, 0);
-        col_y = col_h = -1;
-        foot_hint = "SELECT: PAGE   SEQ / HOME: BACK";
     } else if (ui.sq_pg == SQ_OPT) {             /* (v0.88) OPTIONS; (v0.89) zwykła strona ustawień */
         const pdef_t *d[4];
         int16_t v[4];
@@ -12610,35 +12564,42 @@ static void draw_seq(void)
     body_blit();
 }
 
-static void draw_arp(void)                       /* ARP: 4 gałki (MORE: 4 następne, 3: CHORD), pod nimi ostatnie kroki */
+/* ARP: 4 gałki, pod nimi ostatnie kroki; (v1.2.0, decyzje użytkownika 2026-11-06) strony (SELECT) ARP, MORE, CHORD, KEY, ARP krótko =
+ * ON / OFF na każdej, SEL w nagłówku jak na stronach silników; CHORD / KEY: pod gałkami klawiatura z akordem na C / skalą */
+static void draw_arp(void)
 {
     static const char *const CHW[3] = {"STAB: WHOLE CHORD EACH STEP", "SPLIT: CHORD NOTES ONE BY ONE",
                                        "OFF: ONLY THE KEYS YOU HOLD"};
     static const char *const WHAT[ARM_N] = {"LOW TO HIGH", "HIGH TO LOW", "UP, THEN DOWN", "IN THE ORDER YOU PLAYED",
                                             "RANDOM NOTE EACH STEP", "WHOLE CHORD EACH STEP",
                                             "LOOP OF 8 RANDOM STEPS (MUTATE)"};
+    static const char *const PGN[ARP_NPG] = {"", "MORE", "CHORD", "KEY"};
+    static const char *const KYW[3] = {"", "WRONG KEY: SCALE NOTE BELOW", "WRONG KEY: SILENT"};
     const pdef_t *d[4];
     int16_t v[4];
     char txt[4][16], t[24];
-    int32_t k, more = ui.arp_more, lo = 127, hi = 0;
+    int32_t k, more = ui.arp_more, lo = 127, hi = 0, right;
+    const int pre = chord_pre();
     cv_begin(240, BODY_H, C_BLACK);
     k = cv_text(8, 4, &FONT_M, "ARP", C_WHITE);
+    k = cv_text(k + 8, 4, &FONT_M, sqg.arp_on ? "ON" : "OFF", sqg.arp_on ? C_HI : C_GRAY);
     if (more)
-        k = cv_text(k + 6, 4, &FONT_M, "MORE", C_HI);
-    cv_text(k + 8, 4, &FONT_M, sqg.arp_on ? "ON" : "OFF", sqg.arp_on ? C_HI : C_GRAY);
+        k = cv_text(k + 8, 4, &FONT_M, PGN[more & 3], C_HI);
     t[0] = 0;
-    if (sqg.latch)
-        text_cat(t, "LATCH  ");
     text_cat(t, sq.play ? "SYNC  " : sq.ext ? "MIDI  " : "");
-    text_cat(t, more == 2 ? "3 / 3" : more ? "2 / 3" : "1 / 3");
-    cv_text(232 - text_w(&FONT_XS, t), 12, &FONT_XS, t, C_GRAY);
+    int_text(more + 1, txt[0], 0);
+    text_cat(t, txt[0]);
+    text_cat(t, "/4");
+    right = 232 - text_w(&FONT_XS, t);
+    cv_text(right, 12, &FONT_XS, t, C_GRAY);
+    sel_hdr(right - 8, k + 8, more == ARP_CHPG ? "" : "LATCH", more == ARP_CHPG ? "LEARN" : sqg.latch ? "ON" : "OFF");
     for (k = 0; k < 4; k++) {
-        int32_t j = k + more * 4, x = j < AR_NP ? sqg.a[j] : 0;
-        d[k] = j < AR_NP ? &ARDEF[j] : 0;
+        const int32_t j = ARPG[(k + more * 4) & 15];
+        const int32_t x = pre && j == AR_CHT ? xtc[set.eng][0] & 15 : pre && j == AR_CHV ? xtc[set.eng][0] >> 4 & 3 : sqg.a[j];
+        d[k] = &ARDEF[j];
         v[k] = (int16_t)x;
         txt[k][0] = 0;
-        if (j >= AR_NP) {
-        } else if (ARDEF[j].fmt == F_LIST) {
+        if (ARDEF[j].fmt == F_LIST) {
             text_cat(txt[k], PLIST(&ARDEF[j])[x]);
         } else {
             int_text(j == AR_SWING ? swing_pct(x) : x, txt[k], 0);
@@ -12650,6 +12611,18 @@ static void draw_arp(void)                       /* ARP: 4 gałki (MORE: 4 nast�
     col_h = 56;
     draw_cols(d, v, txt, 1);
     col_y = col_h = -1;
+    foot_hint = "SELECT: PAGE   ARP: ON / OFF";   /* (SEL: w nagłówku) */
+    if (more >= ARP_CHPG) {                      /* CHORD: akord na C (akord presetu: napis); KEY: skala, tonika biała, SNAP / LOCK */
+        const uint32_t sc = sq_scale();
+        if (more == ARP_CHPG)
+            kb_graph(chord_of(xtc[set.eng], 60), 1u, 0);
+        else
+            kb_graph(sc, sc ? 1u << sqg.a[AR_KEY] % 12u : 0u, 1);
+        center(140, &FONT_XS, more == ARP_KYPG ? (sc ? KYW[sqg.a[AR_KEYS] % 3u] : "")
+                            : pre ? "CHORD OF THIS PRESET" : sqg.arp_on && sqg.a[AR_CHT] ? CHW[sqg.a[AR_CHORD] % 3u] : "", C_HI);
+        body_blit();
+        return;
+    }
     for (k = 0; k < 16; k++) {                   /* ostatnie kroki: wysokość nuty (pauza: kropka) */
         int32_t x = ar.hist[k];
         if (x) {
@@ -12667,14 +12640,9 @@ static void draw_arp(void)                       /* ARP: 4 gałki (MORE: 4 nast�
         h = hi > lo ? 8 + (x - lo) * 34 / (hi - lo) : 24;
         cv_rect(bx, 136 - h, 12, h, last ? rgb_light(C_HI) : C_AMB);
     }
-    if (more == 2)                               /* CHORD: co robi; brzmienie bez akordu: gdzie go włączyć */
-        center(140, &FONT_XS, chord_at(60) == 1u ? "NO CHORD IN THIS SOUND (EDIT: CHORD)" : CHW[sqg.a[AR_CHORD] % 3u],
-               C_HI);
-    else
-        center(140, &FONT_XS, !sqg.arp_on ? "ARP: TURN THE ARPEGGIATOR ON"
-                                     : !ar.nl ? "HOLD KEYS: THEY PLAY ONE BY ONE"
-                                     : WHAT[sqg.a[AR_MODE]], sqg.arp_on ? C_HI : C_GRAY);
-    foot_hint = "SELECT: PAGE   ARP: MORE   SEL: LATCH";   /* (v0.91) CHORD pod SELECT */
+    center(140, &FONT_XS, !sqg.arp_on ? "ARP: TURN THE ARPEGGIATOR ON"
+                                 : !ar.nl ? "HOLD KEYS: THEY PLAY ONE BY ONE"
+                                 : WHAT[sqg.a[AR_MODE]], sqg.arp_on ? C_HI : C_GRAY);
     body_blit();
 }
 
@@ -13257,12 +13225,8 @@ void app_frame(void)
             } else if (rk_on() && now - ui.arp_at >= 400u) {   /* (v0.57) RACK: trzymany bez klawisza = ustawienia (przy
                                                               * puszczeniu: ARP + klawisz = SOLO) */
                 go_arp();
-            } else if (ui.page == V_ARP) {   /* w ustawieniach ARP: MORE (jak w każdej sekcji; ON / OFF poza nimi); (v0.91, decyzja
-                                              * użytkownika 2026-11-03) tylko 1 <-> MORE, CHORD pod SELECT */
-                ui.arp_more = (uint8_t)(ui.arp_more == 0u ? 1u : 0u);
-                ui.knob = -1;
-                ui.redraw = 1;
-            } else {
+            } else {                         /* (v1.2.0, decyzja użytkownika 2026-11-06) także w ustawieniach ARP: ON / OFF (strony:
+                                              * SELECT; v0.91 - v1.1.2 tam 1 <-> MORE) */
                 arp_toggle();
             }
         } else if (!ui.arp_done && now - ui.arp_at >= 400u && !rk_on()) {
@@ -13592,6 +13556,7 @@ const char *const *const ogs_lists[LI_N] = {
     [LI_L_ARMODE] = L_ARMODE,
     [LI_L_GRID] = L_GRID,
     [LI_L_ARCHORD] = L_ARCHORD,
+    [LI_L_ARKEYS] = L_ARKEYS,
     [LI_LV_AW] = LV_AW,
     [LI_LV_BW] = LV_BW,
     [LI_LV_MODE] = LV_MODE,
