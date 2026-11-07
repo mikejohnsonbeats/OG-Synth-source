@@ -399,12 +399,8 @@ OGS_UI static void input(void)
         }
         if (((ui.pf_keys | ui.cv_held) & bit) && !(keys & bit))   /* puszczony klawisz PERFORM (FX już może być puszczony) */
             pf_key(k, 0);
-        if (ENG_GRP[set.eng] == EG_DRUM && k == LABEL_KEY[K_AENV] && (keys & bit) && !(ui.keys & bit) && !ui.sel_hold
-            && ui.page >= V_HOME && !ui.gest) {   /* (v1.3.1, decyzja użytkownika 2026-11-06) perkusja: F#5 bez SEL = ENV od razu */
-            eaten |= bit;
-            label_key(K_AENV);
-            continue;
-        }
+        /* (v1.4.2, decyzja użytkownika 2026-11-07) perkusja: F#5 jak OP1-OP6 — SEL + F#5 = ENV, bez SEL gra; w RACK od razu strona
+         * (label_pages wyżej). Do v1.4.1: bez SEL = ENV na każdej stronie */
         if ((bit & avail) && (keys & bit) && !(ui.keys & bit)) {
             eaten |= bit;
             label_key(key_label(k));
@@ -903,8 +899,6 @@ OGS_UI static void input(void)
                     kd |= 1u << k;
             }
         }
-        if (ENG_GRP[set.eng] == EG_DRUM && ui.page >= V_HOME && AENV_PG[set.eng][0] >= 0)
-            kd |= 1u << LABEL_KEY[K_AENV];   /* (v1.3.1) perkusja: F#5 = ENV, przygaszony */
         if (rk_on()) {                           /* (v0.87) RACK zamiast KEY LIGHTS: krok z nutą średnio, grający pusty najciemniej,
                                                   * grający z nutą pełnym światłem */
             rk_leds();
