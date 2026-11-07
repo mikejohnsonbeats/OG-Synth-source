@@ -647,8 +647,12 @@ static void mt_lim_off(int32_t t, int32_t note)
             return;
         }
 }
+#define MT_DX2 10u                           /* (v1.4.2) nuta FM6, gdy grają dwa FM6 (pomiar FM1 2026-11-07, MORPH + FM6 + FM6: 8 nut 82 %,
+                                              * 11 nut 104 % i ~190 przerw w 2 s; po 10 punktów najwyżej 9 nut, ok. 89 %) */
 static uint32_t mt_pts(int32_t t, uint32_t mini)   /* koszt nuty ścieżki t */
 {
+    if (mt_eng[t] == ENG_DX7 && ((mt_eng[1] == ENG_DX7) + (mt_eng[2] == ENG_DX7) + (mt_eng[3] == ENG_DX7)) > 1)
+        return MT_DX2;
     return mt_eng[t] >= NENG ? 0u : mini && mt_eng[t] == ENG_PD ? MT_PD_MINI : MT_PTS[mt_eng[t]];
 }
 static void mt_lim_on(int32_t t, int32_t note)   /* przed note on: miejsce dla nuty (najstarsze puszczone) */
@@ -4741,8 +4745,13 @@ OGS_UI int app_sysex(const uint8_t *p, uint32_t n)
             glob.g[G_MTFOC] = 0;
             glob.g[G_MTMUTE] = 0;
             glob.g[G_MULTI] = any ? 1 : 0;
-            mx_fix();                        /* (v1.4.0) bliźniaki (drugi FM6 od INIT); co nie zagra, odrzuca przerwanie (mt_apply:
-                                              * pierwsza ścieżka wygrywa) — mt_fix odrzucałby obie strony konfliktu po kolei */
+            {                                /* (v1.4.0) bliźniaki (drugi FM6 od INIT); co nie zagra, odrzuca przerwanie (mt_apply:
+                                              * pierwsza ścieżka wygrywa) — mt_fix odrzucałby obie strony konfliktu po kolei.
+                                              * (v1.4.2) bez zapisu GLO jak dotąd: ścieżki pomiaru tylko w RAM */
+                const uint8_t gd = mt_gdirty;
+                mx_fix();
+                mt_gdirty = gd;
+            }
             mt_ver++;
             return 1;
         }
@@ -5148,6 +5157,8 @@ __attribute__((used, visibility("default"))) int32_t ogs_mx(int32_t w)   /* (tes
         return mt_eng[w - 10];
     if (w >= 20 && w <= 22)                  /* perkusja: dźwięk na stronach MORPH, 88 / 99, DUAL */
         return w == 20 ? mp_lane : w == 21 ? dm_lane : du_lane;
+    if (w == 23)                             /* (v1.4.2) trzymane nuty T2-T4 w limicie (mt_hn) */
+        return (int32_t)mt_hn;
     return w == 0 ? mx_in : w == 1 ? mx_rdy : w == 2 ? mx_live : w == 3 ? mx_sw : w == 4 ? mx_new : w == 5 ? mt_ft
          : w == 7 ? (int32_t)mt_used : mx_view() != 0;
 }
@@ -10417,12 +10428,8 @@ OGS_UI static void input(void)
         }
         if (((ui.pf_keys | ui.cv_held) & bit) && !(keys & bit))   /* puszczony klawisz PERFORM (FX już może być puszczony) */
             pf_key(k, 0);
-        if (ENG_GRP[set.eng] == EG_DRUM && k == LABEL_KEY[K_AENV] && (keys & bit) && !(ui.keys & bit) && !ui.sel_hold
-            && ui.page >= V_HOME && !ui.gest) {   /* (v1.3.1, decyzja użytkownika 2026-11-06) perkusja: F#5 bez SEL = ENV od razu */
-            eaten |= bit;
-            label_key(K_AENV);
-            continue;
-        }
+        /* (v1.4.2, decyzja użytkownika 2026-11-07) perkusja: F#5 jak OP1-OP6 — SEL + F#5 = ENV, bez SEL gra; w RACK od razu strona
+         * (label_pages wyżej). Do v1.4.1: bez SEL = ENV na każdej stronie */
         if ((bit & avail) && (keys & bit) && !(ui.keys & bit)) {
             eaten |= bit;
             label_key(key_label(k));
@@ -10921,8 +10928,6 @@ OGS_UI static void input(void)
                     kd |= 1u << k;
             }
         }
-        if (ENG_GRP[set.eng] == EG_DRUM && ui.page >= V_HOME && AENV_PG[set.eng][0] >= 0)
-            kd |= 1u << LABEL_KEY[K_AENV];   /* (v1.3.1) perkusja: F#5 = ENV, przygaszony */
         if (rk_on()) {                           /* (v0.87) RACK zamiast KEY LIGHTS: krok z nutą średnio, grający pusty najciemniej,
                                                   * grający z nutą pełnym światłem */
             rk_leds();

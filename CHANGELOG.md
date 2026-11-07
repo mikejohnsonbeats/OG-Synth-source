@@ -1,5 +1,9 @@
 # Changelog
 
+## v1.4.2 — 2026-11-07
+Źródła MPL OG Synth 1.4.2 „Drum keys” (perkusja: F#5 jak OP1-OP6 — SEL + F#5, w RACK od razu; dwa FM6 w MULTI: nuta po 10 punktów,
+razem najwyżej 9; SysEx pomiaru MULTI 0x1C bez zapisu GLO).
+
 ## v1.4.1 — 2026-11-07
 Źródła MPL OG Synth 1.4.1 „Together” (MULTI: ten sam silnik na dwóch ścieżkach — bliźniak mx_t, zapis OBJ_MTX, pole GLO G_MTTW;
 DCO + ALPHA i 88 + 99 razem; app/app.h: OBJ_MTX w mapie zapisu i kopii zapasowej). Wersja 1.4.0 nie była wydana.
