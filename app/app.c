@@ -25,8 +25,9 @@ void app_render(int32_t *lr, uint32_t n, uint32_t master_q12)
     uint32_t i, done = 0, w = scope_w;
     int sc = scope_on && !mt_void, eq = glob.g[G_SPKEQ], fading, want;
     float pk = 0.0f;
-    if (mt_seen != mt_ver || mt_xs < 0.0f) {   /* (v0.64) MULTI: zmiana trybu / ścieżek po przygaszeniu wyjścia */
-        if ((!mt_on && eng_play >= NENG) || mt_xg <= 0.0f) {   /* (start: od razu) */
+    if (mt_seen != mt_ver || mt_xs < 0.0f || mx_hold) {   /* (v0.64) MULTI: zmiana trybu / ścieżek po przygaszeniu wyjścia;
+                                                           * (v1.4.0) mx_hold: cicho, aż UI zapisze bliźniaki */
+        if (((!mt_on && eng_play >= NENG) || mt_xg <= 0.0f) && !mx_hold) {   /* (start: od razu) */
             mt_seen = mt_ver;
             mt_apply();
             mt_xs = 1.0f;
@@ -92,8 +93,8 @@ void app_render(int32_t *lr, uint32_t n, uint32_t master_q12)
             mt_sends(bl, br, c);             /* (v0.76) wspólne REVERB / DELAY (efekty presetów ścieżek) */
             ogs_pf_render(bl, br, c);        /* (v0.74) PERFORM: tylko w MULTI, na całym miksie (pamięć za ścieżkami) */
             ogs_fx_master(mt_mst >= 0 ? (uint32_t)mt_mst : (uint32_t)glob.g[G_MTMST], mc_p, bl, br, c);   /* (v0.77) master */
-            if (mt_track(eng_play) >= 0)
-                ogs_fx_track_meter((uint32_t)mt_track(eng_play));   /* (v0.83) GR meter strony FX: wybrana ścieżka */
+            if (mt_ft >= 0)
+                ogs_fx_track_meter((uint32_t)mt_ft);   /* (v0.83) GR meter strony FX: wybrana ścieżka */
         } else {
             ogs_fx_render(fx_play(), fx_xplay(), bl, br, c);   /* efekty globalne za silnikiem; (v0.74) bez PERFORM */
         }
@@ -139,6 +140,7 @@ void app_render(int32_t *lr, uint32_t n, uint32_t master_q12)
         }
         done += c;
     }
+    mx_at(-1);                               /* (v1.4.0) brzmienia bliźniaków na swoje miejsca: UI widzi wybraną ścieżkę */
     if (want && dk_g <= 0.0f) {              /* przy zerze: zmiany z UI wchodzą, UI może wczytać preset */
         dk_apply();
         dk_quiet = dk_quiet_req;
@@ -982,6 +984,13 @@ OGS_UI void app_frame(void)
     uint32_t now, pct;
     int32_t note;
     input();
+    if (mx_lv && mt_xg <= 0.0f) {            /* (v1.4.0) do SOLO: wyjście cicho, bliźniaki do flasha, potem pula dla łańcucha */
+        mx_store();
+        mx_lv = 0;
+        mt_ver++;
+        mx_hold = 0;
+    }
+    mx_sync();                               /* (v1.4.0) bliźniaki: przed brzmieniami sceny */
     mt_scene_presets();                      /* (v0.73) scena MULTI: brzmienia po przygaszeniu */
     {                                        /* (v0.88) perkusja: inny dźwięk (też MIDI): numer, gałki i wykres strony od razu */
         static int32_t lane = -1;

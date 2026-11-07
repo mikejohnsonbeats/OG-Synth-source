@@ -1,5 +1,9 @@
 # Changelog
 
+## v1.4.1 — 2026-11-07
+Źródła MPL OG Synth 1.4.1 „Together” (MULTI: ten sam silnik na dwóch ścieżkach — bliźniak mx_t, zapis OBJ_MTX, pole GLO G_MTTW;
+DCO + ALPHA i 88 + 99 razem; app/app.h: OBJ_MTX w mapie zapisu i kopii zapasowej). Wersja 1.4.0 nie była wydana.
+
 ## v1.3.1 — 2026-11-06
 Źródła MPL OG Synth 1.3.1 „Env key” (F#5 = obwiednia głośności, RACK: klawisze z nadrukiem na strony perkusji,
 CHORD LEARN w perkusji, engine_switch bez strony spoza silnika; app/ogs_engine.h: K_AENV).
