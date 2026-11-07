@@ -198,6 +198,7 @@ static struct {
                                           * przełącza opcji strony */
     uint32_t sel_at;                     /* kiedy SEL naciśnięty: opcję przełącza tylko krótkie kliknięcie */
     int8_t glo_sec;                      /* GLO: -1 lista sekcji, albo GS_* */
+    uint8_t mac_e;                       /* (1.5.0) GLO > ALGO KNOB: edytowany silnik (ALGO zmienia) */
     uint8_t glo_cur, glo_page, sy_cur;   /* kursor listy sekcji, strona w sekcji, kursor SYSTEM */
     uint8_t reset_opt, reset_sure;       /* FACTORY RESET: co (ustawienia / presety / wszystko), drugie potwierdzenie */
     uint8_t note;                        /* okno V_NOTE: SY_BACKUP albo SY_CALIB */
@@ -747,8 +748,12 @@ OGS_UI static void input(void)
                 mtl_group(e);
             else if (ui.page == V_ENGP)      /* okno ENGINE: ALGO po grupach (VA, DIGI, DRUM) */
                 engine_turn(e, 1);
-            else if (ui.page == V_HOME && mt_ui())   /* (v0.85) MULTI: główny ekran, ALGO = silnik ścieżki */
+            else if (ui.page == V_HOME && mt_ui() && (ui.sel_hold || glob.g[G_MT0 + mt_at_cur()] >= NENG)) {   /* (v0.85) MULTI: główny
+                                                                     * ekran, silnik ścieżki; (1.5.0, decyzja użytkownika 2026-11-07)
+                                                                     * SEL + ALGO, samo ALGO jak w SOLO (pusta ścieżka: samo ALGO też) */
+                ui.sel_used = 1;
                 mt_engine(e);
+            }
             else if (ui.page == V_ALLP) {    /* ALL PRESETS: ALGO po silnikach (v0.37, jak po grupach w oknie ENGINE) */
                 preset_go(eng_jump(preset_now(), e));
                 ui.redraw = 1;
@@ -930,7 +935,8 @@ OGS_UI static void input(void)
             if (set.edited[set.eng])             /* brzmienie zmienione: SAVE delikatnie (do wciśnięcia) */
                 fxon |= 1u << B_SAVE;
             fxon |= secmid;
-            if (!sqg.arp_on && ui.page == V_ARP) /* ustawienia ARP, arp wyłączony: przygaszony */
+            if (!sqg.arp_on && (ui.page == V_ARP || sqg.latch))   /* ustawienia ARP, arp wyłączony: przygaszony; (1.5.0) też LATCH
+                                                                * bez ARP (nuty wiszą) */
                 fxon |= 1u << B_ARP;
             plat_lights_mid(fxon, (shown & ~lit) | kmid); /* dostępne skróty przygaszone, tylko przy trzymanym SEL */
         }
@@ -1059,7 +1065,8 @@ OGS_UI void app_frame(void)
         ui.sel_used = 1;
         fxl_open();
     }
-    if (ui.page == V_HOME && mt_ui() && ui.sel_hold && !ui.sel_used && now - ui.sel_at >= SEL_SHOW_MS) {   /* (v0.86) główny ekran MULTI: lista silników */
+    if (ui.page == V_HOME && mt_ui() && ui.sel_hold && !ui.sel_used && now - ui.sel_at >= SEL_EQ_MS) {   /* (v0.86) główny ekran MULTI: lista
+                                                                     * silników; (1.5.0) po 0,8 s jak lista efektów: SEL + ALGO = silnik */
         ui.sel_used = 1;
         mtl_open();
     }
