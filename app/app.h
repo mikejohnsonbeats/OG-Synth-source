@@ -7,7 +7,7 @@
 #include "plat.h"
 
 #define APP_NAME "OG SYNTH"
-#define OGS_VERSION "1.4.2"              /* GLO > SYSTEM > INFO */
+#define OGS_VERSION "1.5.0"              /* GLO > SYSTEM > INFO */
 #define APP_SPLASH_RGB RGB(255, 154, 31)       /* #FF9A1F, pomarańczowy OG Deck */
 #define APP_SPLASH                       /* ekran startowy: logo OG Synth (app_splash, app.c) */
 #define APP_BLOCK 256u                   /* frames per audio block: 5.8 ms at 44.1 kHz */
@@ -19,7 +19,7 @@
 /* OGS: OBJ_GLOBAL = ustawienia GLO, OBJ_USER0..7 = presety USER po 16 (01-16 .. 113-128), OBJ_FACT = nadpisane fabryczne, OBJ_SYX = spis banków DX7 (dane banków: obszar danych 0xA0000, plat_data) */
 /* OBJ_FXP = efekty globalne: bieżące każdego silnika, presetów USER i nadpisanych fabrycznych (v0.9) */
 enum { OBJ_SETTINGS, OBJ_PANEL, OBJ_BLE, OBJ_GLOBAL, OBJ_USER0, OBJ_USER1, OBJ_FACT, OBJ_USER2, OBJ_USER3, OBJ_SYX, OBJ_FXP,
-       OBJ_FXP2, OBJ_FXX, OBJ_USER4, OBJ_USER5, OBJ_USER6, OBJ_USER7, OBJ_FXH, OBJ_FXH2, OBJ_SET2, OBJ_XTRA, OBJ_MTX, OBJ_NOBJ };
+       OBJ_FXP2, OBJ_FXX, OBJ_USER4, OBJ_USER5, OBJ_USER6, OBJ_USER7, OBJ_FXH, OBJ_FXH2, OBJ_SET2, OBJ_XTRA, OBJ_MTX, OBJ_MAC, OBJ_NOBJ };
                                               /* OBJ_FXP2: dalsza część efektów (6 slotów nie mieści się w jednym);
                                                * OBJ_FXX: gałki efektów ponad 8 (v0.14: COMPRESSOR, MULTIBAND);
                                                * v0.16: OBJ_USER4..7 = USER 65-128, OBJ_FXH(2) = ich efekty;
@@ -28,7 +28,7 @@ enum { OBJ_SETTINGS, OBJ_PANEL, OBJ_BLE, OBJ_GLOBAL, OBJ_USER0, OBJ_USER1, OBJ_F
                                                * 0xFA000; łatka fm1-base unity.c: zapis obiektów także tam) */
 #define APP_STORE_MAP {0xFC000u, 0xDC000u, 0xDE000u, 0xDA000u, 0xD4000u, 0xD6000u, 0xD8000u, 0xD0000u, 0xD2000u, 0xCE000u, 0xCC000u, 0xCA000u, \
                        0xC8000u, 0xC6000u, 0xC4000u, 0xC2000u, 0xC0000u, 0x9E000u, 0x9C000u, 0xF8000u, 0xFA000u, \
-                       0x97000u}   /* (banki DX7: 0xA0000-0xBFFFF); (v1.4.0) OBJ_MTX: bliźniaki MULTI, 0x97000-0x98FFF (wolne miejsce
+                       0x97000u, 0x99000u}   /* (1.5.0) OBJ_MAC: ALGO KNOB miejsca 2-8, 0x99000-0x9AFFF; (banki DX7: 0xA0000-0xBFFFF); (v1.4.0) OBJ_MTX: bliźniaki MULTI, 0x97000-0x98FFF (wolne miejsce
                                     * banków CZ 9-16) */
 
 /* the contract: the platform calls these */
@@ -48,7 +48,7 @@ int app_sysex(const uint8_t *p, uint32_t n);
  * ustawienia, brzmienia na start, presety USER, nadpisane fabryczne, spis banków DX7 (dane banków DX7 w obszarze danych
  * nie wchodzą: ich .syx zostają na komputerze) */
 #define APP_BACKUP_OBJS {OBJ_SETTINGS, OBJ_GLOBAL, OBJ_USER0, OBJ_USER1, OBJ_FACT, OBJ_USER2, OBJ_USER3, OBJ_SYX, OBJ_FXP, OBJ_FXP2, OBJ_FXX, \
-                         OBJ_USER4, OBJ_USER5, OBJ_USER6, OBJ_USER7, OBJ_FXH, OBJ_FXH2, OBJ_SET2, OBJ_XTRA, OBJ_MTX}
+                         OBJ_USER4, OBJ_USER5, OBJ_USER6, OBJ_USER7, OBJ_FXH, OBJ_FXH2, OBJ_SET2, OBJ_XTRA, OBJ_MTX, OBJ_MAC}
 /* (v0.38: dwa obiekty więcej na końcu; starsza kopia (17 obiektów) wczytuje się dalej — brakujące obiekty puste,
  * łatka fm1-base backup.c; kopii z nowej wersji starszy OG Synth nie przyjmie) */
 #define APP_BACKUP_MAGIC 0x3153474Fu       /* "OGS1" */
