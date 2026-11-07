@@ -217,6 +217,7 @@ enum { G_VHOME, G_VPAGES, G_TUNE, G_MIDICH, G_VEL, G_PRESS, G_TRANSP, G_ACCEL, G
                                           * ARP > CHORD > NAME (sqg.a[AR_CHNAME]) */
        G_LRPICK,                         /* (v1.3.0) MIDI > KNOB PICKUP: gałki MIDI LEARN ze stopem JUMP (od razu) / CATCH (gdy miną
                                           * wartość); (CC IN od v1.3.0 nieużywane: przy starcie przechodzi do MIDI LEARN) */
+       G_MTTW,                           /* (v1.4.0) MULTI: bliźniaki (bit ścieżki: drugi FM6 z własnym brzmieniem, OBJ_MTX); bez menu */
        NGALL };
 #define NGX 8                            /* miejsca glob.gx (zapas na kolejne pola) */
 #define NGX2 8                           /* (v1.1.0) miejsca glob.gx2 */
@@ -308,6 +309,7 @@ static const pdef_t GDEF[NGALL] = {
     {"OTHER TRACKS", 0, 1, 0, F_LIST, LI(L_MTCTL)}, {"CC IN", 0, 1, 0, F_LIST, LI(L_ONOFF)},   /* 72-75 (v1.1.0): glob.gx2 */
     {"TUNE KNOB", 0, 1, 0, F_LIST, LI(L_TUNEK)}, {"CHORD NAME", 0, 1, 0, F_LIST, LI(L_ONOFF)},
     {"KNOB PICKUP", 0, 1, 0, F_LIST, LI(L_PICK)},   /* 76 (v1.3.0) */
+    {"TWINS", 0, 15, 0, F_NUM, 0},                  /* 77 (v1.4.0) G_MTTW */
 };
 _Static_assert(NGALL <= NGLOB + NGX + NGX2, "GLO: miejsca gx2");
 _Static_assert(G_ALGO0 + G_ALGO_N == G_SQZINV, "GLO: miejsca ALGO");
@@ -382,7 +384,7 @@ static inline uint32_t mt_ch(int32_t t) { return (uint32_t)GV(G_MTCH0 + t) - 1u;
 #define GLOB_V91C ((int32_t)__builtin_offsetof(__typeof__(glob), gbc) + PF_NCV * 32 + PF_NCV)   /* z krzywymi PERFORM */
 /* (v0.91) krzywe domyślne (propozycja): 1 GATE (1/16 na zmianę), 2 PUMP (narasta co ćwierćnutę), 3 REPEAT (ostatnia ćwierćnuta
  * powtarza trzecią), 4 HALF (każda szesnastka dwa razy: połowa tempa); SMOOTH 20 */
-static void gb_def(uint8_t *g)
+OGS_UI static void gb_def(uint8_t *g)
 {
     static const uint8_t PU[4] = {0, 40, 75, 100}, HA[16] = {0, 1, 1, 2, 2, 3, 3, 4, 4, 5, 5, 6, 6, 7, 7, 8};
     int32_t s;
@@ -427,7 +429,42 @@ static float mt_xg = 1.0f, mt_xs;            /* przygaszenie całego wyjścia (m
 static volatile uint32_t mt_used;            /* bajty puli zajęte przez ścieżki (SysEx 0x1E) */
 static uint8_t mt_gdirty;                    /* UI: ustawienia MULTI do zapisu (w ciszy, jak brzmienia) */
 static uint32_t mt_ovl;                      /* przeciążenie: ścieżki (bit), które jeszcze nie zrzuciły głosu */
-#define MT_LIM 12                            /* (v0.79) wspólny limit trzymanych nut T2-T4 (mt_lim_on, niżej) */
+static int8_t mt_ft = -1;                    /* (v1.4.0) przerwanie: wybrana ścieżka, która gra jako „silnik” (było: ścieżka silnika eng_play) */
+/* (v1.4.0, GitHub issue #3, decyzja użytkownika 2026-11-06) ten sam silnik na dwóch ścieżkach MULTI („bliźniak”; dziś FM6). Brzmienie
+ * (parametry, efekty, dodatki, preset, SAVE) należy do silnika (ENG[e].p, fxc, xtc, set.preset ...): pierwsza ścieżka gra je jak
+ * dotąd, bliźniak ma swoje w miejscu na początku puli MULTI (mx_t, tylko gdy jakiś bliźniak jest: bez niego układ pamięci bit w
+ * bit jak v1.3). Wybrany bliźniak: brzmienia zamienione (UI pod plat_lock, mx_sw), strony / SAVE / presety działają jak dotąd.
+ * Przerwanie na czas bloku i nut niewybranej ścieżki zamienia jej brzmienie z silnikiem (mx_at) i oddaje przed końcem bloku.
+ * Silnik bez zmian: ten sam kod, FM6 dzieli tablicę sinusa (pula silnika jednego). Zapis: OBJ_MTX (mx_store), bity GLO G_MTTW. */
+#define MX_NP EMAX(EMAX(EMAX(NX, NZ), EMAX(NV, NS)), EMAX(EMAX(NJ, NBT), EMAX(EMAX(NWS, NMPP), EMAX(EMAX(NDMP, NDUP), EMAX(NPH, NFOR)))))
+                                             /* najwięcej parametrów silnika, który może mieć bliźniaka */
+/* (v1.4.0, decyzja użytkownika 2026-11-06: wszystkie silniki) każdy silnik poza ENG[e].p nie ma stanu (sprawdzone: żadnych zmiennych
+ * statycznych w głosach; perkusja: dźwięk na stronach LANE_KEEP), więc bliźniak = drugie miejsce w puli. Poza: WAVE (koszt stały,
+ * już obok FM6 nie gra) i MINI (cały na jednym rdzeniu, 44 %): dwa razy nie zmieszczą się w CPU. Wspólna pula silnika: tylko FM6
+ * (sama tablica sinusa), reszta ma w niej stan głosów, więc każdy swoją. */
+static int mt_twin(uint32_t e) { return e != ENG_WT && e != ENG_MOOG; }
+typedef struct {                             /* brzmienie bliźniaka; tak samo w zapisie (OBJ_MTX, efekty: numery fx_io) */
+    uint8_t eng, ed;                         /* silnik, którego brzmienie tu leży (0xFF: brak); SAVE świeci */
+    uint16_t pre, np;
+    int16_t p[MX_NP];
+    fx_slot_t fx[FX_SLOTS];
+    uint8_t fxx[FX_NX], xt[16];              /* (XT_N) */
+} mxs_t;
+typedef struct {
+    mxs_t s;
+    int16_t sp[MX_NP];                       /* kopia z chwili wczytania (snap_*): tylko UI */
+    fx_slot_t sfx[FX_SLOTS];
+    uint8_t sfxx[FX_NX], sxt[16], sok, rsv;
+} mx_t;
+static mx_t *mx_reg;                         /* MT_N miejsc (numer = ścieżka) na początku puli MULTI */
+static volatile uint8_t mx_in;               /* UI: bliźniaki (bit ścieżki) */
+static volatile uint8_t mx_rdy;              /* miejsce ma brzmienie (UI po wczytaniu, mx_sync; przerwanie: nowa pula = 0) */
+static volatile uint8_t mx_live;             /* przerwanie: miejsca są w puli */
+static volatile int8_t mx_sw = -1;           /* UI: bliźniak, którego brzmienie jest teraz w silniku (-1: każde u siebie) */
+static int8_t mx_isw = -1;                   /* przerwanie: miejsce zamienione na czas ścieżki (na końcu bloku -1) */
+static volatile uint8_t mx_hold;             /* UI: wyjście cicho i czeka (zapis bliźniaków przed SOLO, mx_leave) */
+static void mx_at(int32_t t);
+#define MT_LIM 12                           /* (v0.79) wspólny limit trzymanych nut T2-T4 (mt_lim_on, niżej) */
 #define MT_DRUM2 16u                         /* (v0.91) perkusja na T2-T4: punkty budżetu (szacunek; pomiar FM1: multi.md) */
 /* (v0.80) limit ważony kosztem silnika, punkty z pomiaru FM1 (tools/pomiary/2026-10-30-multi-v0.79.0.txt): nuta ścieżki
  * kosztuje MT_PTS, MINI stale MT_MINI (mono, cała praca na jednym rdzeniu), razem najwyżej MT_BUDGET; PHASE obok MINI
@@ -460,7 +497,8 @@ static uint32_t mt_hn;
 #define MT_NEV 64
 static struct { uint16_t at; uint8_t t, on, note, vel, slide; int8_t from, pit; uint16_t dl; } mt_ev[MT_NEV];   /* (v0.92) pit, dl: ogs_seq.c sq_q */
 static uint32_t mt_nev;
-static uint32_t mt_code(uint32_t e)          /* ten sam kod = ten sam stan poza wspólnym RAM */
+static uint32_t mt_code(uint32_t e)          /* ten sam kod (do v1.3: nie naraz; v1.4.0, decyzja użytkownika 2026-11-07: razem, kod nie ma
+                                              * stanu poza ścieżką); 88 / 99: wspólny dźwięk na stronach (dm_lane, mt_midi) */
 {
     return e == ENG_ALPHA ? ENG_DCO : e == ENG_99 ? ENG_88 : e;
 }
@@ -475,39 +513,37 @@ static int mt_clash(uint32_t a, uint32_t b)
 }
 static int mt_ok(int32_t t, int32_t e, const int16_t *eng)   /* silnik e na ścieżce t obok eng[] (UI i przerwanie) */
 {
-    int32_t k;
+    int32_t k, n = 0;
     if (e == MT_NONE)
         return 1;
-    if (e < 0 || e > NENG || (t == 0 && !mt_drum((uint32_t)e)))   /* (v0.91, decyzja użytkownika 2026-11-03) T2-T4 też perkusja
-                                                                      * (inna niż na T1: 88 i 99 to ten sam kod) */
+    if (e < 0 || e > NENG || (t == 0 && !mt_drum((uint32_t)e)))   /* (v0.91, decyzja użytkownika 2026-11-03) T2-T4 też perkusja */
         return 0;
     for (k = 0; k < MT_N; k++)
-        if (k != t && eng[k] < NENG && (mt_code((uint32_t)eng[k]) == mt_code((uint32_t)e)
-                                        || mt_clash((uint32_t)e, (uint32_t)eng[k])))
-            return 0;
+        if (k != t && eng[k] < NENG) {
+            if (eng[k] == e && mt_twin((uint32_t)e)) {   /* (v1.4.0) bliźniak: najwyżej dwa razy */
+                if (n++)
+                    return 0;
+                continue;
+            }
+            if (eng[k] == e || mt_clash((uint32_t)e, (uint32_t)eng[k]))   /* (v1.4.0: DCO + ALPHA, 88 + 99 razem) */
+                return 0;
+        }
     return 1;
-}
-static int32_t mt_track(uint32_t e)          /* ścieżka, na której gra silnik e (-1: żadna) */
-{
-    int32_t t;
-    for (t = 0; mt_on && t < MT_N; t++)
-        if (mt_eng[t] == e)
-            return t;
-    return -1;
 }
 static void mt_at(int32_t t)
 {
     ogs_eram = mt_er[t];
     ogs_epool = mt_ep[t];
+    mx_at(t);                                /* (v1.4.0) brzmienie bliźniaka */
 }
 static void mt_home(void)                    /* wskaźniki na wybraną ścieżkę (UI czyta jej stan); SOLO: wspólny RAM */
 {
-    int32_t t = mt_track(eng_play);
-    if (t >= 0) {
-        mt_at(t);
+    if (mt_on && mt_ft >= 0) {
+        mt_at(mt_ft);
     } else {
         ogs_eram = ogs_eram_mem;
         ogs_epool = ogs_epool_mem;
+        mx_at(-1);
     }
 }
 static void mt_apply(void)                   /* przerwanie audio, wyjście przygaszone: tryb i ścieżki z GLO */
@@ -526,6 +562,8 @@ static void mt_apply(void)                   /* przerwanie audio, wyjście przyg
         for (t = 0; t < MT_N; t++)
             mt_eng[t] = MT_NONE;
         mt_used = 0;
+        mt_ft = -1;
+        mx_live = mx_rdy = 0;                /* (v1.4.0) pula dla łańcucha SOLO: brzmienia bliźniaków tylko w OBJ_MTX */
         mt_home();
         return;
     }
@@ -534,26 +572,39 @@ static void mt_apply(void)                   /* przerwanie audio, wyjście przyg
     base += k;
     cap -= k;
     mt_on = 1;
+    mt_ft = -1;
+    if (mx_in) {                             /* (v1.4.0) miejsca bliźniaków: na początku, zostają przez kolejne zmiany ścieżek */
+        if (!mx_live)
+            mx_rdy = 0;                      /* (nowa pula: UI wczyta, mx_sync) */
+        mx_reg = (mx_t *)(void *)base;
+        mx_live = 1;
+        at = ERAM_UP(MT_N * (uint32_t)sizeof(mx_t));
+    } else {
+        mx_live = mx_rdy = 0;
+    }
     for (t = 0; t < MT_N; t++)
         eng[t] = mt_eng[t] = MT_NONE;
     for (t = 0; t < MT_N; t++) {
-        int32_t e = glob.g[G_MT0 + t];
-        uint32_t ne, np;
+        int32_t e = glob.g[G_MT0 + t], sh = -1;
+        uint32_t ne, np, j;
         if (e >= NENG || !mt_ok((int32_t)t, e, eng))
             continue;
+        for (j = 0; e == ENG_DX7 && j < t; j++)   /* (v1.4.0) drugi FM6: tablica sinusa pierwszego */
+            if (mt_eng[j] == e)
+                sh = (int32_t)j;
         ne = ERAM_UP(MT_SZ[e][0]);
-        np = ERAM_UP(MT_SZ[e][1]);
+        np = sh >= 0 ? 0u : ERAM_UP(MT_SZ[e][1]);
         if (at + ne + np > cap)
             continue;
         mt_er[t] = base + at;
-        mt_ep[t] = base + at + ne;
+        mt_ep[t] = sh >= 0 ? mt_ep[sh] : base + at + ne;
         for (w = (uint32_t *)(void *)mt_er[t]; w < (uint32_t *)(void *)(base + at + ne + np); w++)
             *w = 0;
         at += ne + np;
-        mt_at((int32_t)t);
-        ENG[e].reset();
         eng[t] = (int16_t)e;
         mt_eng[t] = (uint8_t)e;
+        mt_at((int32_t)t);
+        ENG[e].reset();
         mt_g[t] = 0.0f;                      /* (wjeżdża z wygładzeniem) */
     }
     for (t = 0; t < MT_N; t++) {             /* (v0.76) wysyłki od zera */
@@ -565,14 +616,18 @@ static void mt_apply(void)                   /* przerwanie audio, wyjście przyg
     mt_hn = 0;                               /* (v0.79) limit nut: ścieżki od nowa */
     nt_clear();
     eng_play = 0xFF;
-    if (mt_track(set.eng) >= 0)
-        eng_play = set.eng;
-    for (t = 0; eng_play == 0xFF && t < MT_N; t++)
+    t = (uint32_t)glob.g[G_MTFOC];           /* (v1.4.0) wybrana ścieżka (było: ścieżka silnika set.eng) */
+    if (t < MT_N && mt_eng[t] < NENG)
+        mt_ft = (int8_t)t;
+    for (t = 0; mt_ft < 0 && t < MT_N; t++)
         if (mt_eng[t] < NENG)
-            eng_play = mt_eng[t];
+            mt_ft = (int8_t)t;
+    if (mt_ft >= 0)
+        eng_play = mt_eng[mt_ft];
     if (eng_play == 0xFF) {                  /* żadnej ścieżki: SOLO; (v1.1.2) w MULTI (pusta scena) wyciszone */
         mt_on = 0;
         mt_void = 1;
+        mx_live = mx_rdy = 0;
         ogs_fx_arena_give();
     }
     mt_home();
@@ -643,8 +698,11 @@ static void mt_midi(int32_t t, uint32_t ty, uint32_t d1, uint32_t d2)   /* przer
     }
     mt_at(t);
     if (ty == 0x90u && d2) {
+        LANE_KEEP();                         /* (v1.4.0) dwie takie same perkusje: dźwięk na stronach wybranej zostaje */
         mt_lim_on(t, (int32_t)d1);
         ENG[mt_eng[t]].note_on((int32_t)d1, (float)d2 / 127.0f);
+        if (mt_code(mt_eng[t]) == mt_code(eng_play))   /* (88 i 99: jedna zmienna dm_lane) */
+            LANE_BACK();
         mt_kick(t, (int32_t)d1);
     } else {
         mt_lim_off(t, (int32_t)d1);
@@ -691,7 +749,7 @@ static void mt_ev_do(uint32_t k)             /* przerwanie audio: zdarzenie k (w
 _Static_assert(APP_BLOCK <= FX_BUS_N, "wysyłki MULTI: blok w szynie");
 static int32_t mt_mini(void)                 /* (v0.76) ścieżka MINI (nie wybrana) przy wysyłkach: liczy głosy sama — zadanie wysyłek obok */
 {
-    int32_t t, f = mt_track(eng_play);
+    int32_t t, f = mt_ft;
     for (t = 0; ogs_fx_bus(0) && t < MT_N; t++)
         if (t != f && mt_eng[t] == ENG_MOOG)
             return t;
@@ -765,7 +823,7 @@ static void mt_add(int32_t t, const float *xl, const float *xr, float *l, float 
 static void mt_mix(float *l, float *r, uint32_t n)   /* przerwanie audio: blok wybranej ścieżki (l, r) + reszta */
 {
     static float tl[APP_BLOCK], tr[APP_BLOCK];
-    int32_t t, j, f = mt_track(eng_play), mini;
+    int32_t t, j, f = mt_ft, mini;
     uint32_t i, dm = 0;                      /* (v0.83) ścieżki z efektami: do miksu po efektach (mt_fx_run) */
     const uint8_t ovl = ogs_overload;        /* (znacznik wybranej: wraca po reszcie) */
     mt_send_pick();                          /* (v0.76) wysyłki: cele ścieżek, gałki wspólnych efektów */
@@ -863,10 +921,11 @@ static void mt_mix(float *l, float *r, uint32_t n)   /* przerwanie audio: blok w
     ogs_overload = ovl;
     mt_home();
 }
-static void mt_focus_in(void)                /* przerwanie audio: UI wybrało inną ścieżkę (set.eng) */
+static void mt_focus_in(void)                /* przerwanie audio: UI wybrało inną ścieżkę (G_MTFOC; v1.4.0: było set.eng — dwa FM6) */
 {
-    int32_t o = mt_track(eng_play), n;
-    if (mt_track(set.eng) < 0 || set.eng == eng_play)
+    const int32_t o = mt_ft, f = glob.g[G_MTFOC];
+    int32_t n;
+    if (f < 0 || f >= MT_N || f == o || mt_eng[f] >= NENG)
         return;
     if (o >= 0) {                            /* trzymane nuty starej ścieżki: puszczone (wybrzmiewają) */
         mt_at(o);
@@ -874,12 +933,13 @@ static void mt_focus_in(void)                /* przerwanie audio: UI wybrało in
             ENG[eng_play].note_off(n);
     }
     nt_clear();
-    eng_play = set.eng;
+    mt_ft = (int8_t)f;
+    eng_play = mt_eng[f];
     mt_home();
 }
 
 static uint8_t mc_p[4] = {21u, 29u, 79u, 62u};   /* (v0.91) MULTI MASTER COMP: THRESH, RATIO, ATTACK, RELEASE z GLO (przerwanie czyta) */
-static void glob_apply(void)             /* GLO -> silniki, klawisze, ekran */
+OGS_UI static void glob_apply(void)             /* GLO -> silniki, klawisze, ekran */
 {
     {
         int32_t i;
@@ -1081,7 +1141,7 @@ static void eng_off(const engine_t *e, int32_t key)
     }
     for (k = 0; k < 32u; k++)
         if (m >> k & 1u && key + (int32_t)k < 128 && nt_cnt[key + k] && --nt_cnt[key + k] == 0) {
-            mt_lim_off(mt_track(eng_play), key + (int32_t)k);   /* (v0.75) MULTI: limit nut ścieżki */
+            mt_lim_off(mt_ft, key + (int32_t)k);   /* (v0.75) MULTI: limit nut ścieżki */
             e->note_off(key + (int32_t)k);
         }
     nt_key[key & 127] = 0;
@@ -1100,12 +1160,12 @@ static void eng_on_m(const engine_t *e, int32_t key, float v, uint32_t m)
             if (nt_cnt[key + k] < 255u)
                 nt_cnt[key + k]++;
             if (mt_on)                       /* (v0.75) MULTI: limit nut wybranej ścieżki */
-                mt_lim_on(mt_track(eng_play), key + (int32_t)k);
+                mt_lim_on(mt_ft, key + (int32_t)k);
             e->note_on(key + (int32_t)k, v);
         }
     nt_key[key & 127] = m;
     sub_track();
-    mt_kick(mt_on ? mt_track(eng_play) : -1, key);
+    mt_kick(mt_on ? mt_ft : -1, key);
     ogs_fx_note_n++;                         /* (v0.55) AUTO WAH ENV: nowa nuta (akord = jedna) */
 }
 static void eng_all_off(const engine_t *e)
@@ -1244,7 +1304,7 @@ static void events_in(void)              /* przerwanie audio: nuty z panelu i z 
                 hit = 1;
                 if (mt_eng[t] >= NENG)       /* pusta ścieżka: nic */
                     continue;
-                if (mt_eng[t] == eng_play)   /* wybrana: dalej jak SOLO (ARP, nagrywanie, bend, wheel, nacisk) */
+                if (t == mt_ft)              /* wybrana: dalej jak SOLO (ARP, nagrywanie, bend, wheel, nacisk) */
                     foc = 1;
                 else
                     mt_midi(t, ty, d1, d2);
@@ -1306,8 +1366,9 @@ void app_render(int32_t *lr, uint32_t n, uint32_t master_q12)
     uint32_t i, done = 0, w = scope_w;
     int sc = scope_on && !mt_void, eq = glob.g[G_SPKEQ], fading, want;
     float pk = 0.0f;
-    if (mt_seen != mt_ver || mt_xs < 0.0f) {   /* (v0.64) MULTI: zmiana trybu / ścieżek po przygaszeniu wyjścia */
-        if ((!mt_on && eng_play >= NENG) || mt_xg <= 0.0f) {   /* (start: od razu) */
+    if (mt_seen != mt_ver || mt_xs < 0.0f || mx_hold) {   /* (v0.64) MULTI: zmiana trybu / ścieżek po przygaszeniu wyjścia;
+                                                           * (v1.4.0) mx_hold: cicho, aż UI zapisze bliźniaki */
+        if (((!mt_on && eng_play >= NENG) || mt_xg <= 0.0f) && !mx_hold) {   /* (start: od razu) */
             mt_seen = mt_ver;
             mt_apply();
             mt_xs = 1.0f;
@@ -1373,8 +1434,8 @@ void app_render(int32_t *lr, uint32_t n, uint32_t master_q12)
             mt_sends(bl, br, c);             /* (v0.76) wspólne REVERB / DELAY (efekty presetów ścieżek) */
             ogs_pf_render(bl, br, c);        /* (v0.74) PERFORM: tylko w MULTI, na całym miksie (pamięć za ścieżkami) */
             ogs_fx_master(mt_mst >= 0 ? (uint32_t)mt_mst : (uint32_t)glob.g[G_MTMST], mc_p, bl, br, c);   /* (v0.77) master */
-            if (mt_track(eng_play) >= 0)
-                ogs_fx_track_meter((uint32_t)mt_track(eng_play));   /* (v0.83) GR meter strony FX: wybrana ścieżka */
+            if (mt_ft >= 0)
+                ogs_fx_track_meter((uint32_t)mt_ft);   /* (v0.83) GR meter strony FX: wybrana ścieżka */
         } else {
             ogs_fx_render(fx_play(), fx_xplay(), bl, br, c);   /* efekty globalne za silnikiem; (v0.74) bez PERFORM */
         }
@@ -1420,6 +1481,7 @@ void app_render(int32_t *lr, uint32_t n, uint32_t master_q12)
         }
         done += c;
     }
+    mx_at(-1);                               /* (v1.4.0) brzmienia bliźniaków na swoje miejsca: UI widzi wybraną ścieżkę */
     if (want && dk_g <= 0.0f) {              /* przy zerze: zmiany z UI wchodzą, UI może wczytać preset */
         dk_apply();
         dk_quiet = dk_quiet_req;
@@ -1837,7 +1899,7 @@ static uint32_t fxo_len(int32_t w, int32_t part)   /* długość obiektu A (0) /
 {
     return part ? (uint32_t)FXO[w].n - PLAT_STORE_MAX : FXO[w].n < PLAT_STORE_MAX ? FXO[w].n : PLAT_STORE_MAX;
 }
-static int fxo_read(int32_t w, uint32_t off, void *dst, uint32_t n)   /* 1: cały zakres jest we flashu */
+OGS_UI static int fxo_read(int32_t w, uint32_t off, void *dst, uint32_t n)   /* 1: cały zakres jest we flashu */
 {
     uint8_t *d = dst;
     if (!fx_ok[w])
@@ -1865,7 +1927,7 @@ static int fxo_create(int32_t w)         /* pusty zapis: sam znacznik (wpisy dop
     fx_ok[w] = 1;
     return 0;
 }
-static int fxo_write(int32_t w, uint32_t off, const void *src, uint32_t n)   /* 0: zapisane */
+OGS_UI static int fxo_write(int32_t w, uint32_t off, const void *src, uint32_t n)   /* 0: zapisane */
 {
     const uint8_t *s = src;
     if (!fx_ok[w] && fxo_create(w) != 0)
@@ -2169,7 +2231,7 @@ static uint32_t fnv(const uint8_t *b, uint32_t n)   /* odcisk części: zapis ty
 
 static uint32_t fx_saved[4];               /* odciski bieżących we flashu: silniki 1-8 (fxp, fxx), 9-16 (fxh: dwie) */
 
-static void fx_hash(uint32_t *h)
+OGS_UI static void fx_hash(uint32_t *h)
 {
     h[0] = fnv((const uint8_t *)fxc.cur[0], NENG_V8 * sizeof fxc.cur[0]);
     h[1] = fnv(fxc.x[0], NENG_V8 * sizeof fxc.x[0]);
@@ -2454,6 +2516,67 @@ typedef struct {
 _Static_assert(sizeof(xt_t) <= XD1_OBJ_MAX, "dodatki presetu: jeden obiekt, przed rekordem loadera (XD1_OBJ_MAX)");
 static uint8_t xtc[NENG_MAX][XT_N];          /* bieżące każdego silnika (gra xtc[set.eng]) */
 static const uint8_t *xt_play(void) { return xtc[eng_play < NENG ? eng_play : 0]; }
+_Static_assert(XT_N == 16, "bliźniak: dodatki presetu (mx_t)");
+static void __attribute__((noinline)) mx_bswap(void *a, void *b, uint32_t n)
+{
+    uint8_t *x = (uint8_t *)a, *y = (uint8_t *)b, v;
+    while (n--) {
+        v = *x;
+        *x++ = *y;
+        *y++ = v;
+    }
+}
+static void __attribute__((noinline)) mx_swap(int32_t s)               /* (v1.4.0) brzmienie miejsca s <-> silnik: to, co gra (przerwanie; UI pod plat_lock) */
+{
+    mxs_t *c = &mx_reg[s].s;
+    const uint32_t e = c->eng;
+    mx_bswap(ENG[e].p, c->p, (uint32_t)ENG[e].np * 2u);
+    mx_bswap(fxc.cur[e], c->fx, sizeof c->fx);
+    mx_bswap(fxc.x[e], c->fxx, FX_NX);
+    mx_bswap(xtc[e], c->xt, XT_N);
+}
+static int32_t __attribute__((noinline)) mx_loc(int32_t t)             /* miejsce z brzmieniem ścieżki t (-1: silnik), bez zamiany przerwania */
+{
+    const uint32_t e = mt_eng[t];
+    if (!mx_live || e >= NENG)
+        return -1;
+    if ((mx_in & mx_rdy) >> t & 1u)
+        return mx_sw == t ? -1 : t;
+    return mx_sw >= 0 && mx_reg[mx_sw].s.eng == e ? mx_sw : -1;   /* (silnik ma brzmienie wybranego bliźniaka: swoje w jego miejscu) */
+}
+static void mx_at(int32_t t)                 /* przerwanie: brzmienie ścieżki t w silniku (-1: wszystko u siebie) */
+{
+    const int32_t s = t >= 0 ? mx_loc(t) : -1;
+    if (s == mx_isw)
+        return;
+    if (mx_isw >= 0)
+        mx_swap(mx_isw);
+    if (s >= 0)
+        mx_swap(s);
+    mx_isw = (int8_t)s;
+}
+static int32_t __attribute__((noinline)) mx_phys(int32_t t)            /* gdzie teraz leży brzmienie ścieżki t (po zamianie przerwania; -1: silnik) */
+{
+    const int32_t s = mx_loc(t);
+    if (s >= 0)
+        return s == mx_isw ? -1 : s;
+    return mx_isw >= 0 && mx_reg[mx_isw].s.eng == mt_eng[t] ? mx_isw : -1;
+}
+static const fx_slot_t *mt_tfx(int32_t t)    /* efekty ścieżki t (bliźniak: swoje) */
+{
+    const int32_t s = mx_phys(t);
+    return s >= 0 ? mx_reg[s].s.fx : fxc.cur[mt_eng[t]];
+}
+static const uint8_t *mt_tfxx(int32_t t)
+{
+    const int32_t s = mx_phys(t);
+    return s >= 0 ? mx_reg[s].s.fxx : fxc.x[mt_eng[t]];
+}
+static const uint8_t *mt_txt(int32_t t)
+{
+    const int32_t s = mx_phys(t);
+    return s >= 0 ? mx_reg[s].s.xt : xtc[mt_eng[t]];
+}
 static uint32_t xt_sync(const uint8_t *x)    /* (v0.46) SYNC efektów z dodatków presetu */
 {
     return ((uint32_t)x[XT_SYNC] | (uint32_t)x[XT_SYNC + 1] << 8 | (uint32_t)x[XT_SYNC + 2] << 16) & FX_SYNC_SET;
@@ -2472,7 +2595,7 @@ static fx_slot_t *eq_slot(int32_t e)
             return &fxc.cur[e][k];
     return 0;
 }
-static void eq_pack(int32_t e)
+OGS_UI static void eq_pack(int32_t e)
 {
     static const uint8_t EQD[FX_NXE] = {64, 33, 89, 105, 29, 38, 38, 29, 0, 0, 0, 0, 0};
     fx_slot_t *s = eq_slot(e);
@@ -2493,7 +2616,7 @@ static void eq_pack(int32_t e)
     s->p[7] = (uint8_t)f;
     xt_dirty = 1;
 }
-static void eq_unpack(int32_t e)
+OGS_UI static void eq_unpack(int32_t e)
 {
     static const uint8_t EQD[FX_NXE] = {64, 33, 89, 105, 29, 38, 38, 29, 0, 0, 0, 0, 0};
     const fx_slot_t *s = eq_slot(e);
@@ -2540,14 +2663,17 @@ static void mt_tdef(void)
     mfx_def(&mt_tm);
     mt_tm.s[0].p[3] = mt_tm.s[1].p[3] = 127u;
 }
-static const fx_slot_t *mt_fxe(uint32_t e, uint32_t k)   /* REVERB (k 0) / DELAY (k 1) włączony w łańcuchu presetu silnika e */
+static const fx_slot_t *mt_ufx(int32_t t)   /* (v1.4.0) UI przy starcie (bez bliźniaków w puli): efekty silnika ścieżki t, 0: pusta */
+{
+    const int32_t e = glob.g[G_MT0 + t];
+    return e < NENG ? fxc.cur[e] : 0;
+}
+static const fx_slot_t *mt_fxe(const fx_slot_t *c, uint32_t k)   /* REVERB (k 0) / DELAY (k 1) włączony w łańcuchu c (0: pusta ścieżka) */
 {
     const uint32_t type = k ? FX_DELAY : FX_REVERB;
-    const fx_slot_t *c;
     uint32_t j;
-    if (e >= NENG)
+    if (!c)
         return 0;
-    c = fxc.cur[e];
     for (j = 0; j < FX_SLOTS; j++)
         if (c[j].type == type && c[j].mode)
             return &c[j];
@@ -2571,7 +2697,7 @@ static void mfx_upgrade(void)
             uint32_t any = 0;
             for (t = 0; t < MT_N; t++) {
                 const uint32_t v = (b ? (uint32_t)glob.scs[b - 1u][t] : (uint32_t)glob.g[G_MTS0 + t]) >> (k * 7u) & 127u;
-                any |= (uint32_t)(v > 1u) | (uint32_t)(!b && !v && mt_fxe((uint32_t)glob.g[G_MT0 + t], k) != 0);
+                any |= (uint32_t)(v > 1u) | (uint32_t)(!b && !v && mt_fxe(mt_ufx(t), k) != 0);
             }
             if (!c->mode) {
                 c->mode = (uint8_t)(tp >= 0 ? c->p[tp] + 1u : 1u);
@@ -2590,7 +2716,7 @@ static void mfx_upgrade(void)
                 c->p[3] = 127u;
             for (t = 0; t < MT_N; t++) {         /* (nie wysyłała: zostaje bez wysyłki) */
                 const uint32_t v = (b ? (uint32_t)glob.scs[b - 1u][t] : (uint32_t)glob.g[G_MTS0 + t]) >> (k * 7u) & 127u;
-                if (v || (!b && mt_fxe((uint32_t)glob.g[G_MT0 + t], k)))
+                if (v || (!b && mt_fxe(mt_ufx(t), k)))
                     continue;
                 if (b)
                     glob.scs[b - 1u][t] |= (uint16_t)(1u << (k * 7u));
@@ -2614,7 +2740,7 @@ static float mt_send(int32_t t, uint32_t k)
         return 0.0f;
     if (v)
         return (float)(v - 1u) * 0.01f;
-    c = mt_fxe(mt_eng[t], k);
+    c = mt_fxe(mt_tfx(t), k);
     return c ? (float)c->p[3] * (1.0f / 127.0f) : 1.0f;
 }
 static void mt_send_pick(void)
@@ -2669,7 +2795,7 @@ static void mt_fx_pick(void)                 /* przerwanie audio, raz na blok */
             ft += (mt_ftest[t] & 1u ? mt_fxc(FX_DIST) : 0u) + (mt_ftest[t] & 2u ? mt_fxc(FX_FILTER) : 0u)
                 + (mt_ftest[t] & 4u ? mt_fxc(FX_COMP) : 0u) + (mt_ftest[t] & 8u ? mt_fxc(FX_EQ) : 0u);
         } else if (mt_eng[t] < NENG && !(glob.g[G_MTMUTE] >> t & 1)) {
-            const fx_slot_t *c = fxc.cur[mt_eng[t]];
+            const fx_slot_t *c = mt_tfx((int32_t)t);
             for (j = 0; j < FX_SLOTS; j++)
                 if (c[j].mode && c[j].type < FX_NTYPE && (FX_TRACK_TYPES >> c[j].type & 1u) && mt_fxc(c[j].type) <= left) {
                     left -= mt_fxc(c[j].type);
@@ -2704,8 +2830,8 @@ static void mt_track_fx(int32_t t, uint32_t core, uint32_t n)
         ogs_fx_track((uint32_t)t, ch, x, FX_TRACK_TYPES, 0u, core, n);
         return;
     }
-    ogs_fx_track((uint32_t)t, fxc.cur[mt_eng[t]], fxc.x[mt_eng[t]], mt_fxa[t],
-                 (xt_sync(xtc[mt_eng[t]]) >> FX_FILTER & 1u) | (xt_sync(xtc[mt_eng[t]]) >> FX_SIDECH & 1u) << 1, core, n);
+    ogs_fx_track((uint32_t)t, mt_tfx(t), mt_tfxx(t), mt_fxa[t],
+                 (xt_sync(mt_txt(t)) >> FX_FILTER & 1u) | (xt_sync(mt_txt(t)) >> FX_SIDECH & 1u) << 1, core, n);
 }
 static uint32_t mt_fxj_m, mt_fxj_n;          /* zadanie drugiego rdzenia: ścieżki, próbki */
 static void mt_fx_tracks(uint32_t m, uint32_t core, uint32_t n)
@@ -3007,7 +3133,7 @@ static int old_load(uint32_t o, void *b, uint32_t magic)
 }
 
 /* rekordy from..from+n starego banku -> obiekt o; fact: nadpisane fabryczne (lista) */
-static void old_write(uint32_t o, const void *src, uint32_t rs, int32_t from, int32_t n, int fact)
+OGS_UI static void old_write(uint32_t o, const void *src, uint32_t rs, int32_t from, int32_t n, int fact)
 {
     const struct { uint32_t magic, used; uint8_t d[PLAT_STORE_MAX - 8u]; } *s = src;
     int32_t i, at = 0;
@@ -3043,7 +3169,7 @@ static void old_write(uint32_t o, const void *src, uint32_t rs, int32_t from, in
 /* v0.6 - v0.23 -> v0.24: sam układ nagłówka rekordu bez zmian, tylko miejsce na parametry urosło (200 -> REC_SIZE);
  * kopiujemy rekord po rekordzie na te same miejsca (fact: nadmiar ponad nową pojemność gubimy, reszta parametrów
  * nowego rekordu zostaje zerem — jak przy silniku, który urósł). */
-static void old6_write(uint32_t o, const void *src, int32_t n, int fact)
+OGS_UI static void old6_write(uint32_t o, const void *src, int32_t n, int fact)
 {
     const struct { uint32_t magic, used; uint8_t d[PLAT_STORE_MAX - 8u]; } *s = src;
     int32_t i, cap = fact ? FACT_N : BANK_N;
@@ -3107,7 +3233,7 @@ static uint8_t snap_fxx[NENG][FX_NX];
 static uint8_t snap_xt[NENG][XT_N];          /* dodatki presetu (v0.38) */
 static uint8_t snap_ok[NENG];
 
-static void snap_take(int32_t e)
+OGS_UI static void snap_take(int32_t e)
 {
     int32_t k;
     int16_t *sp = snap_of(e);
@@ -3122,7 +3248,7 @@ static void snap_take(int32_t e)
     snap_ok[e] = 1;
 }
 
-static int snap_differs(int32_t e)
+OGS_UI static int snap_differs(int32_t e)
 {
     int32_t k;
     const int16_t *sp = snap_of(e);
@@ -3146,6 +3272,166 @@ static int snap_differs(int32_t e)
     return 0;
 }
 
+/* (v1.4.0) bliźniaki MULTI, strona UI (opis przy mx_t). Zapis: OBJ_MTX, każda ścieżka swoje miejsce; brak: INIT */
+#define MX_MAGIC 0x31584D4Fu                 /* "OMX1" */
+typedef struct {
+    uint32_t magic;
+    mxs_t c[MT_N];
+} mxo_t;
+_Static_assert(sizeof(mxo_t) <= sizeof bk && sizeof(mxo_t) <= PLAT_STORE_MAX, "bliźniaki: jeden obiekt, budowany w bk");
+static uint8_t mx_e[MT_N] = {MT_NONE, MT_NONE, MT_NONE, MT_NONE};   /* silnik ścieżki, dla którego ustalono bliźniaka */
+static uint8_t mx_new, mx_lv;                /* nowy bliźniak: INIT (inaczej z OBJ_MTX); wyjście do SOLO czeka na zapis */
+static uint32_t mx_saved;
+static int listed(int32_t id, int32_t e);
+static void load_preset(int32_t i);
+OGS_UIN static void mx_uswap(int32_t s)              /* pod plat_lock: całe brzmienie, z nazwą presetu i kopią do SAVE */
+{
+    mx_t *c = &mx_reg[s];
+    const uint32_t e = c->s.eng;
+    int16_t *sp = snap_of((int32_t)e);
+    mx_swap(s);
+    mx_bswap(&set.preset[e], &c->s.pre, 2u);
+    mx_bswap(&set.edited[e], &c->s.ed, 1u);
+    mx_bswap(&snap_ok[e], &c->sok, 1u);
+    if (sp)
+        mx_bswap(sp, c->sp, (uint32_t)ENG[e].np * 2u);
+    mx_bswap(snap_fx[e], c->sfx, sizeof c->sfx);
+    mx_bswap(snap_fxx[e], c->sfxx, FX_NX);
+    mx_bswap(snap_xt[e], c->sxt, XT_N);
+}
+OGS_UIN static void mx_own(int32_t t)                /* brzmienie ścieżki t w silniku (wybrana), -1: każde u siebie */
+{
+    const int32_t w = t >= 0 && t < MT_N && mx_live && ((mx_in & mx_rdy) >> t & 1u) ? t : -1;
+    uint32_t f;
+    if (w == mx_sw)
+        return;
+    f = plat_lock();
+    if (mx_sw >= 0)
+        mx_uswap(mx_sw);
+    if (w >= 0)
+        mx_uswap(w);
+    mx_sw = (int8_t)w;
+    plat_unlock(f);
+}
+OGS_UIN static void mx_fix(void)                     /* kto jest bliźniakiem po zmianie silników ścieżek (przed mt_ver++) */
+{
+    int32_t t, k;
+    uint32_t m = mx_in, f;
+    for (t = 0; t < MT_N; t++)               /* inny silnik: brzmienie bliźniaka znika */
+        if ((m >> t & 1u) && (glob.g[G_MT0 + t] != mx_e[t] || !mt_twin((uint32_t)glob.g[G_MT0 + t]))) {
+            if (mx_sw == t)
+                mx_own(-1);
+            m &= ~(1u << t);
+        }
+    for (t = 0; t < MT_N; t++) {             /* nowy na ścieżce, a ten silnik już gra swoje na innej: bliźniak od INIT */
+        const int32_t e = glob.g[G_MT0 + t];
+        if (e >= NENG || e == mx_e[t] || !mt_twin((uint32_t)e))
+            continue;
+        for (k = 0; k < MT_N; k++)
+            if (k != t && glob.g[G_MT0 + k] == e && !(m >> k & 1u) && (mx_e[k] == e || k < t))
+                break;
+        if (k < MT_N) {
+            m |= 1u << t;
+            mx_new |= (uint8_t)(1u << t);
+        }
+    }
+    for (t = 0; t < MT_N; t++)
+        mx_e[t] = (uint8_t)glob.g[G_MT0 + t];
+    mx_new &= (uint8_t)m;
+    f = plat_lock();
+    mx_rdy &= (uint8_t)m;
+    mx_in = (uint8_t)m;
+    plat_unlock(f);
+    if (GV(G_MTTW) != (int16_t)m) {
+        GV(G_MTTW) = (int16_t)m;
+        mt_gdirty = 1;
+    }
+}
+OGS_UIN static const mxo_t *mx_view(void)
+{
+    uint32_t n = 0;
+    const mxo_t *o = (const mxo_t *)(const void *)plat_store_view(OBJ_MTX, &n);
+    return o && n == sizeof *o && o->magic == MX_MAGIC ? o : 0;
+}
+OGS_UIN static void mx_init(int32_t t)       /* miejsce bliźniaka t: zapisane brzmienie (OBJ_MTX) albo INIT */
+{
+    mx_t *c = &mx_reg[t];
+    const int32_t e = glob.g[G_MT0 + t], keep = set.eng;
+    const mxo_t *o = mx_new >> t & 1u ? 0 : mx_view();
+    const mxs_t *q = o && o->c[t].eng == e && o->c[t].np == ENG[e].np ? &o->c[t] : 0;
+    int16_t s[MT_N];
+    uint32_t f, k;
+    mx_own(-1);
+    for (k = 0; k < sizeof *c; k++)
+        ((uint8_t *)c)[k] = 0;
+    if (q) {                                 /* zapisane: wprost na miejsce (silnik gra dalej swoje) */
+        c->s = *q;
+        fx_io(c->s.fx, FX_SLOTS, 0);
+        if (!fx_valid(c->s.fx))
+            fx_default(c->s.fx);
+        if (!(c->s.pre < NALL && listed(c->s.pre, e)))
+            c->s.pre = (uint16_t)eng_first(e);
+        if (!c->s.ed) {                      /* (kopia do SAVE: jak snap_take) */
+            for (k = 0; k < MX_NP; k++)
+                c->sp[k] = c->s.p[k];
+            fx_copy(c->sfx, c->s.fx);
+            fx_xcopy(c->sfxx, c->s.fxx);
+            for (k = 0; k < XT_N; k++)
+                c->sxt[k] = c->s.xt[k];
+            c->sok = 1;
+        }
+    } else {                                 /* (decyzja użytkownika 2026-11-06: drugi FM6 od INIT) */
+        c->s.eng = (uint8_t)e;
+        c->s.np = (uint16_t)ENG[e].np;
+        f = plat_lock();                     /* brzmienie silnika do miejsca t (gra z niego, mx_loc), silnik od nowa */
+        mx_uswap(t);
+        mx_sw = (int8_t)t;
+        plat_unlock(f);
+        set.eng = (uint8_t)e;
+        for (k = 0; k < MT_N; k++)
+            s[k] = glob.g[G_MTS0 + k];
+        load_preset(eng_first(e));
+        for (k = 0; k < MT_N; k++)           /* (load_preset zeruje wysyłki wybranej ścieżki) */
+            glob.g[G_MTS0 + k] = s[k];
+        set.eng = (uint8_t)keep;
+    }
+    f = plat_lock();
+    mx_rdy |= (uint8_t)(1u << t);
+    plat_unlock(f);
+    mx_new &= (uint8_t)~(1u << t);
+}
+static int mt_ui(void);
+OGS_UIN static void mx_sync(void)                    /* app_frame: bliźniaki po nowej puli (start, wejście do MULTI, nowy); wybrany w silniku */
+{
+    int32_t t;
+    if (*(volatile uint16_t *)&mt_seen != mt_ver || !mx_live || !mt_ui())
+        return;
+    for (t = 0; t < MT_N; t++)
+        if ((mx_in & ~mx_rdy) >> t & 1u)
+            mx_init(t);
+    mx_own(glob.g[G_MTFOC]);
+}
+OGS_UIN static void mx_store(void)                   /* bliźniaki do flasha (w ciszy, wszystko u siebie: mx_own(-1)) */
+{
+    mxo_t *o = (mxo_t *)(void *)&bk;
+    uint32_t t, h, k;
+    if (!mx_live || !mx_in || (mx_in & ~mx_rdy))   /* (bez puli MULTI OBJ_MTX już je ma; nie wczytane: nie nadpisywać) */
+        return;
+    for (k = 0; k < sizeof *o; k++)          /* (puste miejsca i wypełnienie: zera, odcisk się nie zmienia) */
+        ((uint8_t *)o)[k] = 0;
+    o->magic = MX_MAGIC;
+    for (t = 0; t < MT_N; t++) {
+        mxs_t *q = &o->c[t];
+        q->eng = 0xFF;
+        if (!(mx_in >> t & 1u))
+            continue;
+        *q = mx_reg[t].s;
+        fx_io(q->fx, FX_SLOTS, 1);
+    }
+    h = fnv((const uint8_t *)o, sizeof *o);
+    if (h != mx_saved && plat_store_save(OBJ_MTX, o, sizeof *o) == 0)
+        mx_saved = h;
+}
 
 /* (v0.64) MULTI — strona UI (główna pętla). Ustawienia w GLO; przerwanie stosuje je po przygaszeniu (mt_ver). */
 static int mt_ui(void) { return glob.g[G_MULTI] != 0; }
@@ -3169,9 +3455,22 @@ static void mt_fix(void)                     /* GLO: ścieżki poprawne (silniki
             glob.g[G_MT0 + t] = MT_NONE;
     if (glob.g[G_MT0 + glob.g[G_MTFOC]] >= NENG && mt_first() >= 0)
         glob.g[G_MTFOC] = (int16_t)mt_first();
+    mx_fix();                                /* (v1.4.0) bliźniaki */
 }                                            /* (v1.1.2) bez ścieżek MULTI zostaje (pusta scena; mt_enter: domyślne) */
 static void mt_boot(void)
 {
+    int32_t t;
+    const uint32_t f = plat_lock();          /* (v1.4.0) start: pula od nowa (łańcuch ją zeruje), brzmienia bliźniaków z OBJ_MTX (mx_sync) */
+    mx_live = mx_rdy = mx_hold = mx_lv = 0;
+    mx_sw = mx_isw = -1;
+    plat_unlock(f);
+    for (t = 0; t < MT_N; t++)
+        mx_e[t] = (uint8_t)glob.g[G_MT0 + t];
+    mx_in = (uint8_t)(GV(G_MTTW) & 15);
+    {
+        const mxo_t *o = mx_view();
+        mx_saved = o ? fnv((const uint8_t *)o, sizeof *o) : 0u;
+    }
     if (!glob.g[G_MULTI])
         return;
     mt_fix();
@@ -3195,17 +3494,20 @@ static void mt_focus_go(int32_t t)           /* wybrana ścieżka: jej silnik na
         set.eng = (uint8_t)e;
         set_dirty = 1;
     }
+    mx_own(t);                               /* (v1.4.0) bliźniak: jego brzmienie na stronach */
 }
 static void page_fix(int32_t e);
-static void engine_switch(int32_t e)
+OGS_UI static void engine_switch(int32_t e)
 {
     if (e == set.eng)
         return;
     if (mt_ui()) {                           /* (v0.64) MULTI: tylko silniki ścieżek (wybór ścieżki) */
         int32_t t;
         for (t = 0; t < MT_N; t++)
-            if (glob.g[G_MT0 + t] == e)
-                mt_focus_go(t);
+            if (glob.g[G_MT0 + t] == e) {
+                mt_focus_go(t);              /* (v1.4.0) pierwsza z tym silnikiem */
+                break;
+            }
         return;
     }
     ev_push(EV_ALL_OFF);
@@ -3340,7 +3642,7 @@ OGS_UI static void load_preset(int32_t i)
     {                                        /* (v0.82) MULTI: nowy preset ścieżki: wysyłki znowu od jego MIX */
         int32_t t;
         for (t = 0; t < MT_N; t++)
-            if (glob.g[G_MULTI] && glob.g[G_MT0 + t] == e && glob.g[G_MTS0 + t]) {
+            if (glob.g[G_MULTI] && t == glob.g[G_MTFOC] && glob.g[G_MT0 + t] == e && glob.g[G_MTS0 + t]) {   /* (v1.4.0: wybrana) */
                 glob.g[G_MTS0 + t] = 0;
                 mt_gdirty = 1;
             }
@@ -3349,7 +3651,7 @@ OGS_UI static void load_preset(int32_t i)
 
 /* preset z panelu / MIDI: przy grającym dźwięku najpierw przygaszenie (bez trzasku), wczytuje app_frame */
 static int32_t pend_preset = -1;
-static void preset_go(int32_t i)
+OGS_UI static void preset_go(int32_t i)
 {
     if (mt_ui() && preset_eng(i) != set.eng) {   /* (v0.64) MULTI: brzmienie innego silnika = jego ścieżka */
         int32_t t;
@@ -3620,7 +3922,10 @@ static int8_t fxt_eng = -1;                  /* pomiar efektów (SysEx 0x15): si
 OGS_UI static void settings_save(void)
 {
     uint32_t h, n2;
+    const int32_t sw = mx_sw;
     int ok;
+    mx_own(-1);                              /* (v1.4.0) silniki z własnymi brzmieniami, bliźniaki u siebie */
+    mx_store();
     if (fx_dirty && fxt_eng < 0)             /* testowy łańcuch nigdy do flasha (zapis po powrocie) */
         fx_store();                          /* bieżące efekty silników razem z resztą (cisza, 5 s) */
     if (xt_dirty)
@@ -3639,6 +3944,7 @@ OGS_UI static void settings_save(void)
     }
     if (ok)
         set_dirty = 0;
+    mx_own(sw);
 }
 
 static void settings_load(void)          /* ustawienia (albo starsze) -> silniki; co się nie zgadza: pierwszy preset */
@@ -4435,6 +4741,8 @@ OGS_UI int app_sysex(const uint8_t *p, uint32_t n)
             glob.g[G_MTFOC] = 0;
             glob.g[G_MTMUTE] = 0;
             glob.g[G_MULTI] = any ? 1 : 0;
+            mx_fix();                        /* (v1.4.0) bliźniaki (drugi FM6 od INIT); co nie zagra, odrzuca przerwanie (mt_apply:
+                                              * pierwsza ścieżka wygrywa) — mt_fix odrzucałby obie strony konfliktu po kolei */
             mt_ver++;
             return 1;
         }
@@ -4823,6 +5131,26 @@ __attribute__((used, visibility("default"))) int32_t ogs_dk(int32_t w)   /* bram
     return w == 0 ? (int32_t)(dk_g * 1000.0f) : w == 1 ? (int32_t)(dk_w - dk_r) : (int32_t)dk_done;
 }
 __attribute__((used, visibility("default"))) int32_t ogs_eng(void) { return set.eng; }
+__attribute__((used, visibility("default"))) int32_t ogs_mx(int32_t w)   /* (testy, v1.4.0) bliźniaki: in, rdy, live, sw, new, ft */
+{
+    uint32_t cap = 0;
+    if (w >= 100 && w < 100 + NENG)          /* pamięć ścieżki z silnikiem w - 100: stan głosów (200 + e: pula silnika) */
+        return (int32_t)ERAM_UP(MT_SZ[w - 100][0]);
+    if (w >= 200 && w < 200 + NENG)
+        return (int32_t)ERAM_UP(MT_SZ[w - 200][1]);
+    if (w == 8) {                            /* pula MULTI: całość (bajty), miejsca bliźniaków */
+        (void)ogs_fx_arena_take(&cap);
+        return (int32_t)cap;
+    }
+    if (w == 9)
+        return (int32_t)ERAM_UP(MT_N * (uint32_t)sizeof(mx_t));
+    if (w >= 10 && w < 10 + MT_N)            /* silnik, który gra na ścieżce (przerwanie) */
+        return mt_eng[w - 10];
+    if (w >= 20 && w <= 22)                  /* perkusja: dźwięk na stronach MORPH, 88 / 99, DUAL */
+        return w == 20 ? mp_lane : w == 21 ? dm_lane : du_lane;
+    return w == 0 ? mx_in : w == 1 ? mx_rdy : w == 2 ? mx_live : w == 3 ? mx_sw : w == 4 ? mx_new : w == 5 ? mt_ft
+         : w == 7 ? (int32_t)mt_used : mx_view() != 0;
+}
 __attribute__((used, visibility("default"))) void ogs_west_hq(int32_t on) { ogs_west_os = on != 0; }   /* (v0.54) testy:
                                                                                                     * LPG x2 (A / B) */
 __attribute__((used, visibility("default"))) uint32_t ogs_midi_non(void) { return midi_non; }   /* testy: licznik 0x19 */
@@ -5201,7 +5529,7 @@ void app_say(const char *a, const char *b)
     }
 }
 
-static void set_param(int32_t id, int32_t v)
+OGS_UI static void set_param(int32_t id, int32_t v)
 {
     const pdef_t *d = E->def(id);
     int32_t i;
@@ -5340,7 +5668,7 @@ static void show_page(int32_t page)      /* strona w swojej sekcji */
 /* przycisk sekcji: będąc w niej MORE włącz / wyłącz (strony: SELECT), z innego miejsca strona, na której z niej
  * wyszliśmy. Strona szybka z HOME (gałki z HOME) liczy się jak ta strona: przycisk jej sekcji od razu daje MORE
  * (decyzja użytkownika 2026-10-26), a strona zostaje (bez powrotu do HOME po 2 s) */
-static void goto_group(int32_t grp)
+OGS_UI static void goto_group(int32_t grp)
 {
     int32_t i, at = 0;
     for (i = 0; i < grp_n(grp); i++) {
@@ -5617,7 +5945,7 @@ static const char *fx_pgname(const fx_slot_t *c, int32_t pg)
     return pg == 1 ? "MORE" : pg == 2 ? "MORE 2" : pg >= 3 ? "MORE 3" : "";
 }
 
-static void fx_changed(void)             /* zmiana efektu = zmiana brzmienia (SAVE, zapis sam w ciszy) */
+OGS_UI static void fx_changed(void)             /* zmiana efektu = zmiana brzmienia (SAVE, zapis sam w ciszy) */
 {
     if (fx_is_mst(fx_cur()) && mt_ui()) {    /* (v0.85) MASTER FX: część miksu, nie presetu (SAVE nie świeci) */
         mt_gdirty = 1;
@@ -6272,7 +6600,7 @@ static void fxl_show(void)               /* przewija tak, żeby kursor (i nagł�
     ui.redraw = 1;
 }
 
-static void fxl_open(void)               /* SEL trzymany (albo SEL na pustym slocie): lista efektów do tego slotu */
+OGS_UI static void fxl_open(void)               /* SEL trzymany (albo SEL na pustym slocie): lista efektów do tego slotu */
 {
     uint32_t t = fx_rank(fx_cur()->type);
     if (fx_is_mst(fx_cur())) {               /* (v0.85) MASTER FX: bez listy (nie można wymienić ani usunąć), SEL trzymany = kolejność */
@@ -6571,7 +6899,7 @@ static void sq_u(uint32_t i)                     /* nuta i (albo SU_HDR) zaraz s
     su_new = 0;
 }
 
-static void su_swap(uint32_t k)
+OGS_UI static void su_swap(uint32_t k)
 {
     const uint32_t i = su_e[k].i & ~SU_START;
     if (i == SU_HDR) {
@@ -6720,7 +7048,8 @@ static int sq_held(uint32_t note, uint32_t keys) /* ta nuta jest pod trzymanym k
 
 /* (v0.66) SEQ 4 ścieżki (docs/funkcje/multi.md): w MULTI edytuje się nuty wybranej ścieżki (reszta = ghost w NOTES),
  * nowe nuty dostają jej numer; (v0.66.2) SOLO: ścieżka silnika (perkusja T1, syntezator ostatnia z T2-T4, sq_strk) */
-static int32_t sq_utrk(void) { return mt_on ? mt_track(set.eng) : sq_strk(set.eng); }   /* (v0.66.2) SOLO: jedna */
+static int32_t sq_utrk(void) { return mt_on ? glob.g[G_MTFOC] : sq_strk(set.eng); }   /* (v1.4.0: było ścieżka set.eng) */
+/* (v0.66.2) SOLO: jedna */
 static int sq_mine(const sqn_t *n)
 {
     const int32_t t = sq_utrk();
@@ -8135,7 +8464,7 @@ static int32_t glo_item(int32_t k)       /* pole GLO pod gałką K1..K4 na bież
            ? GS_ITEM[ui.glo_sec][i] : -1;
 }
 
-static void glo_set(int32_t g, int32_t v)   /* zmiana pola GLO (zapis przy wyjściu z GLO) */
+OGS_UI static void glo_set(int32_t g, int32_t v)   /* zmiana pola GLO (zapis przy wyjściu z GLO) */
 {
     v = clamp(v, GDEF[g].lo, GDEF[g].hi);
     if (v == GV(g))
@@ -8154,12 +8483,20 @@ static void glo_set(int32_t g, int32_t v)   /* zmiana pola GLO (zapis przy wyjś
 static void factory_reset(int32_t what)  /* 0 ustawienia GLO, 1 presety (USER, nadpisane fabryczne, banki DX7), 2 wszystko */
 {
     int32_t b, e;
+    mx_own(-1);                              /* (v1.4.0) brzmienia silników (bliźniaki zostają, chyba że GLO od nowa) */
     if (what != 1) {
         for (b = 0; b < NGALL; b++)
             GV(b) = GDEF[b].def;
         for (b = 0; b < LR_N; b++)           /* (v1.3.0) MIDI LEARN */
             glob.lrn[b][0] = 0;
         gb_def(glob.gbc);                    /* (v0.91) krzywe PERFORM */
+        {                                    /* (v1.4.0) bez bliźniaków (G_MTTW 0) */
+            const uint32_t f = plat_lock();
+            mx_in = mx_rdy = 0;
+            plat_unlock(f);
+            for (b = 0; b < MT_N; b++)
+                mx_e[b] = (uint8_t)glob.g[G_MT0 + b];
+        }
         glob_dirty = 1;
         glob_apply();
     }
@@ -8267,7 +8604,7 @@ static void algo_show(int32_t id)        /* (v0.64.3) ALGO z HOME: strona z para
     quick_show();
 }
 
-static void octave_step(int32_t d)
+OGS_UI static void octave_step(int32_t d)
 {
     int32_t o = clamp(set.octave + d, -3, 3);
     char t[12];
@@ -9289,9 +9626,15 @@ static void mt_enter(void)
 }
 static void mt_leave(void)               /* wybrany silnik zostaje */
 {
+    mx_own(-1);                          /* (v1.4.0) SOLO gra brzmienie silnika (nie bliźniaka) */
     glob.g[G_MULTI] = 0;
     mt_gdirty = 1;
-    mt_ver++;
+    if (mx_in && mx_live) {              /* (v1.4.0) bliźniaki: najpierw cisza i zapis (app_frame), potem pula dla SOLO */
+        mx_hold = 1;
+        mx_lv = 1;
+    } else {
+        mt_ver++;
+    }
     glob_apply();                        /* (kolor SOLO) */
     ui.fx_slot = ui.fx_win = 0;
     go_home();
@@ -9326,6 +9669,7 @@ static void mt_engine_set(int32_t t, int32_t e)   /* silnik ścieżki t (MT_NONE
         return;
     glob.g[G_MT0 + t] = (int16_t)e;
     glob.g[G_MTS0 + t] = 0;              /* (v0.82) inny silnik: wysyłki od MIX jego presetu */
+    mx_fix();                            /* (v1.4.0) drugi FM6: bliźniak od INIT */
     if (e < NENG) {
         mt_focus_go(t);
     } else if (glob.g[G_MTFOC] == t && mt_first() >= 0) {   /* wybrana zostaje pusta: gra inna, kursor zostaje */
@@ -9336,18 +9680,24 @@ static void mt_engine_set(int32_t t, int32_t e)   /* silnik ścieżki t (MT_NONE
     mt_ver++;
     ui.redraw = 1;
 }
-static void mt_why(int32_t t, int32_t e, char *o)   /* (v0.81) dlaczego e nie zagra na ścieżce t, np. „NOT WITH MINI” */
+OGS_UIN static void mt_why(int32_t t, int32_t e, char *o)   /* (v0.81) dlaczego e nie zagra na ścieżce t, np. „NOT WITH MINI” */
 {
-    int32_t k;
+    int32_t k, n = 0;
     o[0] = 0;
+    for (k = 0; k < MT_N; k++)
+        n += k != t && glob.g[G_MT0 + k] == e;
+    if (mt_twin((uint32_t)e) && n >= 2) {    /* (v1.4.0) silnik najwyżej dwa razy */
+        text_cat(o, "ALREADY TWICE");
+        return;
+    }
     for (k = 0; k < MT_N; k++) {
         const int32_t x = glob.g[G_MT0 + k];
-        if (k == t || x >= NENG)
+        if (k == t || x >= NENG || (x == e && mt_twin((uint32_t)e)))
             continue;
-        if (mt_code((uint32_t)x) == mt_code((uint32_t)e)) {
+        if (x == e) {
             char n[3] = {'T', (char)('1' + k), 0};
-            text_cat(o, x == e ? "ALREADY ON " : "SAME CODE AS ");
-            text_cat(o, x == e ? n : ENG[x].name);
+            text_cat(o, "ALREADY ON ");
+            text_cat(o, n);
             return;
         }
         if (mt_clash((uint32_t)e, (uint32_t)x)) {
@@ -9453,7 +9803,7 @@ static void mtl_show(void)               /* przewija tak, żeby kursor (i nagł�
         ui.mtl_top = (uint8_t)(c - (MTL_ROWS - 1));
     ui.redraw = 1;
 }
-static void mtl_open(void)
+OGS_UI static void mtl_open(void)
 {
     int8_t r[MTL_MAX];
     const int32_t t = mt_at_cur(), n = mtl_rows(t, r);
@@ -9469,7 +9819,7 @@ static void mtl_open(void)
     ui.knob = -1;
     ui.page = V_MTL;
 }
-static void mtl_move(int32_t d)          /* SELECT: kursor po kolei, bez koła (jak lista efektów), nagłówki pomija */
+OGS_UI static void mtl_move(int32_t d)          /* SELECT: kursor po kolei, bez koła (jak lista efektów), nagłówki pomija */
 {
     int8_t r[MTL_MAX];
     const int32_t n = mtl_rows(mt_at_cur(), r), s = d > 0 ? 1 : -1;
@@ -9531,10 +9881,10 @@ static void mt_pan_text(int32_t v, char *t)  /* (v0.72) PAN: C, L25, R40 */
     t[0] = v < 0 ? 'L' : 'R';
     int_text(v < 0 ? -v * 2 : v * 2, t + 1, 0);   /* (0..100 na ekranie) */
 }
-static int32_t mt_send_ui(int32_t t, uint32_t k)   /* (v0.82) wysyłka 0-100 na ekranie: pole albo MIX z presetu */
+OGS_UIN static int32_t mt_send_ui(int32_t t, uint32_t k)   /* (v0.82) wysyłka 0-100 na ekranie: pole albo MIX z presetu */
 {
     const uint32_t v = mt_sf(t, k);
-    const fx_slot_t *c = mt_fxe((uint32_t)glob.g[G_MT0 + t], k);
+    const fx_slot_t *c = mt_fxe(mt_eng[t] < NENG && mt_eng[t] == glob.g[G_MT0 + t] ? mt_tfx(t) : mt_ufx(t), k);   /* (v1.4.0) bliźniak */
     return v ? (int32_t)v - 1 : c ? (c->p[3] * 100 + 63) / 127 : 100;
 }
 static void mt_send_set(int32_t t, uint32_t k, int32_t v)   /* v: 0-100; -1: jak MIX w presecie */
@@ -9604,8 +9954,10 @@ static void mt_scene_presets(void)       /* app_frame: przerwanie zastosowało n
     pend_preset = -1;
     for (k = 0; k < MT_N; k++) {             /* zapisane presety (load_preset wybiera ścieżkę silnika) */
         const int32_t e = glob.g[G_MT0 + k], id = c->pre[k];
-        if (e < NENG && id < NALL && preset_eng(id) == e)
+        if (e < NENG && id < NALL && preset_eng(id) == e) {
+            mt_focus_go(k);                  /* (v1.4.0) ta ścieżka (dwa FM6: silnik nie wystarcza) */
             load_preset(id);
+        }
     }
     /* (v0.82) wysyłki ze sceny (load_preset wraca je do MIX presetu) */
     {
@@ -9646,9 +9998,10 @@ static void mt_scene_save(void)
         c->eng[k] = (uint8_t)e;
         c->vol[k] = (uint8_t)glob.g[G_MTV0 + k];
         c->pan[k] = (int8_t)glob.g[G_MTP0 + k];
-        c->pre[k] = (uint16_t)(e < NENG ? set.preset[e] : 0xFFFFu);
+        const int32_t s = mx_loc(k);         /* (v1.4.0) bliźniak: jego preset */
+        c->pre[k] = (uint16_t)(e >= NENG ? 0xFFFFu : s >= 0 ? mx_reg[s].s.pre : set.preset[e]);
         glob.scs[mt_scn][k] = (uint16_t)((uint32_t)glob.g[G_MTS0 + k] | (mt_linked(k, 0) ? 0u : 1u << 14) | (mt_linked(k, 1) ? 0u : 1u << 15));
-        if (e < NENG && set.edited[e] && ed < 0)
+        if (e < NENG && (s >= 0 ? mx_reg[s].s.ed : set.edited[e]) && ed < 0)
             ed = k;
     }
     glob.scm[mt_scn] = glob.mfx;             /* (v0.85) MASTER FX */
@@ -9729,7 +10082,7 @@ static void engine_open(void)            /* HOME na HOME: okno ENGINE (SELECT wy
 
 /* SELECT w oknie ENGINE: silnik po kolei (każdy z własnym brzmieniem), gra od razu; ALGO (grp): pierwszy silnik
  * następnej / poprzedniej grupy */
-static void engine_turn(int32_t e, int grp)
+OGS_UI static void engine_turn(int32_t e, int grp)
 {
     int32_t at = eng_at(set.eng);
     if (grp) {                           /* ALGO: następna niepusta grupa, w kółko */
@@ -9766,7 +10119,7 @@ static uint32_t gest_keys(void)          /* klawisze OP, które mają źródło 
     return b;
 }
 
-static int32_t env_page(void)            /* ENV + gałka: AMP ENV (PHASE: DCA 1), inaczej pierwsza strona ENV */
+OGS_UI static int32_t env_page(void)            /* ENV + gałka: AMP ENV (PHASE: DCA 1), inaczej pierwsza strona ENV */
 {
     static const char *const AMP[2] = {"AMP ENV", "DCA 1"};
     int32_t i, j;
@@ -13580,6 +13933,13 @@ OGS_UI void app_frame(void)
     uint32_t now, pct;
     int32_t note;
     input();
+    if (mx_lv && mt_xg <= 0.0f) {            /* (v1.4.0) do SOLO: wyjście cicho, bliźniaki do flasha, potem pula dla łańcucha */
+        mx_store();
+        mx_lv = 0;
+        mt_ver++;
+        mx_hold = 0;
+    }
+    mx_sync();                               /* (v1.4.0) bliźniaki: przed brzmieniami sceny */
     mt_scene_presets();                      /* (v0.73) scena MULTI: brzmienia po przygaszeniu */
     {                                        /* (v0.88) perkusja: inny dźwięk (też MIDI): numer, gałki i wykres strony od razu */
         static int32_t lane = -1;
