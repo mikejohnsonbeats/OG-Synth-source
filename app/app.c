@@ -211,7 +211,8 @@ enum { G_VHOME, G_VPAGES, G_TUNE, G_MIDICH, G_VEL, G_PRESS, G_TRANSP, G_ACCEL, G
                                           * zapis 1.0.0 ma tu 0: poza zakresem = domyślne) */
        G_MTCTL = G_MTCH0 + 4,            /* (v1.1.0) pola od 72: glob.gx2 (na końcu obiektu, zapis bez nich = domyślne);
                                           * MIDI > OTHER TRACKS: niewybrane ścieżki MULTI: NOTES (jak dotąd) / + BEND, WHEEL, PRESS (P6) */
-       G_CCIN,                           /* (v1.1.0) MIDI > CC IN: OFF (jak dotąd) / ON: CC 21-24 = K1-K4 strony (P7) */
+       G_CCIN,                           /* (v1.1.0) MIDI > CC IN: OFF (jak dotąd) / ON: CC 21-24 = K1-K4 strony (P7); (1.5.1) w zapisie sprzed
+                                          * v1.3.0 dalej CC IN (przejście do MIDI LEARN), od 1.5.1 pole G_CTLOUT */
        G_TUNEK,                          /* (v1.1.0) PLAY > TUNE KNOB: FINE (jak dotąd) / SEMITONES (P9) */
        G_CHNAME,                         /* (v1.1.0) DISPLAY > CHORD NAME: OFF (jak dotąd) / ON (akordy A); (v1.2.0) nieużywane:
                                           * ARP > CHORD > NAME (sqg.a[AR_CHNAME]) */
@@ -221,10 +222,14 @@ enum { G_VHOME, G_VPAGES, G_TUNE, G_MIDICH, G_VEL, G_PRESS, G_TRANSP, G_ACCEL, G
        G_FXKEEP,                         /* (1.5.0, P54, decyzja użytkownika 2026-11-07) AUDIO > FX SEND: wysyłki REVERB / DELAY ścieżki
                                           * MULTI po zmianie presetu / silnika: KEEP (0, domyślnie; stare zapisy mają tu 0) albo PRESET
                                           * (jak do 1.4.2: od MIX presetu) */
+       G_SCNSQ,                          /* (1.5.1, P60, skrzynka #7) SEQ > OPTIONS > SCENE: + PATTERN (0, domyślnie — decyzja użytkownika
+                                          * 2026-11-08; stare zapisy mają tu 0): scena MULTI wczytuje też swój wzór SEQ / SOUND (1: jak do
+                                          * 1.5.0, wzór zostaje); zapis wzoru w scenie zawsze */
        NGALL };
 #define NGX 8                            /* miejsca glob.gx (zapas na kolejne pola) */
 #define NGX2 8                           /* (v1.1.0) miejsca glob.gx2 */
 _Static_assert(G_MTCTL == NGLOB + NGX, "GLO: gx pełne, dalej gx2 (v1.1.0)");
+#define G_CTLOUT G_CCIN                  /* (1.5.1) MIDI > CONTROLS OUT: pole po CC IN (73) */
 #define GV(q) (*((q) < NGLOB ? &glob.g[q] : (q) < NGLOB + NGX ? &glob.gx[(q) - NGLOB] : &glob.gx2[(q) - NGLOB - NGX]))
 _Static_assert(G_MTP0 + 4 == NGLOB, "GLO: PAN T1-T4 w ostatnich polach");
 #define G_ALGO_N 8                       /* miejsca na silniki w jednym bloku (G_ALGO0: 1-8, G_ALGO8: 9-16) */
@@ -275,6 +280,7 @@ static const char *const L_MTCTL[] = {"NOTES", "+ BEND, WHEEL"};   /* (v1.1.0) G
 static const char *const L_TUNEK[] = {"FINE", "SEMITONES"};        /* (v1.1.0) G_TUNEK */
 static const char *const L_PICK[] = {"JUMP", "CATCH"};            /* (v1.3.0) G_LRPICK */
 static const char *const L_FXKEEP[] = {"KEEP", "PRESET"};         /* (1.5.0) G_FXKEEP */
+static const char *const L_SCNSQ[] = {"+ PATTERN", "SOUND"};      /* (1.5.1) G_SCNSQ */
 static const pdef_t GDEF[NGALL] = {
     {"VISUAL HOME", 0, 1, 1, F_LIST, LI(L_ONOFF)}, {"VISUAL PAGES", 0, 1, 1, F_LIST, LI(L_ONOFF)},
     {"TUNE A4", 4270, 4530, 4400, F_CUSTOM, 0},   /* (v1.1.1, decyzja użytkownika 2026-11-05) 427,0-453,0 Hz co 0,1 Hz (dziesiąte Hz) */      {"MIDI CH", 0, 16, 0, F_LIST, LI(L_MIDICH)},
@@ -310,11 +316,13 @@ static const pdef_t GDEF[NGALL] = {
     {"COMP ATTACK", 0, 127, 79, F_CUSTOM, 0}, {"COMP RELEASE", 0, 127, 62, F_CUSTOM, 0},
     {"T1 CHANNEL", 1, 16, 1, F_NUM, 0}, {"T2 CHANNEL", 1, 16, 2, F_NUM, 0},   /* 68-71 (v1.0.1): G_MTCH0 */
     {"T3 CHANNEL", 1, 16, 3, F_NUM, 0}, {"T4 CHANNEL", 1, 16, 4, F_NUM, 0},
-    {"OTHER TRACKS", 0, 1, 0, F_LIST, LI(L_MTCTL)}, {"CC IN", 0, 1, 0, F_LIST, LI(L_ONOFF)},   /* 72-75 (v1.1.0): glob.gx2 */
+    {"OTHER TRACKS", 0, 1, 0, F_LIST, LI(L_MTCTL)}, {"CONTROLS OUT", 0, 1, 0, F_LIST, LI(L_ONOFF)},   /* 72-75 (v1.1.0): glob.gx2;
+                                                                                                     * 73: (1.5.1) G_CTLOUT */
     {"TUNE KNOB", 0, 1, 0, F_LIST, LI(L_TUNEK)}, {"CHORD NAME", 0, 1, 0, F_LIST, LI(L_ONOFF)},
     {"KNOB PICKUP", 0, 1, 0, F_LIST, LI(L_PICK)},   /* 76 (v1.3.0) */
     {"TWINS", 0, 15, 0, F_NUM, 0},                  /* 77 (v1.4.0) G_MTTW */
     {"FX SEND", 0, 1, 0, F_LIST, LI(L_FXKEEP)},     /* 78 (1.5.0) G_FXKEEP */
+    {"SCENE", 0, 1, 0, F_LIST, LI(L_SCNSQ)},        /* 79 (1.5.1) G_SCNSQ (gx2 pełne) */
 };
 _Static_assert(NGALL <= NGLOB + NGX + NGX2, "GLO: miejsca gx2");
 _Static_assert(G_ALGO0 + G_ALGO_N == G_SQZINV, "GLO: miejsca ALGO");
@@ -327,7 +335,7 @@ static const char *const GS_HINT[NGS] = {"TUNE, TRANSPOSE, VELOCITY", "CHANNELS,
 #define GS_N 16                          /* pozycji w sekcji (ALGO KNOB: jedna na silnik, NENG_MAX) */
 static const int8_t GS_ITEM[NGS][GS_N] = {
     {G_TUNE, G_TRANSP, G_VEL, G_VELFIX, G_PRESS, G_ACCEL, G_TOPKEYS, G_TUNEK, -1},
-    {G_MIDICH, G_MIDIOUT, G_LOCAL, G_PROGCH, G_CLKIN, G_CLKOUT, G_MTCH0, G_MTCH0 + 1, G_MTCH0 + 2, G_MTCH0 + 3, G_MTCTL, G_LRPICK, -1},
+    {G_MIDICH, G_MIDIOUT, G_LOCAL, G_PROGCH, G_CLKIN, G_CLKOUT, G_MTCH0, G_MTCH0 + 1, G_MTCH0 + 2, G_MTCH0 + 3, G_MTCTL, G_LRPICK, G_CCIN, -1},   /* (1.5.1) CONTROLS OUT */
     {G_SPKEQ, G_CPU2, G_MTMST, G_MCTH, G_MCRA, G_MCAT, G_MCRE, G_FXKEEP, -1},
     {G_VHOME, G_VPAGES, G_LIGHTS, G_KEYL, G_SCROFF, G_COLOR, -1},   /* (v1.2.0: CHORD NAME do ARP > CHORD, pole G_CHNAME wolne) */
     {-1},                                /* (1.5.0) ALGO KNOB: 8 miejsc silnika (mac_*), nie pola GLO */
@@ -349,6 +357,8 @@ enum { LF_ON = 0x80, LF_NOTE = 0x40, LF_ANY = 0x20 };   /* glob.lrn[t][0]: przyp
 #define SCN_N 8
 #define SCN_NUM 4                        /* (v0.78) scn_t.rsv: numeracja presetów (0: sprzed PHYS, 1: z PHYS, 2: z FORMANT, 3: zestawy v0.88,
                                           * 4: mniej zestawów v0.90) */
+#define SCN_PAT 0x80u                    /* (1.5.1) rsv bit 7: mute bity 4-7 = wzór SEQ sceny (starsze: bez wzoru; czytają mute & 15) */
+#define SCN_RSV(c) ((c)->rsv & 0x7Fu)    /* numeracja presetów sceny (bez SCN_PAT) */
 typedef struct {
     uint8_t ok, foc, mute, rsv;
     uint8_t eng[4], vol[4];
@@ -3010,7 +3020,7 @@ static int32_t mac_get(int32_t e, int32_t s)   /* parametr miejsca s (0-7) silni
     m = (const mac_t *)plat_store_view(OBJ_MAC, &n);
     return m && n >= sizeof(mac_t) && m->magic == MAC_MAGIC ? (int32_t)m->s[e][s - 1] - 1 : -1;
 }
-static void mac_flush(void)
+OGS_UI static void mac_flush(void)
 {
     uint16_t w[MAC_N];
     uint32_t i, n;
@@ -3094,7 +3104,7 @@ static int rec_name(int32_t id, char *t) /* nazwa zapisanego, w miejscu we flash
     return c > 0;
 }
 
-static int32_t preset_eng(int32_t id)    /* silnik presetu: fabryczny wg miejsca, USER wg zapisu, banki: DX7 */
+OGS_UI static int32_t preset_eng(int32_t id)    /* silnik presetu: fabryczny wg miejsca, USER wg zapisu, banki: DX7 */
 {
     return id >= ID_XF ? XF[id - ID_XF].eng : id >= ID_FM1 ? ENG_DX7 : id >= ID_CZ ? ENG_PD : id >= ID_SYX ? ENG_DX7 : id >= ID_USER ? reng[id - ID_USER] : id >= NFACT_V78 ? ENG_FORMANT : id >= NFACT_V54 ? ENG_PHYS : id >= NFACT_V52 ? ENG_DUAL : id >= NFACT_V51 + ND8K ? ENG_99 : id >= NFACT_V51 ? ENG_88 : id >= NFACT_V49 ? ENG_MORPH : id >= NFACT_V44 ? ENG_ALPHA : id >= NFACT_V42 ? ENG_WEST : id >= NFACT_V27 ? ENG_BIT : id >= NFACT_V23 ? ENG_DCO
          : id >= NFACT_V22 ? ENG_SEM
@@ -3612,7 +3622,7 @@ static void fm1_scan(void)
     }
     fm1_dirty = 0;
 }
-static int32_t fm1_slot(int32_t b)
+OGS_UI static int32_t fm1_slot(int32_t b)
 {
     if (fm1_dirty)
         fm1_scan();
@@ -4352,7 +4362,7 @@ static void store_load(void)             /* wszystko z pamięci: przy starcie i 
 #define ND8K NKIT_V89
 #define ND9K NKIT_V89
 #define NDUK NKIT_V89
-        if (c->ok && c->rsv < 3u) {              /* (v0.88) zestawy perkusji: numery przed PHYS w układzie sprzed v0.88 */
+        if (c->ok && SCN_RSV(c) < 3u) {              /* (v0.88) zestawy perkusji: numery przed PHYS w układzie sprzed v0.88 */
             for (e = 0; e < MT_N; e++) {
                 uint32_t q = c->pre[e];
                 if (q == 0xFFFFu)
@@ -4369,14 +4379,14 @@ static void store_load(void)             /* wszystko z pamięci: przy starcie i 
             }
             glob_dirty = 1;
         }
-        if (c->ok && c->rsv < 1u) {            /* (v0.78) numery presetów sprzed PHYS: USER i banki o NPHP dalej */
+        if (c->ok && SCN_RSV(c) < 1u) {            /* (v0.78) numery presetów sprzed PHYS: USER i banki o NPHP dalej */
             for (e = 0; e < MT_N; e++)
                 if (c->pre[e] != 0xFFFFu && c->pre[e] >= NFACT_V54)
                     c->pre[e] = (uint16_t)(c->pre[e] + NPHP);
             c->rsv = 1;
             glob_dirty = 1;
         }
-        if (c->ok && c->rsv < 2u) {              /* (v0.84) sprzed FORMANT: USER i banki o NFOP dalej */
+        if (c->ok && SCN_RSV(c) < 2u) {              /* (v0.84) sprzed FORMANT: USER i banki o NFOP dalej */
             for (e = 0; e < MT_N; e++)
                 if (c->pre[e] != 0xFFFFu && c->pre[e] >= NFACT_V78)
                     c->pre[e] = (uint16_t)(c->pre[e] + NFOP);
@@ -4386,7 +4396,7 @@ static void store_load(void)             /* wszystko z pamięci: przy starcie i 
 #pragma pop_macro("ND8K")
 #pragma pop_macro("ND9K")
 #pragma pop_macro("NDUK")
-        if (c->ok && c->rsv < 4u) {              /* (v0.90) mniej zestawów perkusji */
+        if (c->ok && SCN_RSV(c) < 4u) {              /* (v0.90) mniej zestawów perkusji */
             for (e = 0; e < MT_N; e++)
                 c->pre[e] = (uint16_t)kit90(c->pre[e]);
             glob_dirty = 1;
@@ -4425,7 +4435,8 @@ static void store_load(void)             /* wszystko z pamięci: przy starcie i 
             || L[4] > (b < LR_NK ? 3u : 1u))
             L[0] = 0;
     }
-    if (GV(G_CCIN)) {                        /* (v1.3.0) CC IN ON (1.1.0-1.2.3) = K1-K4 na CC 21-24 jak dotąd (kanał: MIDI CH) */
+    if (k < GLOB_V130 + (int32_t)sizeof glob.lrn && GV(G_CCIN)) {   /* (v1.3.0) CC IN ON (1.1.0-1.2.3) = K1-K4 na CC 21-24 jak dotąd
+                                                                   * (kanał: MIDI CH); (1.5.1) tylko zapis bez MIDI LEARN: pole = CONTROLS OUT */
         for (b = 0; b < 4; b++)
             if (!glob.lrn[b][0]) {
                 uint8_t *L = glob.lrn[b];
@@ -5604,7 +5615,7 @@ static int32_t ui_sq(int32_t w)          /* (testy; 17 MORE, 18 strona szybka, 1
          : (int32_t)ui.sq_cur;
 }
 
-void app_say(const char *a, const char *b)
+OGS_UI void app_say(const char *a, const char *b)
 {
     uint32_t i;
     char t[48];
@@ -5739,7 +5750,7 @@ static int32_t knob_id(int32_t k)        /* parametr pod gałką na bieżącej s
     return more_on() ? E->more(ui.page, k) : E->knob(ui.page, k);
 }
 
-static void show(int32_t grp, int32_t idx)
+OGS_UI static void show(int32_t grp, int32_t idx)
 {
     int32_t n = grp_n(grp);
     glob_commit();
@@ -5963,14 +5974,14 @@ static int eq_qk(const fx_slot_t *c, int32_t j)   /* (v0.92) EQ: Q (zapis 5 bit�
     const int32_t s = fx_sj(c, j);
     return c->type == FX_EQ && s >= EQJ(EQX_Q1) && s <= EQJ(EQX_Q4);
 }
-static uint8_t *fx_par(const fx_slot_t *c, int32_t j)
+OGS_UI static uint8_t *fx_par(const fx_slot_t *c, int32_t j)
 {
     static uint8_t none;
     j = fx_sj(c, j);
     return j < 0 ? &none : j < FX_NP ? (uint8_t *)&c->p[j] : fx_is_mst(c) ? &glob.mfx.x[fx_xoff(c->type) + j - FX_NP]
          : &fxc.x[set.eng][fx_xoff(c->type) + j - FX_NP];
 }
-static const char *fx_pname(const fx_slot_t *c, int32_t j)
+OGS_UI static const char *fx_pname(const fx_slot_t *c, int32_t j)
 {
     if (j == fx_syncj(c))
         return "SYNC";
@@ -6808,7 +6819,7 @@ static const char *const L_PC12[12] = {"C", "C#", "D", "D#", "E", "F", "F#", "G"
 static const char *const L_SCALE[12] = {"OFF", "MAJOR", "MINOR", "DORIAN", "PHRYGIAN", "LYDIAN", "MIXOLYDIAN", "HARM MINOR",
                                         "MEL MINOR", "PENTA MAJOR", "PENTA MINOR", "BLUES"};
 static const char *const L_VOICE[] = {"CLOSE", "OPEN", "INV 1", "INV 2"};   /* (v1.1.0) CHORD VOICING; (v1.2.0) ARP > CHORD K2 */
-static const int8_t SQ_OPTG[4] = {-1, G_SQVEL, G_SQK1INV, G_SQZINV};   /* (v0.88) OPTIONS: pola GLO pod K1-K4; (v0.90) K1 pusta: SEL + ALGO już bez wyboru */
+static const int8_t SQ_OPTG[4] = {G_SCNSQ, G_SQVEL, G_SQK1INV, G_SQZINV};   /* (v0.88) OPTIONS: pola GLO pod K1-K4; (v0.90) K1 pusta: SEL + ALGO już bez wyboru */
 static const char *const L_CLICK[] = {"OFF", "REC", "ON"};
 /* (v0.92, decyzja użytkownika 2026-11-04) REC trzymany: METRONOME (klik wzoru, jak FEEL CLICK), COUNT IN (odliczanie przed nagraniem
  * z PLAY, innym klikiem), QUANTIZE (nagrane nuty na końcu: OFF albo wartość; w FEEL SEL: OFF <-> grid wzoru).
@@ -6955,7 +6966,7 @@ static void sq_um(uint32_t key)                  /* początek czynności (0: zaw
 }
 static void su_clear(void) { su_n = su_pos = 0; su_new = 1; }
 
-static void sq_u(uint32_t i)                     /* nuta i (albo SU_HDR) zaraz się zmieni */
+OGS_UI static void sq_u(uint32_t i)                     /* nuta i (albo SU_HDR) zaraz się zmieni */
 {
     uint32_t k;
     if (su_skip)
@@ -7057,7 +7068,7 @@ static void sq_undo(int32_t e)                   /* SEL + K4: e < 0 cofa, e > 0 
 
 /* (v0.87, decyzja użytkownika 2026-10-31: nieregularne metrum) długość wzoru w krokach 1/16 (PATTERN K2, SEL + ALGO): bars taktów
  * bez xs kroków. Kolejność zapisów: dźwięk w przerwaniu nigdy nie widzi długości 0. Nuty za końcem zostają (nie grają). */
-static void sq_steps_set(int32_t v)
+OGS_UI static void sq_steps_set(int32_t v)
 {
     uint32_t b;
     v = clamp(v, 1, SQ_MAXBARS * 16);
@@ -7431,7 +7442,7 @@ static void sq_toggle(uint32_t note, uint32_t vel)   /* SEL + klawisz w kursorze
     sq_view_sel();
 }
 
-static void sq_quantize(int all)                 /* nuty do gridu (all 1: wszystkie, 2: edytowane (karta), 0: z ostatniego nagrania) */
+OGS_UI static void sq_quantize(int all)                 /* nuty do gridu (all 1: wszystkie, 2: edytowane (karta), 0: z ostatniego nagrania) */
 {
     uint32_t i, g = all || !sqp.recq ? sq_grid() : SQ_GRID[(sqp.recq - 1u) % 6u], L = sq_len();   /* (v0.92) nagranie: QUANTIZE z REC */
     for (i = 0; i < SQ_NN; i++) {
@@ -7446,7 +7457,7 @@ static void sq_quantize(int all)                 /* nuty do gridu (all 1: wszyst
     sq_changed();
 }
 
-static void sq_rec_end(void)                     /* koniec nagrywania na żywo: długości, kwantyzacja (FEEL SEL) */
+OGS_UI static void sq_rec_end(void)                     /* koniec nagrywania na żywo: długości, kwantyzacja (FEEL SEL) */
 {
     uint32_t i, any = 0;
     sq.rec = 0;
@@ -7540,7 +7551,7 @@ static int sq_in_set(void) { return ui.page == V_SEQ && !sq_is_view(); }   /* w 
 
 static uint32_t sq_hint_until;
 #define NOTES_HINT "SELECT: STEP   ALGO: GRID   SEL: CARD   HOLD SEL: MORE"                   /* (v0.91) NOTES nie ma paska: podpowiedź w nagłówku przez 2,5 s po wejściu */
-static void sq_open(uint32_t pg)                 /* strona sekcji SEQ */
+OGS_UI static void sq_open(uint32_t pg)                 /* strona sekcji SEQ */
 {
     glob_commit();
     sq_hint_until = pg == SQ_NOTES && hints() ? plat_ms() + 2500u : 0;
@@ -8088,9 +8099,9 @@ static void sq_knob(uint32_t k, int32_t e)
         const pdef_t *pd = &GDEF[g < 0 ? 0 : g];
         if (g < 0)
             return;
-        const int32_t v = clamp(glob.g[g] + (pd->hi - pd->lo < 20 ? (e > 0 ? 1 : -1) : accel(EN_K1 + k, e, pd->hi - pd->lo)), pd->lo, pd->hi);
-        if (v != glob.g[g]) {
-            glob.g[g] = (int16_t)v;
+        const int32_t v = clamp(GV(g) + (pd->hi - pd->lo < 20 ? (e > 0 ? 1 : -1) : accel(EN_K1 + k, e, pd->hi - pd->lo)), pd->lo, pd->hi);
+        if (v != GV(g)) {                        /* (1.5.1) GV: K1 SCENE w glob.gx2 */
+            GV(g) = (int16_t)v;
             glob_dirty = 1;
         }
         return;
@@ -8690,7 +8701,7 @@ static void quick_page(int32_t pg)       /* strona chwilowa z HOME (wraca po 2 s
     ui.qback = -1;                           /* (v0.65) wraca do HOME (gest: tam, skąd) */
 }
 static void quick_show(void) { quick_page(E->quick); }   /* gałka z HOME: strona szybka silnika */
-static void algo_show(int32_t id)        /* (v0.64.3) ALGO z HOME: strona z parametrem pod ALGO (decyzja użytkownika
+OGS_UI static void algo_show(int32_t id)        /* (v0.64.3) ALGO z HOME: strona z parametrem pod ALGO (decyzja użytkownika
                                           * 2026-10-30, wszystkie silniki; było: strona szybka) — gałka, MORE albo SEL */
 {
     int32_t p, k;
@@ -8811,7 +8822,7 @@ static int32_t cv_edit(void)             /* krzywa ustawiana gałkami: trzymany 
 {
     return ui.page == V_PERF && (ui.cv_held >> (ui.cv_last * 2u) & 1u) ? ui.cv_last : -1;
 }
-static void pf_key(uint32_t k, int down)
+OGS_UI static void pf_key(uint32_t k, int down)
 {
     uint32_t b = 1u << k, i, n = 0;
     if (k >= PF_N)
@@ -9026,7 +9037,7 @@ OGS_UI static void knob_turn(uint32_t k, int32_t e)
 /* (1.5.0) parametry pod gałkami stron silnika e po kolei (perkusja: każdego dźwięku — MORPH i DUAL 8, 88 / 99 16), bez powtórzeń.
  * want >= 0: id pozycji want (-1: za końcem); want < 0: pozycja parametru find (-1: brak). *ln: dźwięk (-1: nie perkusja albo
  * parametr zestawu, ten sam na każdym dźwięku), *pg: strona */
-static int32_t mac_list(int32_t e, int32_t want, int32_t find, int32_t *ln, int32_t *pg)
+OGS_UI static int32_t mac_list(int32_t e, int32_t want, int32_t find, int32_t *ln, int32_t *pg)
 {
     const engine_t *g = &ENG[e];
     volatile int32_t *lv = e == ENG_MORPH ? &mp_lane : e == ENG_DUAL ? &du_lane : &dm_lane;
@@ -9072,7 +9083,7 @@ static int32_t mac_list(int32_t e, int32_t want, int32_t find, int32_t *ln, int3
 }
 /* (1.5.0) GLO > ALGO KNOB, kolumna miejsca s: nm = nazwa parametru (perkusja: numer dźwięku przed nią, w pierwszej linii; puste:
  * KNOB n), tx = jego strona (KNOB 1 bez wyboru: DEFAULT = parametr silnika; puste: -). nm, tx: po 16 B */
-static void mac_col(int32_t e, int32_t s, char *nm, char *tx)
+OGS_UI static void mac_col(int32_t e, int32_t s, char *nm, char *tx)
 {
     int32_t id = mac_get(e, s), ln, pg;
     const int dflt = !s && !algo_ok(e, id);
@@ -9715,6 +9726,53 @@ OGS_UIN static void lr_knob(uint32_t k, int32_t e)   /* K1 na liście: tryb (ga�
     glob_dirty = 1;
     ui.redraw = 1;
 }
+/* (1.5.1, P59, K61 — Ableton CC Control „can't record knob1”; decyzje użytkownika 2026-11-08) GLO > MIDI > CONTROLS OUT (OFF jak dotąd):
+ * gałki i przyciski FM1 wysyłają MIDI, żeby DAW nagrywał ruchy. Nauczone w MIDI LEARN: ich CC / nuta i kanał (gałka w swoim MIN-MAX
+ * albo REL, przycisk HOLD 127 / 0, CLICK tylko wciśnięcie), nienauczone: K1-K4, ALGO, SELECT, PRESETS, MASTER = CC 21-28, przyciski
+ * CC 102-115 (kolejność B_*), kanał jak nuty. Tylko ruch na FM1 (nic z MIDI nie wraca); 0,3 s po nim to samo z kontrolera = echo DAW. */
+static uint32_t ko_at[LR_NK], ko_bat, ko_bm;     /* kiedy gałka / przyciski ko_bm poszły z FM1 */
+OGS_UIN static void ko_send(uint32_t t, int32_t v, int32_t dl, uint32_t ch)   /* t: wiersz LEARN; v: gałka 0-1023 / przycisk 0-1;
+                                                                                * dl: kroki (REL) */
+{
+    const uint8_t *L = glob.lrn[t];
+    const uint32_t on = L[0] & LF_ON;
+    uint32_t n = t < LR_B0 ? 21u + t : 102u + t - LR_B0, st = 0xB0u;
+    int32_t d;
+    if (on) {
+        n = L[1];
+        if (!(L[0] & LF_ANY))
+            ch = L[0] & 15u;
+    }
+    if (t >= LR_B0) {
+        if (on && L[4] && !v)                    /* CLICK: tylko wciśnięcie */
+            return;
+        d = v ? 127 : 0;
+        if (on && (L[0] & LF_NOTE))
+            st = v ? 0x90u : 0x80u;
+    } else if (on && L[4]) {                     /* REL (odwrotność lr_rel) */
+        dl = clamp(dl, -63, 63);
+        if (!dl)
+            return;
+        d = L[4] == 2u ? 64 + dl : dl > 0 ? dl : L[4] == 1u ? 128 + dl : 64 - dl;
+    } else {
+        const int32_t lo = on ? L[2] : 0, r = on && L[3] > L[2] ? L[3] - L[2] : 127;
+        d = lo + (clamp(v, 0, 1023) * r + 511) / 1023;
+        ko_at[t] = plat_ms();
+    }
+    plat_midi_send(st >> 4 | (st | ch) << 8 | n << 16 | (uint32_t)d << 24, TO_USB);
+}
+static int32_t pr_pos(int32_t e, int32_t was, int32_t *at)   /* (1.5.1) miejsce presetu was na liście silnika e od INIT; długość */
+{
+    const int32_t q0 = eng_first(e);
+    int32_t q = q0, i = 0;
+    *at = 0;
+    do {
+        if (q == was)
+            *at = i;
+        q = preset_step(q, 1, e);
+    } while (++i < 4096 && q != q0);
+    return i;
+}
 /* gałka ze stopem wprost: strona silnika i HOME w SOLO, bez trzymanych SEL / HOME / gestu (inaczej: kroki jak gałka FM1) */
 OGS_UI static int lr_direct(uint32_t btn)
 {
@@ -9758,6 +9816,8 @@ OGS_UIN static void lr_frame(uint32_t btn)       /* (input) nauka na ekranie; ga
         d = lr_seen >> t & 1u ? n - (int32_t)lr_last[t] : 0;
         lr_seen |= (uint8_t)(1u << t);
         lr_last[t] = (uint16_t)n;
+        if (now - ko_at[t] < 300u)               /* (1.5.1) CONTROLS OUT: echo z DAW tej gałki */
+            continue;
         ui.input_at = now;
         if (t == LR_MASTER) {
             plat_master_midi(n * 4096 / 1023);
@@ -9806,16 +9866,9 @@ OGS_UIN static void lr_frame(uint32_t btn)       /* (input) nauka na ekranie; ga
         if (t == LR_PRESET && !(btn >> B_HOME & 1u)
             && (ui.page >= V_HOME || PANEL_PAGE(ui.page) || ui.page == V_ENGP)) {   /* PRESETS: miejsce na liście silnika */
             const int32_t e = set.eng, was = preset_now();
-            const int32_t q0 = eng_first(e);
-            int32_t q, i = 0, at = 0;
+            int32_t i, at;
             if (lr_pe != e || lr_pid != was) {   /* lista od INIT (jak Program Change) */
-                q = q0;
-                do {
-                    if (q == was)
-                        at = i;
-                    q = preset_step(q, 1, e);
-                } while (++i < 4096 && q != q0);
-                lr_pn = i;
+                lr_pn = pr_pos(e, was, &at);
                 lr_pix = at;
             }
             i = n * lr_pn / 1024;
@@ -10184,6 +10237,8 @@ static void mt_scene_presets(void)       /* app_frame: przerwanie zastosowało n
     c = &glob.scn[mt_scn_pend - 1u];
     mt_scn_pend = 0;
     pend_preset = -1;
+    if ((c->rsv & SCN_PAT) && !GV(G_SCNSQ))  /* (1.5.1, P60) SEQ > OPTIONS > SCENE + PATTERN: wzór sceny (wyjście cicho) */
+        sq_set_pattern(c->mute >> 4);
     for (k = 0; k < MT_N; k++) {             /* zapisane presety (load_preset wybiera ścieżkę silnika) */
         const int32_t e = glob.g[G_MT0 + k], id = c->pre[k];
         if (e < NENG && id < NALL && preset_eng(id) == e) {
@@ -10223,8 +10278,8 @@ static void mt_scene_save(void)
     int32_t k, ed = -1;
     c->ok = 1;                               /* (v1.1.2) bez ścieżek: na liście i po wczytaniu = pusta */
     c->foc = (uint8_t)glob.g[G_MTFOC];
-    c->mute = (uint8_t)glob.g[G_MTMUTE];
-    c->rsv = SCN_NUM;                        /* (v0.78) numeracja presetów */
+    c->mute = (uint8_t)(glob.g[G_MTMUTE] | sqg.pat << 4);   /* (1.5.1) wzór SEQ w bitach 4-7 */
+    c->rsv = SCN_NUM | SCN_PAT;              /* (v0.78) numeracja presetów; (1.5.1) ze wzorem */
     for (k = 0; k < MT_N; k++) {
         const int32_t e = glob.g[G_MT0 + k];
         c->eng[k] = (uint8_t)e;
@@ -10547,6 +10602,69 @@ static int sel_keys_own(void)
     return (ui.page == V_ARP && ui.arp_more == ARP_CHPG) || ui.pf_hold || ui.page == V_PERF;
 }
 
+OGS_UIN static void ko_in(uint32_t btn, uint32_t ch)   /* (1.5.1) CONTROLS OUT: przyciski i MASTER z FM1; echo z DAW przez 0,3 s pomijane */
+{
+    static uint32_t pb;
+    static int32_t mv = -1;
+    static uint8_t ma;
+    const uint32_t now = plat_ms(), c = btn ^ pb, on = (uint32_t)GV(G_CTLOUT);
+    const int32_t m = (int32_t)(plat_master() >> 2);
+    uint32_t k;
+    if (now - ko_bat >= 300u)
+        ko_bm = 0;
+    if (c && on) {
+        ko_bm |= c;
+        ko_bat = now;
+        for (k = 0; k < NB; k++)
+            if (c >> k & 1u)
+                ko_send(LR_B0 + k, (int32_t)(btn >> k & 1u), 0, ch);
+    }
+    pb = btn;
+    if (mv < 0 || ma != lr_ac[LR_MASTER]) {     /* MASTER z kontrolera: nie odsyłać */
+        ma = lr_ac[LR_MASTER];
+        mv = m;
+    } else if (m - mv >= 8 || mv - m >= 8) {
+        if (on)
+            ko_send(LR_MASTER, m, (m - mv) / 8, ch);
+        mv = m;
+    }
+}
+static const uint8_t KO_T[NE] = {LR_SELECT, LR_ALGO, LR_PRESET, 0, 1, 2, 3};   /* EN_* -> wiersz LEARN */
+static int8_t ko_d[NE];                  /* obroty gałek FM1 w tej klatce */
+OGS_UIN static int32_t ko_enc(int k)     /* plat_enc z zapamiętaniem (CONTROLS OUT) */
+{
+    return ko_d[k] = (int8_t)plat_enc(k);
+}
+OGS_UIN static void ko_knobs(uint32_t ch, uint32_t btn)   /* (1.5.1) CONTROLS OUT: gałki ruszone na FM1 */
+{
+    const int8_t *dl = ko_d;
+    uint32_t k;
+    if (ui.gest)
+        return;
+    for (k = 0; k < NE; k++) {
+        const uint32_t t = KO_T[k];
+        int32_t v = -1, id = -1, at, n;
+        if (!dl[k])
+            continue;
+        if (t < LR_ALGO && ui.page >= 0)
+            id = knob_id((int32_t)t);
+        else if (t == LR_ALGO && ui.page >= V_HOME && !ui.sel_hold)
+            id = algo_id();
+        else if (t == LR_SELECT && ui.page >= 0)
+            v = (2 * ui.idx + 1) * 512 / grp_n(ui.grp);
+        else if (t == LR_PRESET && !(btn >> B_HOME & 1u) && (ui.page >= V_HOME || PANEL_PAGE(ui.page) || ui.page == V_ENGP)) {
+            n = pr_pos(set.eng, preset_now(), &at);
+            v = (2 * at + 1) * 512 / n;
+        }
+        if (id >= 0) {
+            const pdef_t *d = E->def(id);
+            v = d->hi > d->lo ? (pget(id) - d->lo) * 1023 / (d->hi - d->lo) : 0;
+        }
+        if (v >= 0)
+            ko_send(t, v, dl[k], ch);
+    }
+}
+
 OGS_UI static void input(void)
 {
     static uint32_t eaten;                   /* klawisze zużyte jako skróty: ich puszczenie nie gasi nuty */
@@ -10557,12 +10675,14 @@ OGS_UI static void input(void)
     uint32_t chan = mt_ui() ? mt_ch(glob.g[G_MTFOC])   /* (v0.66.1) MULTI: MIDI OUT na kanale wybranej ścieżki (v1.0.1: z GLO) */
                   : glob.g[G_MIDICH] ? (uint32_t)glob.g[G_MIDICH] - 1u : 0u;
     int32_t e;
+    ko_in(btn, chan);                        /* (1.5.1) CONTROLS OUT: przyciski, MASTER */
     for (k = 0; k < NB; k++)                 /* (v1.3.0) MIDI LEARN: przyciski z kontrolera; kliknięcie = jedna klatka (kolejne: co drugą) */
         if (lr_pc[k] != lr_ps[k] && !(ui.btn >> k & 1u)) {
             lr_ps[k]++;
-            btn |= 1u << k;
+            if (!(ko_bm >> k & 1u))
+                btn |= 1u << k;
         }
-    btn |= lr_hold;
+    btn |= lr_hold & ~ko_bm;
     lr_frame(btn);
     touch_poll();
     keys = touch_keys();
@@ -10850,7 +10970,7 @@ OGS_UI static void input(void)
         lr_stp[k] = 0;
         if (s)
             ui.enc_at[k] = 0;
-        if ((e = plat_enc((int)k) + m + s) == 0)
+        if ((e = ko_enc((int)k) + m + s) == 0)   /* (1.5.1) ko_enc: plat_enc + obroty dla CONTROLS OUT */
             continue;
         ui.input_at = plat_ms();                 /* GLO SCREEN OFF: każdy ruch budzi */
         if (ui.allp_del && (ui.page == V_ALLP || ui.page == V_SCN))   /* (v1.0.2) okno DELETE?: gałki stoją */
@@ -11041,6 +11161,8 @@ OGS_UI static void input(void)
             knob_turn(k - EN_K1, e);
         }
     }
+    if (GV(G_CTLOUT))                        /* (1.5.1) CONTROLS OUT: gałki ruszone na FM1 */
+        ko_knobs(chan, btn);
     if (ui.gest && !(btn >> (ui.gest - 1u) & 1u)) {   /* v0.35: puszczony LFO / ENV bez gestu: jak dotąd */
         uint32_t b = ui.gest - 1u;
         int used = ui.gest_used, lng = plat_ms() - ui.gest_at >= 400u;
@@ -11245,7 +11367,7 @@ static void mt_strip(void)               /* (v0.64.3) MULTI: górny pasek = ści
     cv_rect(0, 29, 240, 1, C_LINE);
 }
 
-static void header(void)
+OGS_UI static void header(void)
 {
     cv_begin(240, 30, C_BLACK);
     if (mt_ui()) {
@@ -11962,7 +12084,7 @@ OGS_UI static void page_hint(int more)
 /* (v0.90, decyzje użytkownika 2026-11-03) opcja pod SEL w nagłówku: "SEL KEY TRK 1/3", do prawej (do right); za długie obok tytułu
  * (koniec tend): najpierw mniejsza czcionka, nazwa opcji znika dopiero, gdy i tak się nie mieści; „SEL” (przycisk) i wartość
  * zostają zawsze. (v1.2.0) wspólne ze stronami ARP */
-static void sel_hdr(int32_t right, int32_t tend, const char *nm, const char *t)
+OGS_UI static void sel_hdr(int32_t right, int32_t tend, const char *nm, const char *t)
 {
     const felucca_font_t *f = &FONT_XS;
     int32_t sp = 4, k, x = 0, y;
@@ -12148,7 +12270,7 @@ static void battery(int32_t x, int32_t y)   /* ikona baterii (plat_battery 0..3)
 
 /* podpowiedź na dolnym pasku: części oddzielone trzema spacjami od lewej do prawej krawędzi (8 px), jak na HOME;
  * jedna część albo za długie: na środku */
-static void hint_line(int32_t y, const char *s, uint16_t c)
+OGS_UI static void hint_line(int32_t y, const char *s, uint16_t c)
 {
     const char *p[6];
     char part[6][40];
@@ -12721,7 +12843,7 @@ __attribute__((noinline)) static void draw_eq(const fx_slot_t *c, int32_t y0, in
     }
 }
 
-static const char *fx_mt_why(const fx_slot_t *c)   /* (v0.83) MULTI: dlaczego włączony efekt nie gra (0: gra) */
+OGS_UI static const char *fx_mt_why(const fx_slot_t *c)   /* (v0.83) MULTI: dlaczego włączony efekt nie gra (0: gra) */
 {
     const int32_t t = glob.g[G_MTFOC];
     if (!mt_ui() || !c->mode || c->type >= FX_NTYPE)
@@ -12956,7 +13078,7 @@ static void sq_title(const char *name, const char *right)   /* wiersz nazwy stro
         cv_text(232 - text_w(&FONT_XS, right), 12, &FONT_XS, right, C_GRAY);
 }
 
-static void sq_state(char *t)                    /* PLAY / REC / STOP i wzór */
+OGS_UI static void sq_state(char *t)                    /* PLAY / REC / STOP i wzór */
 {
     char n[8];
     t[0] = 0;
@@ -13541,7 +13663,7 @@ OGS_UI static void draw_seq(void)
         for (k = 0; k < 4; k++) {
             const int32_t g = SQ_OPTG[k];
             d[k] = g < 0 ? 0 : &GDEF[g];
-            v[k] = g < 0 ? 0 : glob.g[g];
+            v[k] = g < 0 ? 0 : GV(g);
             txt[k][0] = 0;
             if (g >= 0)
                 def_text(d[k], -1, v[k], txt[k]);
@@ -14136,7 +14258,7 @@ static void speak(void)
 #define SPLASH_MS 4500u                      /* v0.19: dłużej (było 2 s), co najmniej SPLASH_MIN od app_ui_init */
 #define SPLASH_MIN 3000u
 
-void app_splash(void)
+OGS_UI void app_splash(void)
 {
     const int32_t h = OGS_LOGO_H + 28, ox = (240 - OGS_LOGO_W) / 2;
     int32_t x, y;
@@ -14722,4 +14844,5 @@ const char *const *const ogs_lists[LI_N] = {
     [LI_LW_DSM] = LW_DSM,
     [LI_L_PICK] = L_PICK,
     [LI_L_FXKEEP] = L_FXKEEP,
+    [LI_L_SCNSQ] = L_SCNSQ,
 };

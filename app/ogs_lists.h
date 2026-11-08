@@ -25,6 +25,7 @@ enum {
     LI_LW_F2T, LI_LW_DSM,
     LI_L_PICK,                                   /* (v1.3.0) GLO MIDI KNOB PICKUP */
     LI_L_FXKEEP,                                 /* (1.5.0) GLO AUDIO FX SEND */
+    LI_L_SCNSQ,                                  /* (1.5.1) SEQ OPTIONS SCENE */
     LI_N
 };
 extern const char *const *const ogs_lists[LI_N];
