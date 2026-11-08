@@ -1,5 +1,14 @@
 # Changelog
 
+## v1.5.1 — 2026-11-09
+Źródła MPL OG Synth 1.5.1 „Controls out” (GLO > MIDI > CONTROLS OUT: gałki i przyciski FM1 wysyłają MIDI do DAW — nauczone w MIDI
+LEARN swoim CC / kanałem / zakresem, inne CC 21-28 i 102-115, echo z DAW pomijane; scena MULTI pamięta wzór SEQ, SEQ > OPTIONS > SCENE;
+pole GLO 73 po CC IN; minsize na funkcjach obsługi).
+
+## v1.5.0 — 2026-11-08
+Źródła MPL OG Synth 1.5.0 „Latch” (LATCH cały akord i bez ARP, pedał sustain CC 64, tryby ARP, ALGO = makro do 8 parametrów — obiekt
+OBJ_MAC, FX SEND KEEP, MULTI SEL + ALGO; app/ogs_lists.h).
+
 ## v1.4.2 — 2026-11-07
 Źródła MPL OG Synth 1.4.2 „Drum keys” (perkusja: F#5 jak OP1-OP6 — SEL + F#5, w RACK od razu; dwa FM6 w MULTI: nuta po 10 punktów,
 razem najwyżej 9; SysEx pomiaru MULTI 0x1C bez zapisu GLO).

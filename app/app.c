@@ -275,7 +275,7 @@ static struct {
     uint8_t redraw;
 } ui = {.page = V_HOME, .knob = -1, .sq_low = 55, .sq_note = -1, .sq_pitch = 60, .sq_zv = 1, .sq_zh = 2, .pf_mac = {0, 0, 0, 100}};
 #include "ogs_app_06.c"
-void app_say(const char *a, const char *b)
+OGS_UI void app_say(const char *a, const char *b)
 {
     uint32_t i;
     char t[48];
@@ -308,12 +308,14 @@ OGS_UI static void input(void)
     uint32_t chan = mt_ui() ? mt_ch(glob.g[G_MTFOC])   /* (v0.66.1) MULTI: MIDI OUT na kanale wybranej ścieżki (v1.0.1: z GLO) */
                   : glob.g[G_MIDICH] ? (uint32_t)glob.g[G_MIDICH] - 1u : 0u;
     int32_t e;
+    ko_in(btn, chan);                        /* (1.5.1) CONTROLS OUT: przyciski, MASTER */
     for (k = 0; k < NB; k++)                 /* (v1.3.0) MIDI LEARN: przyciski z kontrolera; kliknięcie = jedna klatka (kolejne: co drugą) */
         if (lr_pc[k] != lr_ps[k] && !(ui.btn >> k & 1u)) {
             lr_ps[k]++;
-            btn |= 1u << k;
+            if (!(ko_bm >> k & 1u))
+                btn |= 1u << k;
         }
-    btn |= lr_hold;
+    btn |= lr_hold & ~ko_bm;
     lr_frame(btn);
     touch_poll();
     keys = touch_keys();
@@ -601,7 +603,7 @@ OGS_UI static void input(void)
         lr_stp[k] = 0;
         if (s)
             ui.enc_at[k] = 0;
-        if ((e = plat_enc((int)k) + m + s) == 0)
+        if ((e = ko_enc((int)k) + m + s) == 0)   /* (1.5.1) ko_enc: plat_enc + obroty dla CONTROLS OUT */
             continue;
         ui.input_at = plat_ms();                 /* GLO SCREEN OFF: każdy ruch budzi */
         if (ui.allp_del && (ui.page == V_ALLP || ui.page == V_SCN))   /* (v1.0.2) okno DELETE?: gałki stoją */
@@ -792,6 +794,8 @@ OGS_UI static void input(void)
             knob_turn(k - EN_K1, e);
         }
     }
+    if (GV(G_CTLOUT))                        /* (1.5.1) CONTROLS OUT: gałki ruszone na FM1 */
+        ko_knobs(chan, btn);
     if (ui.gest && !(btn >> (ui.gest - 1u) & 1u)) {   /* v0.35: puszczony LFO / ENV bez gestu: jak dotąd */
         uint32_t b = ui.gest - 1u;
         int used = ui.gest_used, lng = plat_ms() - ui.gest_at >= 400u;
