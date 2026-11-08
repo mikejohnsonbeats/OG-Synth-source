@@ -1,0 +1,7 @@
+{
+  "what": "A synth firmware for sound design: 16 engines (FM, VA, wavetable, phase distortion, physical modelling, formant, drums), 28 effects, 4 tracks at once, arpeggiator, sequencer and MIDI learn. Installs and updates from the browser.",
+  "author": "Mike Johnson Beats",
+  "kinds": "synth",
+  "play": "https://ogsynth.cc/emulator/",
+  "image": "fmhub-og-synth.jpg"
+}
