@@ -1067,6 +1067,20 @@ static void eng_on(const engine_t *e, int32_t key, float v);   /* (v0.39) nuty d
 static void eng_on_m(const engine_t *e, int32_t key, float v, uint32_t m);   /* ... z podanym akordem (1: bez) */
 static uint32_t chord_at(int32_t key);       /* akord brzmienia, które gra, na klawiszu key (bit k = +k półtonów; v1.1.0: KEY 3 / 7) */
 static void eng_off(const engine_t *e, int32_t key);
+/* (1.6.0) AUTO (ogs_auto.c, dołączony przed draw): linie w parametry co tick SEQ, wczytanie / zapis razem ze wzorem, gałki, ekran */
+static void ap_tick(uint32_t p);
+static void ap_load(int32_t pat);
+static void ap_store(void);
+static void ap_touch(int32_t id);
+static void ap_frame(void);
+static void ap_copy(int32_t src);
+static void ap_knob(uint32_t k, int32_t e);
+static void ap_draw(int32_t h, uint32_t bar0, uint32_t V, uint32_t L);
+static void ap_chips(void);
+static void ap_card_draw(void);
+static void ap_card_turn(int32_t e);
+static void ap_card_ok(void);
+static uint8_t ap_lane_trk(void);
 #include "ogs_seq.c"
 
 /* ------------------------------------------------------------ nuty z UI --- */
@@ -2271,176 +2285,15 @@ OGS_UI static void fx_hash(uint32_t *h)
     h[3] = fnv(fxc.x[NENG_V8], (NENG_MAX - NENG_V8) * sizeof fxc.x[0]);
 }
 
-/* starsze zapisy efektów (OFX1 - OFX6, do v0.15) -> bieżący układ: całość w pamięci tła HOME (bg_a; tło odbudowuje się
- * samo, bg_for), przeliczenie jak dawniej i zapis w całości. Rzadko: raz po aktualizacji z bardzo starej wersji albo po
- * przywróceniu takiej kopii zapasowej. */
-_Static_assert(sizeof bg_a >= sizeof(fxp_t) + sizeof(fxx_t), "efekty: przeliczenie w pamięci tła");
-static void fx_migrate(void)
-{
-#define fxp (*(fxp_t *)(void *)bg_a)
-#define fxx (*(fxx_t *)(void *)(bg_a + sizeof(fxp_t)))
+/* (1.6.0, decyzja użytkownika 2026-11-09) przeliczanie efektów OFX1 - OFX6 (do v0.15, fx_migrate) usunięte: miejsce na AUTO.
+ * Zapisało nowy układ przy pierwszym starcie nowszej wersji; od 1.0.0 takich zapisów nie ma (stary znacznik: efekty domyślne). */
 
-    uint8_t *b = (uint8_t *)&fxp;
-    /* (v0.34.2) wszystkie wpisy po kolei (cur, user, fact) przez wskaźnik na cały obiekt — indeks za pierwszym
-     * wierszem tablicy cur[0] to w C niezdefiniowane zachowanie (GCC: -Waggressive-loop-optimizations) */
-    fx_slot_t *fxp_all = (fx_slot_t *)(void *)(b + FXOFF(fxp_t, cur));
-    uint8_t *fxx_all = (uint8_t *)&fxx + FXOFF(fxx_t, cur);
-    int32_t e, na = plat_store_load(OBJ_FXP, b, FXP_A), nb = plat_store_load(OBJ_FXP2, b + FXP_A, sizeof fxp - FXP_A);
-    const uint32_t nent = 8u + NUSER_LO + (uint32_t)FX_FACT_N, old6 = 4u + nent * 6u * sizeof(fx_slot_t);
-    int mig = 0;
-    if (na == (int)FXP_A && nb == (int)(old6 - FXP_A)
-        && (fxp.magic == FXP_MAGIC_2 || fxp.magic == FXP_MAGIC_3 || fxp.magic == FXP_MAGIC_4)) {
-        /* 6 slotów -> 8: te same wpisy (cur, user, fact), od końca, w miejscu; dwa nowe sloty puste */
-        int32_t k;
-        for (e = (int32_t)nent - 1; e >= 0; e--) {
-            uint8_t *to = b + 4 + (uint32_t)e * FX_SLOTS * sizeof(fx_slot_t);
-            const uint8_t *from = b + 4 + (uint32_t)e * 6u * sizeof(fx_slot_t);
-            int32_t i;
-            for (i = 6 * (int32_t)sizeof(fx_slot_t) - 1; i >= 0; i--)   /* od końca: to >= from */
-                to[i] = from[i];
-            for (k = 6; k < FX_SLOTS; k++) {
-                fx_slot_t *q = (fx_slot_t *)(void *)to + k;
-                q->type = FX_NONE_ST;
-                q->mode = 0;
-                for (i = 0; i < FX_NP; i++)
-                    q->p[i] = 0;
-            }
-        }
-        mig = 1;
-    }
-    if (na == (int)(4u + (8u + NUSER_LO + (uint32_t)FX_FACT_N) * 4u * sizeof(fx_slot_t)) && fxp.magic == FXP_MAGIC_1) {
-        /* 4 sloty -> 6: te same wpisy w tej samej kolejności (cur, user, fact), od końca, w miejscu; EQ i COMPRESSOR
-         * dopisane wyłączone */
-        int32_t n = 8 + NUSER_LO + FX_FACT_N, k;
-        for (e = n - 1; e >= 0; e--) {
-            fx_slot_t *to = (fx_slot_t *)(void *)(b + 4 + (uint32_t)e * FX_SLOTS * sizeof(fx_slot_t));
-            const uint8_t *from = b + 4 + (uint32_t)e * 4u * sizeof(fx_slot_t);
-            uint8_t t[4 * sizeof(fx_slot_t)];
-            uint32_t i;
-            for (i = 0; i < sizeof t; i++)
-                t[i] = from[i];
-            for (i = 0; i < sizeof t; i++)
-                ((uint8_t *)to)[i] = t[i];
-            for (k = 4; k < FX_SLOTS; k++) {
-                to[k].type = (uint8_t)k;
-                to[k].mode = 0;
-                for (i = 0; i < FX_NP; i++)
-                    to[k].p[i] = FXDEF[k][i];
-            }
-        }
-        fxp.magic = FXP_MAGIC_2;             /* dalej jak OFX2 (niżej: TYPE na MORE K1) */
-        mig = 1;
-    }
-    if (fxp.magic == FXP_MAGIC_2 && (na == (int)FXP_A || na > 0)) {   /* OFX2 -> OFX3: gałki DIST i REVERB po nowemu */
-        fx_slot_t *all = fxp_all;
-        uint32_t i, nall = (uint32_t)(sizeof fxp - 4u) / sizeof(fx_slot_t);
-        for (i = 0; i < nall; i++) {
-            uint8_t *q = all[i].p, t4 = q[4], t5 = q[5], t6 = q[6], t7 = q[7];
-            if (all[i].type == FX_DIST) {    /* było: LOW CUT, BIAS, TYPE */
-                q[4] = t6;
-                q[5] = t4;
-                q[6] = t5;
-            } else if (all[i].type == FX_REVERB) {   /* było: PREDELAY, LOW CUT, WIDTH, TYPE */
-                q[4] = t7;
-                q[5] = t4;
-                q[6] = t5;
-                q[7] = t6;
-            } else if (all[i].type == FX_CRUSH) {    /* było: TONE, LEVEL na MORE K1, K2 */
-                q[5] = t4;
-                q[6] = t5;
-                q[4] = 0;
-            }
-        }
-        fxp.magic = FXP_MAGIC_3;
-    }
-    if (fxp.magic == FXP_MAGIC_3 && na > 0) {   /* OFX3 -> OFX4: wyłączony efekt z domyślnymi gałkami = pusty slot */
-        fx_slot_t *all = fxp_all;
-        uint32_t i, j, nall = (uint32_t)(sizeof fxp - 4u) / sizeof(fx_slot_t);
-        for (i = 0; i < nall; i++) {
-            int def = all[i].type < FX_NONE_ST && !all[i].mode;
-            for (j = 0; def && j < FX_NP; j++)
-                def = j == FX_TYPEK || all[i].p[j] == FXDEF[all[i].type][j];
-            if (def) {
-                all[i].type = FX_NONE_ST;
-                for (j = 0; j < FX_NP; j++)
-                    all[i].p[j] = 0;
-            }
-        }
-        fxp.magic = FXP_MAGIC_4;
-    }
-    if (fxp.magic == FXP_MAGIC_4 && mig)     /* OFX4 (6 slotów, już rozszerzone) -> OFX5 */
-        fxp.magic = FXP_MAGIC_5;
-    if (fxp.magic == FXP_MAGIC_5 && (mig || (na == (int)FXP_A && nb == (int)(sizeof fxp - FXP_A)))) {
-        /* OFX5 -> OFX6: dwa nowe rodzaje przed pustym slotem (FX_NONE było 16) */
-        fx_slot_t *all = fxp_all;
-        uint32_t i, nall = (uint32_t)(sizeof fxp - 4u) / sizeof(fx_slot_t);
-        for (i = 0; i < nall; i++)
-            if (all[i].type == 16u)
-                all[i].type = FX_NONE_ST;
-        fxp.magic = FXP_MAGIC_6;
-    } else if (na != (int)FXP_A || nb != (int)(sizeof fxp - FXP_A) || (fxp.magic != FXP_MAGIC && fxp.magic != FXP_MAGIC_6)) {
-        uint32_t i;
-        for (i = 0; i < sizeof fxp; i++)
-            b[i] = 0;
-        fxp.magic = FXP_MAGIC;
-    }
-    if (fxp.magic == FXP_MAGIC_6) {          /* OFX6 -> OFX7: DISTORTION BIAS i LOW CUT zamienione, HIGH CUT wyłączony */
-        fx_slot_t *all = fxp_all;
-        uint32_t i, nall = (uint32_t)(sizeof fxp - 4u) / sizeof(fx_slot_t);
-        for (i = 0; i < nall; i++)
-            if (all[i].type == FX_DIST) {
-                uint8_t t = all[i].p[5];
-                all[i].p[5] = all[i].p[6];
-                all[i].p[6] = t;
-                all[i].p[7] = 127;
-            }
-        fxp.magic = FXP_MAGIC;
-    }
-    for (e = 0; e < (int32_t)sizeof fxx; e++)   /* ogon DELAY (v0.30): brak = przeliczenie przy odczycie */
-        ((uint8_t *)&fxx)[e] = 0;
-    if (plat_store_load(OBJ_FXX, &fxx, sizeof fxx) < (int)FXOFF(fxx_t, tcur) || fxx.magic != FXX_MAGIC) {
-        /* bez gałek ponad 8 (do v0.13): domyślne, a COMPRESSOR na nowy układ (było MAKEUP p4, MIX p5; jest STYLE p4,
-         * MAKEUP p5 z AUTO na 0, MIX p6, KNEE p7; włączony = CLEAN) */
-        fx_slot_t *all = fxp_all;
-        uint32_t i, nall = (uint32_t)(sizeof fxp - 4u) / sizeof(fx_slot_t);
-        for (i = 0; i < nall; i++)
-            if (all[i].type == FX_COMP) {
-                uint8_t *q = all[i].p;
-                q[6] = q[5];
-                q[5] = (uint8_t)(1u + q[4] * 126u / 127u);
-                q[4] = 0;
-                q[7] = FXDEF[FX_COMP][7];
-                if (all[i].mode)
-                    all[i].mode = 1;
-            }
-        fxx.magic = FXX_MAGIC;
-        for (i = 0; i < (uint32_t)FXX_NENT * FX_NX0; i++)
-            fxx_all[i] = FXXDEF[i % FX_NX0];
-    }
-    for (e = 0; e < (int32_t)FXX_NENT * FX_NX0; e++)
-        if (fxx_all[e] > 127u)
-            fxx_all[e] = FXXDEF[e % FX_NX0];
-    bg_for = -1;
-    if (plat_store_save(OBJ_FXX, &fxx, sizeof fxx) == 0)
-        fx_ok[FO_X] = 1;
-    if (plat_store_save(OBJ_FXP, &fxp, FXP_A) == 0 && plat_store_save(OBJ_FXP2, b + FXP_A, sizeof fxp - FXP_A) == 0)
-        fx_ok[FO_P] = 1;
-#undef fxp
-#undef fxx
-}
-
-static void fx_load(void)                /* bieżące efekty silników z flasha (brak: domyślne) */
+OGS_UIN static void fx_load(void)                /* bieżące efekty silników z flasha (brak: domyślne) */
 {
-    uint32_t la = 0, m = 0, old = 0;
-    const uint8_t *a = plat_store_view(OBJ_FXP, &la);
+    uint32_t old = 0;
     int32_t w, e;
     for (w = 0; w < NFO; w++)
         fx_ok[w] = (uint8_t)fxo_check(w);
-    if (a && la >= 4u)
-        m = (uint32_t)(a[0] | a[1] << 8 | a[2] << 16 | (uint32_t)a[3] << 24);
-    if (m == FXP_MAGIC_1 || m == FXP_MAGIC_2 || m == FXP_MAGIC_3 || m == FXP_MAGIC_4 || m == FXP_MAGIC_5
-        || m == FXP_MAGIC_6)
-        fx_migrate();
     for (e = 0; e < NENG_MAX; e++) {
         int ok = e < NENG_V8 ? fxo_read(FO_P, FXOFF(fxp_t, cur) + (uint32_t)e * FX_SL, fxc.cur[e], FX_SL)
                              : fxo_read(FO_H, FXOFF(fxh_t, cur) + (uint32_t)(e - NENG_V8) * FX_SL, fxc.cur[e], FX_SL);
@@ -2713,7 +2566,7 @@ static const fx_slot_t *mt_fxe(const fx_slot_t *c, uint32_t k)   /* REVERB (k 0)
 }
 /* (v0.88) zapis sprzed v0.88: MASTER FX OFF = odpięty od wszystkich; RETURN 100 bez żadnej wysyłki (nic nie było słychać): MIX 0; ktoś
  * wysyłał: RETURN zostaje MIX, a ścieżki, które nie wysyłały, dostają wysyłkę 0 (dziś pusta wysyłka = cała) — brzmi jak było */
-static void mfx_upgrade(void)
+OGS_UIN static void mfx_upgrade(void)
 {
     uint32_t b, k;
     int32_t t;
@@ -2959,7 +2812,7 @@ static int xt_write(uint32_t off, const uint8_t *src, uint32_t n)   /* 0: zapisa
         return -1;
     return plat_store_patch(OBJ_XTRA, sizeof(xt_t), off, src, n);
 }
-static void xt_load(void)                /* bieżące z flasha (brak: domyślne) */
+OGS_UIN static void xt_load(void)                /* bieżące z flasha (brak: domyślne) */
 {
     uint32_t n = 0, e;
     xt_ok = xt_view(&n) != 0;
@@ -3191,114 +3044,8 @@ static void rec_write(uint8_t *r, const char *name, int32_t eng, int32_t idx, in
         r[REC_HDR + k] = pk[k];
 }
 
-/* starsze banki: v0.4 (sam MOOG, 32 rekordy po 71 B w USER0 / USER1, 9 nadpisanych fabrycznych na miejscach 0-8),
- * v0.5 (rekord 176 B: nazwa, silnik, parametry; banki po 16; nadpisane fabryczne na miejscach numerów: 0-8 MOOG,
- * 9-17 DX7). Przenosimy raz, w kolejności bezpiecznej przy zaniku zasilania: najpierw nowe obiekty, potem nadpisywane. */
-#define OLD4_MAGIC (0x4D430000u | 56u)
-#define OLD4_REC 71u
-#define OLD5_MAGIC (0x4D440000u | 176u)
-#define OLD5_REC 176u
-/* v0.6 - v0.23: rekord 200 B (przed DRAW Q/X v0.24, które zjadły resztę zapasu). Sam układ nagłówka (nazwa, silnik,
- * numer, liczba parametrów) się nie zmienił — tylko miejsce na parametry urosło — więc kopiujemy rekord po
- * rekordzie bez przeliczania; nadpisanych fabrycznych mogło być więcej (19) niż się teraz mieści (16): nadmiar gubimy. */
-#define OLD6_MAGIC (0x4D450000u | 200u)
-#define OLD6_REC 200u
-#define OLD6_FACT_N (int32_t)((PLAT_STORE_MAX - 8u) / OLD6_REC)
-typedef struct {
-    uint32_t magic, used;
-    uint8_t d[PLAT_STORE_MAX - 8u];
-} old_t;
-/* przy starcie, zanim cokolwiek się rysuje, pamięć tła HOME (bg_a) służy przenoszeniu starych banków (old0 / old1) */
-_Static_assert(sizeof bg_a >= 2 * sizeof(old_t), "migracja: dwa bufory w pamięci tła");
-#define old0 (*(old_t *)(void *)bg_a)
-#define old1 (*(old_t *)(void *)(bg_a + sizeof(old_t)))
-
-static int old_load(uint32_t o, void *b, uint32_t magic)
-{
-    return plat_store_load(o, b, sizeof(old_t)) > 8 && ((uint32_t *)b)[0] == magic;
-}
-
-/* rekordy from..from+n starego banku -> obiekt o; fact: nadpisane fabryczne (lista) */
-OGS_UI static void old_write(uint32_t o, const void *src, uint32_t rs, int32_t from, int32_t n, int fact)
-{
-    const struct { uint32_t magic, used; uint8_t d[PLAT_STORE_MAX - 8u]; } *s = src;
-    int32_t i, at = 0;
-    bk.magic = BANK_MAGIC;
-    bk.used = 0;
-    for (i = 0; i < n; i++) {
-        const uint8_t *q;
-        int32_t eng = ENG_MOOG, idx = from + i;
-        char nm[NAME_LEN + 1];
-        if (!(s && (s->used >> (from + i) & 1u)))
-            continue;
-        q = s->d + (uint32_t)(from + i) * rs;
-        if (rs == OLD5_REC) {
-            eng = q[NAME_LEN] < NENG ? q[NAME_LEN] : ENG_MOOG;
-            if (fact && idx >= 9) {          /* v0.5: 9 presetów MOOGA, potem DX7 */
-                eng = ENG_DX7;
-                idx -= 9;
-            }
-        }
-        for (at = 0; at < NAME_LEN; at++)
-            nm[at] = (char)q[at];
-        nm[NAME_LEN] = 0;
-        at = fact ? (int32_t)__builtin_popcount(bk.used) : i;
-        if (at >= (fact ? FACT_N : BANK_N))
-            break;
-        rec_write(rec(at), nm, eng, fact ? idx : 0xFF, eng == ENG_MOOG ? 56 : 163, q + NAME_LEN + (rs == OLD5_REC),
-                  rs - NAME_LEN - (rs == OLD5_REC));
-        bk.used |= 1u << at;
-    }
-    plat_store_save(o, &bk, bank_size(o));
-}
-
-/* v0.6 - v0.23 -> v0.24: sam układ nagłówka rekordu bez zmian, tylko miejsce na parametry urosło (200 -> REC_SIZE);
- * kopiujemy rekord po rekordzie na te same miejsca (fact: nadmiar ponad nową pojemność gubimy, reszta parametrów
- * nowego rekordu zostaje zerem — jak przy silniku, który urósł). */
-OGS_UI static void old6_write(uint32_t o, const void *src, int32_t n, int fact)
-{
-    const struct { uint32_t magic, used; uint8_t d[PLAT_STORE_MAX - 8u]; } *s = src;
-    int32_t i, cap = fact ? FACT_N : BANK_N;
-    bk.magic = BANK_MAGIC;
-    bk.used = 0;
-    for (i = 0; i < n && i < cap; i++) {
-        const uint8_t *q = s->d + (uint32_t)i * OLD6_REC;
-        uint8_t *r = rec(i);
-        uint32_t k;
-        if (!(s->used >> i & 1u))
-            continue;
-        for (k = 0; k < REC_SIZE; k++)
-            r[k] = k < OLD6_REC ? q[k] : 0;
-        bk.used |= 1u << i;
-    }
-    plat_store_save(o, &bk, bank_size(o));
-}
-
-static void migrate(void)
-{
-    int a = old_load(OBJ_USER0, &old0, OLD4_MAGIC), b = old_load(OBJ_USER1, &old1, OLD4_MAGIC);
-    int32_t i;
-    if (b) {                                 /* v0.4 */
-        old_write(OBJ_USER2, &old1, OLD4_REC, 0, BANK_N, 0);
-        old_write(OBJ_USER3, &old1, OLD4_REC, BANK_N, BANK_N, 0);
-    }
-    if (a || b)
-        old_write(OBJ_USER1, a ? &old0 : 0, OLD4_REC, BANK_N, BANK_N, 0);
-    if (a)
-        old_write(OBJ_USER0, &old0, OLD4_REC, 0, BANK_N, 0);
-    if (old_load(OBJ_FACT, &old0, OLD4_MAGIC))
-        old_write(OBJ_FACT, &old0, OLD4_REC, 0, 9, 1);
-    for (i = 0; i < NBANK; i++)              /* v0.5: te same miejsca, nowy rekord */
-        if (old_load(UOBJ[i], &old0, OLD5_MAGIC))
-            old_write(UOBJ[i], &old0, OLD5_REC, 0, BANK_N, 0);
-    if (old_load(OBJ_FACT, &old0, OLD5_MAGIC))
-        old_write(OBJ_FACT, &old0, OLD5_REC, 0, 18, 1);
-    for (i = 0; i < NBANK; i++)              /* v0.24: rekord 200 -> 232 B (DRAW Q/X), te same miejsca */
-        if (old_load(UOBJ[i], &old0, OLD6_MAGIC))
-            old6_write(UOBJ[i], &old0, BANK_N, 0);
-    if (old_load(OBJ_FACT, &old0, OLD6_MAGIC))
-        old6_write(OBJ_FACT, &old0, OLD6_FACT_N, 1);
-}
+/* (1.6.0, decyzja użytkownika 2026-11-09) przenoszenie banków v0.4 - v0.23 (OLD4 / OLD5 / OLD6, migrate) usunięte: miejsce na
+ * AUTO. Zapisało nowy układ przy pierwszym starcie nowszej wersji; od 1.0.0 (pierwsza publiczna) takich banków nie ma. */
 
 /* SAVE świeci tylko, gdy brzmienie naprawdę różni się od presetu: kopia parametrów z chwili wczytania / zapisu.
  * Bez kopii (po starcie ze zmienionym brzmieniem, pojedyncze brzmienie DX7 z SysEx) zmiana zostaje do zapisu. */
@@ -3543,7 +3290,7 @@ static void mt_fix(void)                     /* GLO: ścieżki poprawne (silniki
         glob.g[G_MTFOC] = (int16_t)mt_first();
     mx_fix();                                /* (v1.4.0) bliźniaki */
 }                                            /* (v1.1.2) bez ścieżek MULTI zostaje (pusta scena; mt_enter: domyślne) */
-static void mt_boot(void)
+OGS_UIN static void mt_boot(void)
 {
     int32_t t;
     const uint32_t f = plat_lock();          /* (v1.4.0) start: pula od nowa (łańcuch ją zeruje), brzmienia bliźniaków z OBJ_MTX (mx_sync) */
@@ -4034,81 +3781,12 @@ OGS_UI static void settings_save(void)
     mx_own(sw);
 }
 
-static void settings_load(void)          /* ustawienia (albo starsze) -> silniki; co się nie zgadza: pierwszy preset */
+OGS_UIN static void settings_load(void)          /* ustawienia (albo starsze) -> silniki; co się nie zgadza: pierwszy preset */
 {
-    typedef union {                          /* (v0.38: czytane do pamięci tła HOME, bg_a — nie na stałe w RAM) */
+    typedef union {                          /* (v0.38: czytane do pamięci tła HOME, bg_a — nie na stałe w RAM); (1.6.0) tylko
+                                              * bieżący układ (v0.26+, „MJB9”): starsze (v0.4 - v0.25) usunięte, decyzja
+                                              * użytkownika 2026-11-09 — miejsce na AUTO */
         settings_t s;
-        struct {                             /* v0.24 - v0.25 ("MJB8"): 8 miejsc na silniki */
-            uint32_t magic;
-            int8_t octave;
-            uint8_t eng, rsv[2];
-            uint16_t preset[NENG_V8];
-            uint8_t edited[NENG_V8];
-            uint16_t np[NENG_V8];
-            int16_t p[SET_P];
-            int16_t pw[WX_N];
-            int16_t px[SET_PX];
-        } s24;
-        struct {                             /* v0.22 - v0.23: pw[] 64 (przed DRAW Q/X v0.24), px jest */
-            uint32_t magic;
-            int8_t octave;
-            uint8_t eng, rsv[2];
-            uint16_t preset[NENG_V8];
-            uint8_t edited[NENG_V8];
-            uint16_t np[NENG_V8];
-            int16_t p[SET_P];
-            int16_t pw[WX_N_V23];
-            int16_t px[SET_PX];
-        } s23;
-        struct {                             /* v0.19 - v0.21: bez px (silniki od VCO) */
-            uint32_t magic;
-            int8_t octave;
-            uint8_t eng, rsv[2];
-            uint16_t preset[NENG_V8];
-            uint8_t edited[NENG_V8];
-            uint16_t np[NENG_V8];
-            int16_t p[SET_P];
-            int16_t pw[WX_N_V23];
-        } s19;
-        struct {                             /* v0.17 - v0.18: bez pw (WAVE do 128 parametrów) */
-            uint32_t magic;
-            int8_t octave;
-            uint8_t eng, rsv[2];
-            uint16_t preset[NENG_V8];
-            uint8_t edited[NENG_V8];
-            uint16_t np[NENG_V8];
-            int16_t p[SET_P];
-        } s17;
-        struct {                             /* v0.6 - v0.14: te same pola, brzmienia bez miejsca na PHASE */
-            uint32_t magic;
-            int8_t octave;
-            uint8_t eng, rsv[2];
-            uint16_t preset[NENG_V8];
-            uint8_t edited[NENG_V8];
-            uint16_t np[NENG_V8];
-            int16_t p[SET_P_V13];
-        } s13;
-        struct {                             /* v0.15 - v0.16: PHASE bez 8 STEP (128 miejsc) */
-            uint32_t magic;
-            int8_t octave;
-            uint8_t eng, rsv[2];
-            uint16_t preset[NENG_V8];
-            uint8_t edited[NENG_V8];
-            uint16_t np[NENG_V8];
-            int16_t p[SET_P_V15];
-        } s15;
-        struct {                             /* v0.5 */
-            uint32_t magic;
-            int8_t octave;
-            uint8_t eng, rsv[2], preset[2], edited[2];
-            int16_t p[56 + 163];
-        } s7;
-        struct {                             /* v0.4 */
-            uint32_t magic;
-            int8_t octave;
-            uint8_t preset, edited, rsv;
-            int16_t p[56];
-        } s6;
     } set_old_t;
     _Static_assert(sizeof bg_a >= sizeof(set_old_t), "ustawienia: odczyt w pamięci tła");
 #define o (*(set_old_t *)(void *)bg_a)
@@ -4121,7 +3799,6 @@ static void settings_load(void)          /* ustawienia (albo starsze) -> silniki
     uint16_t pr[NENG] = {0}, np[NENG] = {0};
     const int16_t *src[NENG] = {0};
     uint8_t ed[NENG] = {0};
-    int al_mig = 0;                          /* (v0.49) bieżące DCO z MODEL ALPHA -> silnik ALPHA */
     set.magic = SET_MAGIC;
     set.rsv[0] = 18;                         /* numeracja presetów: z WAVE (v0.13: 1), z PHASE (v0.15: 2), USER 128 (3),
                                               * z VCO (v0.22: 4), z SEM (v0.23: 5), z DCO (v0.27: 6), z BIT (v0.42: 7),
@@ -4132,22 +3809,14 @@ static void settings_load(void)          /* ustawienia (albo starsze) -> silniki
     set.octave = 0;
     set.eng = ENG_MOOG;
     int n9 = n == (int)sizeof o.s && o.s.magic == SET_MAGIC;
-    if (n9 || ((n == (int)sizeof o.s24 || n == (int)sizeof o.s23 || n == (int)sizeof o.s19 || n == (int)sizeof o.s17
-                || n == (int)sizeof o.s15 || n == (int)sizeof o.s13) && o.s24.magic == SET_MAGIC_8)) {
-        /* v0.26 albo ("MJB8", 8 miejsc na silniki) v0.24 - v0.25, v0.22 - v0.23, v0.19 - v0.21, v0.17 - v0.18, v0.15 -
-         * v0.16, v0.6 - v0.14 (krótsze: brzmienie, które się nie zmieściło (PHASE do v0.14, VCO do v0.21): np = 0 ->
-         * pierwszy preset; zmieściło się krótsze (PHASE do v0.16, WAVE do v0.18): reszta domyślna) */
-        int32_t np_max = n == (int)sizeof o.s15 ? SET_P_V15 : n == (int)sizeof o.s13 ? SET_P_V13
-                       : (n9 || n == (int)sizeof o.s24 || n == (int)sizeof o.s23) ? SET_P + SET_PX : SET_P;   /* p[] (+ px[]) */
-        int pw = n9 || n == (int)sizeof o.s24 || n == (int)sizeof o.s23 || n == (int)sizeof o.s19;   /* jest pw[] */
-        int32_t ne = n9 ? NENG_MAX : NENG_V8;
-        const uint16_t *opr = n9 ? o.s.preset : o.s24.preset, *onp = n9 ? o.s.np : o.s24.np;
-        const uint8_t *oed = n9 ? o.s.edited : o.s24.edited, rsv = n9 ? o.s.rsv[0] : o.s24.rsv[0];
-        const int16_t *op = n9 ? o.s.p : o.s24.p, *opw = n9 ? o.s.pw : o.s24.pw;   /* (pw[]: v0.19 - v0.23 tu samo) */
-        const int16_t *opx = n9 ? o.s.px : n == (int)sizeof o.s23 ? o.s23.px : o.s24.px;
+    if (n9) {                                /* v0.26+ (1.6.0: tylko ten układ; od v0.90 numeracja presetów 18 — od 1.0.0 innej nie ma) */
+        const int32_t np_max = SET_P + SET_PX, pw = 1, ne = NENG_MAX;   /* p[] + px[], jest pw[] */
+        const uint16_t *opr = o.s.preset, *onp = o.s.np;
+        const uint8_t *oed = o.s.edited;
+        const int16_t *op = o.s.p, *opw = o.s.pw, *opx = o.s.px;
         static int16_t wsrc[WX_SLOT + WX_N];
-        set.octave = n9 ? o.s.octave : o.s24.octave;
-        set.eng = n9 ? o.s.eng : o.s24.eng;
+        set.octave = o.s.octave;
+        set.eng = o.s.eng;
         for (e = 0; e < NENG && e < ne; e++) {   /* (silnik bez miejsca w starym zapisie: pierwszy preset) */
             pr[e] = opr[e];
             ed[e] = oed[e];
@@ -4167,113 +3836,14 @@ static void settings_load(void)          /* ustawienia (albo starsze) -> silniki
                     src[e] = wsrc;
                 }
             }
-            if (pr[e] == 0xFFFFu)
-                continue;
-#pragma push_macro("NMPK")                       /* (v0.90) kroki niżej liczą układ v0.88-v0.89 (po 20 zestawów), na końcu kit90 */
-#pragma push_macro("ND8K")
-#pragma push_macro("ND9K")
-#pragma push_macro("NDUK")
-#undef NMPK
-#undef ND8K
-#undef ND9K
-#undef NDUK
-#define NMPK NKIT_V89
-#define ND8K NKIT_V89
-#define ND9K NKIT_V89
-#define NDUK NKIT_V89
-            if (rsv < 1u && pr[e] >= NFACT_OLD)  /* v0.13: presety WAVE przed USER */
-                pr[e] = (uint16_t)(pr[e] + NWTP);
-            if (rsv < 2u && pr[e] >= NFACT_V13)  /* v0.15: presety PHASE przed USER */
-                pr[e] = (uint16_t)(pr[e] + NZP);
-            if (rsv < 3u && pr[e] >= NFACT_V15 + NUSER_LO)   /* v0.16: banki DX7 za USER 128 */
-                pr[e] = (uint16_t)(pr[e] + NUSER - NUSER_LO);
-            if (rsv < 4u && pr[e] >= NFACT_V15)  /* v0.22: presety VCO przed USER */
-                pr[e] = (uint16_t)(pr[e] + NVP);
-            if (rsv < 5u && pr[e] >= NFACT_V22)  /* v0.23: presety SEM przed USER */
-                pr[e] = (uint16_t)(pr[e] + NSP);
-            if (rsv < 6u && pr[e] >= NFACT_V23)  /* v0.27: presety DCO przed USER */
-                pr[e] = (uint16_t)(pr[e] + NJP);
-            if (rsv < 7u && pr[e] >= NFACT_V27)  /* v0.42: presety BIT przed USER */
-                pr[e] = (uint16_t)(pr[e] + NBTP);
-            if (rsv < 8u && pr[e] >= NFACT_V42)  /* v0.44: presety WEST przed USER */
-                pr[e] = (uint16_t)(pr[e] + NWSP);
-            if (rsv < 9u && pr[e] >= NFACT_V44)  /* v0.49: presety ALPHA przed USER */
-                pr[e] = (uint16_t)(pr[e] + NAP);
-            if (rsv < 10u && pr[e] >= NFACT_V49) /* v0.50: zestawy MORPH przed USER */
-                pr[e] = (uint16_t)(pr[e] + NMPK_V50);
-            if (rsv < 11u && pr[e] >= NFACT_V49 + NMPK_V50)   /* v0.51: nowe zestawy MORPH przed USER */
-                pr[e] = (uint16_t)(pr[e] + NMPK - NMPK_V50);
-            else if (rsv < 17u && rsv >= 11u && pr[e] >= NFACT_V49 + NMPK_V87)   /* v0.88: nowe zestawy MORPH (rsv 11-16 mają ich 15) */
-                pr[e] = (uint16_t)(pr[e] + NMPK - NMPK_V87);
-            if (rsv < 12u && pr[e] >= NFACT_V51) /* v0.52: zestawy 88 i 99 przed USER */
-                pr[e] = (uint16_t)(pr[e] + ND8K_V54 + ND9K_V54);
-            if (rsv < 13u && pr[e] >= NFACT_V51 + ND8K_V54 + ND9K_V54)   /* v0.54: zestawy DUAL przed USER */
-                pr[e] = (uint16_t)(pr[e] + NDUK_V54);
-            if (rsv < 14u) {                     /* v0.56: nowe zestawy 88, 99, DUAL (każdy silnik za swoimi) */
-                if (pr[e] >= NFACT_V51 + ND8K_V54)
-                    pr[e] = (uint16_t)(pr[e] + ND8K - ND8K_V54);
-                if (pr[e] >= NFACT_V51 + ND8K + ND9K_V54)
-                    pr[e] = (uint16_t)(pr[e] + ND9K - ND9K_V54);
-                if (pr[e] >= NFACT_V52 + NDUK_V54)
-                    pr[e] = (uint16_t)(pr[e] + NDUK - NDUK_V54);
-            }
-            if (rsv >= 14u && rsv < 17u) {       /* v0.88: nowe zestawy 88, 99, DUAL (rsv 14-16: układ v0.56, kroki wyżej liczą już nowy) */
-                if (pr[e] >= NFACT_V51 + ND8K_V87)
-                    pr[e] = (uint16_t)(pr[e] + ND8K - ND8K_V87);
-                if (pr[e] >= NFACT_V51 + ND8K + ND9K_V87)
-                    pr[e] = (uint16_t)(pr[e] + ND9K - ND9K_V87);
-                if (pr[e] >= NFACT_V52 + NDUK_V87)
-                    pr[e] = (uint16_t)(pr[e] + NDUK - NDUK_V87);
-            }
-            if (rsv < 15u && pr[e] >= NFACT_V54) /* v0.78: presety PHYS przed USER */
-                pr[e] = (uint16_t)(pr[e] + NPHP);
-            if (rsv < 16u && pr[e] >= NFACT_V78) /* v0.84: presety FORMANT przed USER */
-                pr[e] = (uint16_t)(pr[e] + NFOP);
-#pragma pop_macro("NMPK")
-#pragma pop_macro("ND8K")
-#pragma pop_macro("ND9K")
-#pragma pop_macro("NDUK")
-            if (rsv < 18u)                       /* v0.90: mniej zestawów perkusji */
-                pr[e] = (uint16_t)kit90(pr[e]);
         }
-        al_mig = rsv < 9u && ENG_DCO < ne && src[ENG_DCO] && np[ENG_DCO] > J_MODEL && src[ENG_DCO][J_MODEL] == 2;
-    } else if (n == (int)sizeof o.s7 && o.s7.magic == SET_MAGIC_7) {
-        set.octave = o.s7.octave;
-        set.eng = o.s7.eng;
-        pr[ENG_MOOG] = o.s7.preset[0];       /* v0.5: te same numery (18 fabrycznych, potem USER) */
-        pr[ENG_DX7] = o.s7.preset[1];
-        for (e = 0; e < 2; e++)
-            if (pr[e] >= NFACT_OLD)
-                pr[e] = (uint16_t)(pr[e] + NWTP + NZP + NVP + NSP + NJP + NBTP + NWSP + NAP + NMPK + ND8K + ND9K + NDUK + NPHP + NFOP);
-        ed[ENG_MOOG] = o.s7.edited[0];
-        ed[ENG_DX7] = o.s7.edited[1];
-        np[ENG_MOOG] = 56;
-        np[ENG_DX7] = 163;
-        src[ENG_MOOG] = o.s7.p;
-        src[ENG_DX7] = o.s7.p + 56;
-    } else if (n == (int)sizeof o.s6 && o.s6.magic == SET_MAGIC_6) {
-        set.octave = o.s6.octave;
-        pr[ENG_MOOG] = o.s6.preset < NPRESETS ? o.s6.preset : 0xFFFF;
-        ed[ENG_MOOG] = o.s6.edited;
-        np[ENG_MOOG] = 56;
-        src[ENG_MOOG] = o.s6.p;
     }
     if (set.octave < -3 || set.octave > 3)
         set.octave = 0;
     if (set.eng >= NENG)
         set.eng = ENG_MOOG;
-    if (al_mig) {                            /* (v0.49) efekty i dodatki bieżącego DCO idą z brzmieniem do ALPHA (zanim pętla
-                                              * niżej da DCO jego preset); zapiszą się z najbliższym zapisem ustawień */
-        fx_copy(fxc.cur[ENG_ALPHA], fxc.cur[ENG_DCO]);
-        fx_xcopy(fxc.x[ENG_ALPHA], fxc.x[ENG_DCO]);
-        for (k = 0; k < XT_N; k++)
-            xtc[ENG_ALPHA][k] = xtc[ENG_DCO][k];
-        fx_dirty = xt_dirty = 1;
-    }
     for (e = NENG - 1; e >= 0; e--) {        /* każdy silnik po kolei jako bieżący; na końcu zapisany */
         uint8_t keep = set.eng;
-        if (e == ENG_ALPHA && al_mig)
-            continue;                        /* (niżej) */
         set.eng = (uint8_t)e;
         if (pr[e] < NALL && listed(pr[e], e) && src[e] && np[e] && np[e] <= ENG[e].np) {
             if ((pr[e] >= ID_SYX && pr[e] < ID_CZ) || (pr[e] >= ID_FM1 && pr[e] < ID_XF))
@@ -4293,24 +3863,9 @@ static void settings_load(void)          /* ustawienia (albo starsze) -> silniki
         }
         set.eng = keep;
     }
-    if (al_mig) {                            /* (v0.49) brzmienie DCO z MODEL ALPHA (v0.39 - v0.48) gra teraz w ALPHA: te same
-                                              * parametry; DCO zostaje z tym, co wczytała pętla wyżej (preset albo pierwszy) */
-        int32_t dp = pr[ENG_DCO], own = dp < NALL && listed(dp, ENG_ALPHA);
-        uint8_t keep = set.eng;
-        set.eng = ENG_ALPHA;
-        al_load(0);                          /* (parametry spoza zapisu: domyślne ALPHA) */
-        for (k = 0; k < np[ENG_DCO]; k++)
-            JA[k] = (int16_t)clamp(src[ENG_DCO][k], al_def(k)->lo, al_def(k)->hi);
-        set.preset[ENG_ALPHA] = (uint16_t)(own ? dp : eng_first(ENG_ALPHA));
-        set.edited[ENG_ALPHA] = own ? ed[ENG_DCO] : 1;
-        if (!set.edited[ENG_ALPHA])
-            snap_take(ENG_ALPHA);
-        set.eng = keep == ENG_DCO ? ENG_ALPHA : keep;   /* grał DCO z ALPHA: dalej ten sam dźwięk */
-    }
     set_dirty = 0;
     sync_out();
-    set_saved = fnv((const uint8_t *)&set, sizeof set) ^ (al_mig ? 1u : 0u);   /* jak we flashu: bez zmian nie zapisujemy
-                                              * (v0.49: po przeniesieniu do ALPHA — przy najbliższym zapisie wszystko) */
+    set_saved = fnv((const uint8_t *)&set, sizeof set);   /* jak we flashu: bez zmian nie zapisujemy */
     if ((n2 = (int)set2_build()) != 0)       /* (brak albo inny zapis OBJ_SET2: pierwszy zapis go założy) */
         set2_saved = ok2 ? h2 : fnv((const uint8_t *)&bk, (uint32_t)n2) ^ 1u;   /* (v0.49) skrót tego, co we flashu: silnik
                                               * 9-16 bez zapisu (nowy, przeniesiony, pierwszy preset) zapisze się z resztą */
@@ -4318,7 +3873,7 @@ static void settings_load(void)          /* ustawienia (albo starsze) -> silniki
 #undef o
 }
 
-static void store_load(void)             /* wszystko z pamięci: przy starcie i po przywróceniu kopii zapasowej */
+OGS_UIN static void store_load(void)             /* wszystko z pamięci: przy starcie i po przywróceniu kopii zapasowej */
 {
     int32_t k, e, b, ok;
     for (b = 0; b < NBANK; b++)
@@ -4350,57 +3905,8 @@ static void store_load(void)             /* wszystko z pamięci: przy starcie i 
         if (!ok || k < GLOB_V81 || c->ok != 1u || c->foc >= MT_N) {
             c->ok = 0;
         }
-#pragma push_macro("NMPK")                       /* (v0.90) kroki niżej: układ v0.88-v0.89 (po 20 zestawów), na końcu kit90 */
-#pragma push_macro("ND8K")
-#pragma push_macro("ND9K")
-#pragma push_macro("NDUK")
-#undef NMPK
-#undef ND8K
-#undef ND9K
-#undef NDUK
-#define NMPK NKIT_V89
-#define ND8K NKIT_V89
-#define ND9K NKIT_V89
-#define NDUK NKIT_V89
-        if (c->ok && SCN_RSV(c) < 3u) {              /* (v0.88) zestawy perkusji: numery przed PHYS w układzie sprzed v0.88 */
-            for (e = 0; e < MT_N; e++) {
-                uint32_t q = c->pre[e];
-                if (q == 0xFFFFu)
-                    continue;
-                if (q >= NFACT_V49 + NMPK_V87)
-                    q += NMPK - NMPK_V87;
-                if (q >= NFACT_V51 + ND8K_V87)
-                    q += ND8K - ND8K_V87;
-                if (q >= NFACT_V51 + ND8K + ND9K_V87)
-                    q += ND9K - ND9K_V87;
-                if (q >= NFACT_V52 + NDUK_V87)
-                    q += NDUK - NDUK_V87;
-                c->pre[e] = (uint16_t)q;
-            }
-            glob_dirty = 1;
-        }
-        if (c->ok && SCN_RSV(c) < 1u) {            /* (v0.78) numery presetów sprzed PHYS: USER i banki o NPHP dalej */
-            for (e = 0; e < MT_N; e++)
-                if (c->pre[e] != 0xFFFFu && c->pre[e] >= NFACT_V54)
-                    c->pre[e] = (uint16_t)(c->pre[e] + NPHP);
-            c->rsv = 1;
-            glob_dirty = 1;
-        }
-        if (c->ok && SCN_RSV(c) < 2u) {              /* (v0.84) sprzed FORMANT: USER i banki o NFOP dalej */
-            for (e = 0; e < MT_N; e++)
-                if (c->pre[e] != 0xFFFFu && c->pre[e] >= NFACT_V78)
-                    c->pre[e] = (uint16_t)(c->pre[e] + NFOP);
-            glob_dirty = 1;
-        }
-#pragma pop_macro("NMPK")
-#pragma pop_macro("ND8K")
-#pragma pop_macro("ND9K")
-#pragma pop_macro("NDUK")
-        if (c->ok && SCN_RSV(c) < 4u) {              /* (v0.90) mniej zestawów perkusji */
-            for (e = 0; e < MT_N; e++)
-                c->pre[e] = (uint16_t)kit90(c->pre[e]);
-            glob_dirty = 1;
-        }
+        /* (1.6.0, decyzja użytkownika 2026-11-09) przenumerowanie presetów scen sprzed v0.90 (PHYS v0.78, FORMANT v0.84,
+         * zestawy v0.88 / v0.90) usunięte: miejsce na AUTO; zapisało się przy pierwszym starcie nowszej wersji */
         if (c->ok)
             c->rsv = SCN_NUM;
         if (!ok || k < GLOB_V84)                 /* (v0.82) zapis bez wysyłek w scenach: jak presety */
@@ -4467,7 +3973,6 @@ OGS_UI void app_init(void)
     for (e = 0; e < NENG; e++)
         if (ENG[e].init)
             ENG[e].init();
-    migrate();
     for (k = 0; k < (int32_t)SC_LEN; k++)
         scope[k] = 0;
     mt_tdef();
@@ -5340,6 +4845,8 @@ __attribute__((used, visibility("default"))) int32_t ogs_sqn(int32_t i, int32_t 
     return w == 0 ? q->t : w == 1 ? q->len : w == 2 ? q->note : w == 3 ? q->vel : w == 4 ? q->fl : w == 6 ? sqp.x[(uint32_t)i % SQ_NN] : q->chance;   /* (v0.92) 6: x */
 }
 __attribute__((used, visibility("default"))) const uint8_t *ogs_sq_flash(int32_t pat) { return plat_data(sq_off(pat)); }
+static uint8_t web_dx_out[164];                  /* (1.6.0) testy: ostatnia ramka SEND AS DX7 (na PC plat_sysex_send nic nie wysyła) */
+__attribute__((used, visibility("default"))) const uint8_t *ogs_dx_out(void) { return web_dx_out; }
 __attribute__((used, visibility("default"))) const int16_t *ogs_wt_frame(int32_t v, int32_t o) { return wd[v & 7].buf[o & 1]; }
 __attribute__((used, visibility("default"))) int32_t ogs_wt_info(int32_t v, int32_t w) { const wtvoice_t *d = &wd[v & 7]; return w == 0 ? d->nuni[0] : w == 1 ? (int32_t)d->inc[0][0] : w == 2 ? d->key[0].hmax : w == 3 ? d->key[0].pos : w == 4 ? (int32_t)(d->gl[0][0] * 1000) : w == 5 ? wc[v & 7].on : (int32_t)(d->amp * 1000); }
 #pragma pop_macro("__attribute__")
@@ -5449,7 +4956,7 @@ static void mod_knob(uint32_t k, int32_t e);
 static void mod_select(int32_t e);
 static void mt_step(int32_t d);
 static void mt_scene_load(void);
-static void mt_mute(void);
+static void mt_mute(int32_t t);
 static void mt_engine_set(int32_t t, int32_t e);
 static void mtl_open(void);
 static void mtl_ok(void);
@@ -5536,6 +5043,7 @@ static struct {
     uint32_t st_mine[(SQ_NN + 31) / 32]; /* wpis krokowy: dodane w tym akordzie (nie usuwać) */
     uint8_t sqt_cur, sqt_sure;           /* okno narzędzi wzoru */
     uint8_t sqt_from;                    /* (v0.66.2) MOVE HERE FROM: ścieżka, z której nuty (gałka) */
+    uint8_t sqt_src;                     /* (1.6.0, P62) COPY PATTERN / TRACK FROM: wzór, z którego (gałka) */
     int16_t sq_note;                     /* NOTES: podświetlona nuta (jedna, jak w Melodee), -1 pusty krok */
     uint8_t sq_rng;                      /* NOTES: zaznaczony zakres (SEL + SELECT, jak w FL): edycja i karta na wszystkich */
     uint32_t sq_ra, sq_re;               /* zakres: komórka startu i końca (tick w gridzie, w obie strony) */
@@ -5643,6 +5151,7 @@ OGS_UI static void set_param(int32_t id, int32_t v)
     const pdef_t *d = E->def(id);
     int32_t i;
     v = clamp(v, d->lo, d->hi);
+    ap_touch(id);                            /* (1.6.0) AUTO: linia na tym parametrze czeka (dotyk) */
     if (v == pget(id))
         return;
     ui.redraw = 1;
@@ -6810,10 +6319,11 @@ static void fx_mode(void)                /* SEL krótko: włącza / wyłącza (r
  * (v0.90, decyzje użytkownika 2026-11-03; docs/sekwencer.md na górze) SEL + OP1-4 = ścieżka (było SEQ + OP), NOTES: świecą klawisze nut
  * kroku pod kursorem, SEL + K3 długość co tick, SEL + K4 UNDO / REDO, SEL + ALGO długość co GRID,
  * K1 znowu po wysokości (ta sama wysokość: od lewej), VEL RANDOM i QUANTIZE w karcie nuty, sceny MULTI: HOME na głównym ekranie. */
-enum { SQ_NOTES, SQ_PATTERN, SQ_FEEL, SQ_RACK, SQ_OPT, SQ_REC, SQ_NPG };   /* (v0.57) RACK: tylko silniki perkusji; (v0.88) OPT: strona ustawień;
+enum { SQ_NOTES, SQ_PATTERN, SQ_FEEL, SQ_RACK, SQ_OPT, SQ_REC, SQ_AUTO, SQ_NPG };   /* (1.6.0) AUTO: automatyka (ogs_auto.c) */
+   /* (v0.57) RACK: tylko silniki perkusji; (v0.88) OPT: strona ustawień;
                                                                      * (v0.92) REC: strona nagrywania (REC trzymany); (v1.1.0 - v1.1.2
                                                                      * za RECORD strona KEY; v1.2.0: KEY w ustawieniach ARP) */
-static const char *const SQ_PGNAME[SQ_NPG] = {"NOTES", "PATTERN", "FEEL", "RACK", "OPTIONS", "RECORD"};
+static const char *const SQ_PGNAME[SQ_NPG] = {"NOTES", "PATTERN", "FEEL", "RACK", "OPTIONS", "RECORD", "AUTO"};
 /* (v1.1.0, P14) tonacja: KEY, SCALE (OFF = bez tonacji, jak dotąd); (v1.2.0) w ustawieniach ARP (ARDEF) */
 static const char *const L_PC12[12] = {"C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"};
 static const char *const L_SCALE[12] = {"OFF", "MAJOR", "MINOR", "DORIAN", "PHRYGIAN", "LYDIAN", "MIXOLYDIAN", "HARM MINOR",
@@ -6865,9 +6375,10 @@ static const pdef_t SQDEF[2][4] = {
     {{"HUMANIZE", 0, 100, 0, F_NUM, 0}, {"VEL RANDOM", 0, 100, 0, F_NUM, 0}, {"GATE", 25, 200, 100, F_NUM, 0},
      {"CLICK", 0, 2, 0, F_LIST, LI(L_CLICK)}},
 };
-enum { ST_QUANT, ST_DOUBLE, ST_CLEAR, ST_CLRALL, ST_MOVE, ST_ZINV, ST_K1INV, NST };   /* (v0.66.1) CLEAR: wybrana ścieżka */
+enum { ST_QUANT, ST_DOUBLE, ST_CLEAR, ST_CLRALL, ST_MOVE, ST_CPAT, ST_CTRK, ST_ZINV, ST_K1INV, NST };   /* (v0.66.1) CLEAR: wybrana
+                                                                                                    * ścieżka; (1.6.0, P62) COPY */
 static const char *const ST_NAME[NST] = {"QUANTIZE NOTES", "DOUBLE LENGTH", "CLEAR PATTERN", "CLEAR ALL TRACKS", "MOVE HERE FROM",
-                                         "ZOOM (SEL + K1)",
+                                         "COPY PATTERN FROM", "COPY TRACK FROM", "ZOOM (SEL + K1)",
                                          "K1 NOTES / SCROLL"};
 
 static uint32_t sq_sel[(SQ_NN + 31) / 32];       /* zaznaczone nuty (NOTES): z komórki kursora */
@@ -6941,10 +6452,12 @@ static void sq_changed(void)                     /* wzór zmieniony: zapis sam w
  * Przed zmianą nuty i: sq_u(i) zapisuje jej stan sprzed (raz na krok); krok = jedna czynność (sq_um: przycisk, albo kręcenie tą samą
  * gałką na tej samej nucie bez przerwy 1,5 s). Cofanie zamienia wpisy z nutami (wpis trzyma potem stan „po”: ponawianie).
  * Pełny dziennik: najstarsze kroki wypadają; krok większy niż cały dziennik (np. CLEAR dużego wzoru) nie da się cofnąć.
- * Inny wzór: dziennik od zera. SU_HDR = długość wzoru (bars w t, xs w len). */
+ * Inny wzór: dziennik od zera. SU_HDR = długość wzoru (bars w t, xs w len). (1.6.0) SU_RAW, SU_RAW + 1 = bajty 4-11 i 12-19 nagłówka
+ * wzoru (tempo, FEEL, długość, MUTE / SOLO RACK: COPY PATTERN FROM), po 16 bitów (tempo w przerwaniu zawsze całe). */
 #define SU_N 224                                 /* 224 x 12 B (v0.92: + x nuty) */
 #define SU_START 0x8000u
 #define SU_HDR 0x7FFFu
+#define SU_RAW 0x7FFDu
 static struct {
     uint16_t i;
     sqn_t o;
@@ -6965,6 +6478,17 @@ static void sq_um(uint32_t key)                  /* początek czynności (0: zaw
     su_at = now;
 }
 static void su_clear(void) { su_n = su_pos = 0; su_new = 1; }
+static void su_hraw(uint32_t k, int swap)        /* (1.6.0) wpis k (SU_RAW..) <-> 8 B nagłówka wzoru; swap 0: tylko zapis do wpisu */
+{
+    uint16_t *h = (uint16_t *)(void *)&sqp + 2u + ((su_e[k].i & ~SU_START) - SU_RAW) * 4u, *o = (uint16_t *)(void *)&su_e[k].o;
+    uint32_t j;
+    for (j = 0; j < 4u; j++) {
+        const uint16_t a = h[j];
+        if (swap)
+            h[j] = o[j];
+        o[j] = a;
+    }
+}
 
 OGS_UI static void sq_u(uint32_t i)                     /* nuta i (albo SU_HDR) zaraz się zmieni */
 {
@@ -7000,6 +6524,8 @@ OGS_UI static void sq_u(uint32_t i)                     /* nuta i (albo SU_HDR) 
     if (i == SU_HDR) {
         su_e[su_n].o.t = sqp.bars;
         su_e[su_n].o.len = sqp.xs;
+    } else if (i >= SU_RAW) {
+        su_hraw(su_n, 0);
     } else {
         su_e[su_n].o = sqp.n[i];
         su_e[su_n].x = sqp.x[i];
@@ -7018,6 +6544,8 @@ OGS_UI static void su_swap(uint32_t k)
         sqp.xs = (uint8_t)su_e[k].o.len;
         su_e[k].o.t = b;
         su_e[k].o.len = x;
+    } else if (i >= SU_RAW) {
+        su_hraw(k, 1);
     } else {
         const sqn_t c = sqp.n[i];
         const uint8_t x = sqp.x[i];
@@ -7546,7 +7074,8 @@ static int32_t sq_val(int32_t pg, int32_t k)     /* PATTERN / FEEL: wartość po
     return k == 0 ? sqp.human : k == 1 ? sqp.vrand : k == 2 ? sqp.gate : sqp.click;
 }
 
-static int sq_is_view(void) { return ui.sq_pg == SQ_NOTES || ui.sq_pg == SQ_RACK; }
+static int sq_is_view(void) { return ui.sq_pg == SQ_NOTES || ui.sq_pg == SQ_RACK || ui.sq_pg == SQ_AUTO; }
+static int sq_roll(void) { return ui.sq_pg == SQ_NOTES || ui.sq_pg == SQ_AUTO; }   /* (1.6.0) piano roll: NOTES i AUTO */
 static int sq_in_set(void) { return ui.page == V_SEQ && !sq_is_view(); }   /* w ustawieniach SEQ (v0.90: sceny już nie tu) */
 
 static uint32_t sq_hint_until;
@@ -7558,8 +7087,8 @@ OGS_UI static void sq_open(uint32_t pg)                 /* strona sekcji SEQ */
     ui.sq_pg = (uint8_t)pg;
     if (pg == SQ_PATTERN || pg == SQ_FEEL || pg == SQ_OPT || pg == SQ_REC)
         ui.sq_set = (uint8_t)pg;
-    else if (pg == SQ_NOTES || pg == SQ_RACK)
-        ui.sq_rk = (uint8_t)(pg == SQ_RACK);
+    else if (pg == SQ_NOTES || pg == SQ_RACK || pg == SQ_AUTO)
+        ui.sq_rk = (uint8_t)(pg == SQ_RACK ? 1 : pg == SQ_AUTO ? 2 : 0);   /* (1.6.0) 2: AUTO */
     pt_rescan();                                 /* (v0.90) PATTERN: puste wzory od nowa */
     ui.page = V_SEQ;
     ui.knob = -1;
@@ -7570,7 +7099,7 @@ OGS_UI static void sq_open(uint32_t pg)                 /* strona sekcji SEQ */
 }
 static void sq_view_back(void)                   /* z ustawień: widok, z którego przyszliśmy (RACK / NOTES) */
 {
-    sq_open(ENG_GRP[set.eng] == EG_DRUM && ui.sq_rk ? SQ_RACK : SQ_NOTES);
+    sq_open(ui.sq_rk == 2 ? SQ_AUTO : ENG_GRP[set.eng] == EG_DRUM && ui.sq_rk ? SQ_RACK : SQ_NOTES);
 }
 static void go_seq(void)                         /* SEQ krótko: wejście; w sekcji RACK <-> NOTES (bez perkusji nic); (v0.89) w ustawieniach: widok */
 {
@@ -7579,8 +7108,8 @@ static void go_seq(void)                         /* SEQ krótko: wejście; w sek
         sq_view_back();
     else if (ui.page != V_SEQ)
         sq_open(drum ? SQ_RACK : SQ_NOTES);
-    else if (drum)
-        sq_open(ui.sq_pg == SQ_RACK ? SQ_NOTES : SQ_RACK);
+    else                                         /* (1.6.0, plan AUTO) perkusja RACK -> NOTES -> AUTO -> RACK, reszta NOTES <-> AUTO */
+        sq_open(ui.sq_pg == SQ_RACK ? SQ_NOTES : ui.sq_pg == SQ_NOTES ? SQ_AUTO : drum ? SQ_RACK : SQ_NOTES);
 }
 static void seq_hold(void)                       /* SEQ trzymany: ustawienia; w nich z powrotem */
 {
@@ -7619,7 +7148,7 @@ static void sq_track_go(int32_t t)               /* (v0.66) OP1-4 w MULTI: ście
         return;
     }
     mt_focus_go(t);
-    sq_open(ENG_GRP[e] == EG_DRUM ? SQ_RACK : SQ_NOTES);   /* perkusja w RACK, reszta w NOTES; karta nuty, narzędzia, ustawienia: zamknięte */
+    sq_open(ui.page == V_SEQ && ui.sq_pg == SQ_AUTO ? SQ_AUTO : ENG_GRP[e] == EG_DRUM ? SQ_RACK : SQ_NOTES);   /* (1.6.0) AUTO zostaje */   /* perkusja w RACK, reszta w NOTES; karta nuty, narzędzia, ustawienia: zamknięte */
     ui.sq_rng = 0;
     ui.sq_note = sq_cell_note(0);
     sq_pick(0);
@@ -8064,6 +7593,10 @@ static void sq_knob(uint32_t k, int32_t e)
         rk_knob(k, e);
         return;
     }
+    if (ui.sq_pg == SQ_AUTO) {                   /* (1.6.0) AUTO */
+        ap_knob(k, e);
+        return;
+    }
     if (ui.sq_pg == SQ_FEEL && ui.sel_hold && k == 0) {   /* (v0.57) FEEL: SEL + K1 = RANDOM ROLLS */
         char t[8];
         ui.sel_used = 1;
@@ -8378,6 +7911,14 @@ static void sq_sel_short(void)                   /* SEL krótko: NOTES = GLIDE, 
         ui.sqt_cur = 0;
         ui.sqt_sure = 0;
         ui.sqt_from = (uint8_t)(sq_utrk() == 0 ? 1 : 0);   /* MOVE: z T1 (stare wzory), na T1 z T2 */
+        ui.sqt_src = (uint8_t)(sqg.pat ? sqg.pat - 1u : 1u);   /* (1.6.0) COPY: z poprzedniego wzoru (P1: z P2) */
+        ui.redraw = 1;
+        return;
+    }
+    if (ui.sq_pg == SQ_AUTO) {                   /* (1.6.0) AUTO: karta (PARAMETER, MODE, DELETE, CLEAR LANE) */
+        ui.page = V_SQN;
+        ui.sqn_row = 0;
+        ui.knob = -1;
         ui.redraw = 1;
         return;
     }
@@ -8399,9 +7940,96 @@ static void sq_sel_short(void)                   /* SEL krótko: NOTES = GLIDE, 
     ui.redraw = 1;
 }
 
+/* (1.6.0, K65 / P62, decyzja użytkownika 2026-11-09: „i tak, i tak”) COPY PATTERN FROM: cały wzór src na bieżący (nuty, długość, tempo,
+ * FEEL, MUTE / SOLO RACK — tak samo, jak gra src); COPY TRACK FROM: tylko nuty edytowanej ścieżki z tej samej ścieżki src (wolne
+ * miejsca; reszta wzoru bez zmian). Z flasha: inne wzory są tam aktualne (zmiana wzoru zapisuje bieżący). Nadpisuje nuty: najpierw
+ * SEL AGAIN. UNDO jak każda zmiana nut (nagłówek: SU_RAW). */
+OGS_UIN static void sqt_copy(int all)
+{
+    const uint8_t *s = plat_data(sq_off(ui.sqt_src));
+    const sqpat_t *q = (const sqpat_t *)(const void *)s;
+    const int32_t ut = sq_utrk();
+    const uint32_t t = (uint32_t)(ut < 0 ? 0 : ut), X0 = (uint32_t)__builtin_offsetof(sqpat_t, x);
+    uint32_t i, j = 0, xv, full = 0;
+    char m[4] = {'P', (char)('0' + (ui.sqt_src + 1) / 10), (char)('0' + (ui.sqt_src + 1) % 10), 0};
+    if (ui.sqt_src == sqg.pat) {
+        app_say(m, "IS THIS PATTERN");
+        return;
+    }
+    if (!s || q->magic != SQ_MAGIC) {
+        app_say(m, "IS EMPTY");
+        return;
+    }
+    if (!ui.sqt_sure) {                          /* nadpisze nuty: najpierw SEL AGAIN (jak CLEAR) */
+        for (i = 0; i < SQ_NN && !(sqp.n[i].vel && (all || SQN_TRK(&sqp.n[i]) == t)); i++)
+            ;
+        if (i < SQ_NN) {
+            ui.sqt_sure = 1;
+            ui.redraw = 1;
+            return;
+        }
+    }
+    xv = q->xv;
+    sq_um(0);
+    sq.hold = 1;
+    if (all) {                                   /* nagłówek: przez kopię na stosie i sqp_fix — przerwanie nigdy nie widzi złej długości */
+        uint32_t hb[8];
+        uint16_t *h = (uint16_t *)(void *)hb;
+        for (i = 0; i < 16u; i++)
+            h[i] = ((const uint16_t *)(const void *)s)[i];
+        sqp_fix((sqpat_t *)(void *)hb, xv);
+        sq_u(SU_RAW);
+        sq_u(SU_RAW + 1u);
+        for (i = 2; i < 10u; i++)
+            ((uint16_t *)(void *)&sqp)[i] = h[i];
+    }
+    for (i = 0; i < SQ_NN; i++)                  /* nuty, które znikną (wzór: wszystkie, ścieżka: jej) */
+        if (sqp.n[i].vel && (all || SQN_TRK(&sqp.n[i]) == t)) {
+            sq_u(i);
+            sqp.n[i].vel = 0;
+        }
+    for (i = 0; i < SQ_NN; i++) {
+        const sqn_t c = q->n[i];
+        const uint32_t o = X0 + i;
+        if (!c.vel || c.vel > 127u || c.note > 127u || (!all && SQN_TRK(&c) != t))
+            continue;
+        if (all) {                               /* wzór: to samo miejsce */
+            j = i;
+        } else {                                 /* ścieżka: wolne miejsce (inne ścieżki mają swoje) */
+            while (j < SQ_NN && sqp.n[j].vel)
+                j++;
+            if (j == SQ_NN) {
+                full = 1;
+                break;
+            }
+        }
+        sq_u(j);
+        sqp.n[j] = c;
+        sqp.x[j] = xv == 1u ? s[o < SQ_P1 ? o : o - SQ_P1 + SQ_P2] : 0u;   /* (v0.92) x za rekordem loadera */
+    }
+    sq.hold = 0;
+    if (all)                                     /* (1.6.0) AUTO: linie wzoru src (krok UNDO AUTO) */
+        ap_copy((int32_t)ui.sqt_src);
+    ui.sq_rng = 0;
+    if (ui.sq_cur >= sq_len())
+        ui.sq_cur = 0;
+    if (ui.rk_step >= sq_len() / SQ_STEP)
+        ui.rk_step = 0;
+    sq_ac_new();
+    sq_changed();
+    app_say(full ? "PATTERN FULL" : all ? "PATTERN COPIED" : "TRACK COPIED", m);
+    ui.page = V_SEQ;
+    sq_pick(0);
+    ui.redraw = 1;
+}
+
 static void sqt_ok(void)                         /* okno narzędzi wzoru: SEL robi (CLEAR: drugi raz) */
 {
     uint32_t i, L = sq_len();
+    if (ui.sqt_cur == ST_CPAT || ui.sqt_cur == ST_CTRK) {   /* (1.6.0) COPY */
+        sqt_copy(ui.sqt_cur == ST_CPAT);
+        return;
+    }
     if (ui.sqt_cur == ST_ZINV || ui.sqt_cur == ST_K1INV) {   /* kierunek gałki: przełącza, okno zostaje */
         int32_t g = ui.sqt_cur == ST_ZINV ? G_SQZINV : G_SQK1INV;
         glob.g[g] = (int16_t)!glob.g[g];
@@ -8971,6 +8599,10 @@ OGS_UI static void knob_turn(uint32_t k, int32_t e)
         if (ui.sqt_cur == ST_MOVE) {
             ui.sqt_from = (uint8_t)clamp((int32_t)ui.sqt_from + (e > 0 ? 1 : -1), 0, MT_N - 1);
             ui.redraw = 1;
+        } else if (ui.sqt_cur == ST_CPAT || ui.sqt_cur == ST_CTRK) {   /* (1.6.0) COPY: z którego wzoru */
+            ui.sqt_src = (uint8_t)clamp((int32_t)ui.sqt_src + (e > 0 ? 1 : -1), 0, SQ_NPAT - 1);
+            ui.sqt_sure = 0;
+            ui.redraw = 1;
         }
         return;
     }
@@ -9003,7 +8635,10 @@ OGS_UI static void knob_turn(uint32_t k, int32_t e)
         return;
     }
     if (ui.page == V_SQN) {                  /* karta nuty: każda gałka zmienia wiersz */
-        sqn_turn(e);
+        if (ui.sq_pg == SQ_AUTO)             /* (1.6.0) karta AUTO */
+            ap_card_turn(e);
+        else
+            sqn_turn(e);
         return;
     }
     if (ui.page <= V_SAVE)                   /* w oknach gałki nic nie robią (wybór: SELECT) */
@@ -9190,9 +8825,9 @@ static void algo_turn(int32_t e)         /* ALGO: parametr silnika (MOOG: CUTOFF
 /* podpisane czarne klawisze FM1 (OP1..OP6, PITCH, GLOBAL, MONO, POLY): skróty z trzymanym SEL */
 static const uint8_t LABEL_KEY[NLABEL] = {1, 3, 5, 8, 10, 13, 15, 17, 20, 22, 25};   /* klawisz 0 = F3; (v1.3.1) 25 = F#5 */
 /* (v1.3.1, decyzja użytkownika 2026-11-06) F#5 (czarny bez nadruku) = obwiednia głośności w każdym silniku, druga strona przy
- * kolejnym naciśnięciu; FM6 bez (każdy OP ma swoją). Numery stron jak w tabelach silników (test tools/v131_test.mjs: nazwy). */
+ * kolejnym naciśnięciu; FM6 (1.6.1): AMP ENV (nakładka na nośne). Numery stron jak w tabelach silników (test tools/v131_test.mjs: nazwy). */
 static const int8_t AENV_PG[NENG][2] = {
-    [ENG_MOOG] = {9, -1}, [ENG_DX7] = {-1, -1}, [ENG_WT] = {8, -1}, [ENG_PD] = {7, 9},   /* AMP ENV, -, AMP ENV, DCA 1 > DCA 2 */
+    [ENG_MOOG] = {9, -1}, [ENG_DX7] = {XP_AENV, -1}, [ENG_WT] = {8, -1}, [ENG_PD] = {7, 9},   /* AMP ENV, AMP ENV, AMP ENV, DCA 1 > DCA 2 */
     [ENG_VCO] = {6, -1}, [ENG_SEM] = {6, -1}, [ENG_DCO] = {6, -1}, [ENG_BIT] = {7, -1},   /* AMP ENV, AMP ENV, AMP, AMP ENV */
     [ENG_WEST] = {7, 11}, [ENG_ALPHA] = {6, -1}, [ENG_MORPH] = {5, -1}, [ENG_88] = {3, -1},   /* ENV 1 > ENV 2, AMP, ENV, ENV */
     [ENG_99] = {3, -1}, [ENG_DUAL] = {5, 6}, [ENG_PHYS] = {4, -1}, [ENG_FORMANT] = {7, -1},   /* ENV, ENV 1 > ENV 2, AMP ENV, AMP ENV */
@@ -9407,12 +9042,58 @@ static void user_del(void)
     app_say("DELETED", t);
 }
 
+/* (1.6.0, K65 / P64, decyzja użytkownika 2026-11-09) SAVE > SEND AS DX7: brzmienie FM6 jako SysEx DX7 przez USB (jedno brzmienie, VCED:
+ * F0 43 0n 00 01 1B, 155 B, suma kontrolna, F7) — Volca FM, DX7, biblioteki brzmień. FM6 trzyma głos DX7 w tym samym układzie (dx_vced),
+ * więc pola 1:1; operator wyłączony (OGS OP OFF) = LEVEL 0 (brzmi tak samo); (1.6.1) AMP ENV wpisana w obwiednie nośnych (dx_aenv,
+ * tak jak gra). Dodatki OGS (fala operatora inna niż SINE, BRIGHT,
+ * OP VOLUME, UNISON, FILTER, VINTAGE, matryca, efekty) w DX7 nie istnieją: przepadają. Nazwa: 10 pierwszych znaków presetu. Kanał: GLO MIDI. */
+OGS_UIN static void dx_send(void)
+{
+    uint8_t f[163];
+    const int16_t *X = E->p;
+    char nm[24];
+    uint32_t n, k, s = 0;
+    f[0] = 0xF0;
+    f[1] = 0x43;
+    f[2] = (uint8_t)(glob.g[G_MIDICH] ? glob.g[G_MIDICH] - 1 : 0);
+    f[3] = 0x00;
+    f[4] = 0x01;
+    f[5] = 0x1B;
+    for (n = 0; n < 6u; n++)                     /* w VCED OP6 pierwszy */
+        for (k = 0; k < NVCED_OP; k++)
+            f[6u + (5u - n) * NVCED_OP + k] = (uint8_t)(k == O_OL && !X[XO(n, O_ON)] ? 0
+                                                        : (k <= O_L4 ? dx_aenv((int32_t)n, (int32_t)k) : X[XO(n, k)]) & 0x7F);
+    for (k = 0; k < NVCED_G; k++)
+        f[6u + 6u * NVCED_OP + k] = (uint8_t)(X[X_PR1 + k] & 0x7F);
+    preset_name(CUR, nm);
+    for (k = n = 0; k < 10u; k++) {
+        const char c = nm[n] ? nm[n++] : ' ';
+        f[6u + 6u * NVCED_OP + NVCED_G + k] = (uint8_t)(c < ' ' || c > '~' ? ' ' : c);
+    }
+    for (k = 6; k < 161u; k++)
+        s += f[k];
+    f[161] = (uint8_t)(-s & 0x7Fu);
+    f[162] = 0xF7;
+    plat_sysex_send(f, sizeof f);
+#ifdef PLAT_WEB
+    for (k = 0; k < sizeof f; k++)
+        web_dx_out[k] = f[k];
+#endif
+    app_say("SENT TO USB", "AS DX7 VOICE");
+}
+_Static_assert(6 * NVCED_OP + NVCED_G + 10 == 155, "VCED: 155 B");
+static uint32_t save_n(void) { return set.eng == ENG_DX7 ? 3u : 2u; }     /* (1.6.0) okno SAVE: OVERWRITE, NEW PRESET, (FM6) SEND AS DX7 */
+
 static void save_ok(void)               /* SEL w oknach: zatwierdza (HOME anuluje) */
 {
     if (ui.page == V_NAME) {
         ui.page = ui.save_back;
         ui.redraw = 1;
         save(ui.save_id, ui.name);
+    } else if (ui.page == V_SAVE && ui.save_new == 2u) {   /* (1.6.0) FM6: SEND AS DX7, okno się zamyka */
+        dx_send();
+        ui.page = ui.save_back;
+        ui.redraw = 1;
     } else if (ui.page == V_SAVE) {
         name_start(ui.save_new ? free_slot() : CUR);
     } else if (ui.page == V_ALLP || ui.page == V_ENGP) {
@@ -9447,7 +9128,10 @@ static void save_ok(void)               /* SEL w oknach: zatwierdza (HOME anuluj
     } else if (ui.page == V_SQT) {
         sqt_ok();
     } else if (ui.page == V_SQN) {
-        sqn_ok();
+        if (ui.sq_pg == SQ_AUTO)                 /* (1.6.0) karta AUTO */
+            ap_card_ok();
+        else
+            sqn_ok();
     }
 }
 
@@ -9466,7 +9150,8 @@ static void save_key(void)
     glob_commit();
     ui.knob = -1;
     ui.quick = 0;
-    if (is_init(CUR) || CUR >= ID_SYX) {     /* INIT i brzmienia z banków: zawsze nowy USER */
+    if (is_init(CUR) || CUR >= ID_SYX) {     /* INIT i brzmienia z banków: zawsze nowy USER (1.6.0: też w FM6 — SAVE, SEL jak
+                                              * dawniej; SEND AS DX7 w oknie, gdy się pokazuje: fabryczne i USER) */
         name_start(free_slot());
         return;
     }
@@ -9543,7 +9228,7 @@ static void sel_cycle(void)              /* SEL: opcja strony w pętli (FILTER: 
         if (glob.g[G_MT0 + mt_at_cur()] >= NENG)
             mtl_open();
         else
-            mt_mute();
+            mt_mute(mt_at_cur());
         return;
     }
     if (ui.page == V_FX) {
@@ -9577,7 +9262,7 @@ static void sel_cycle(void)              /* SEL: opcja strony w pętli (FILTER: 
     app_say(d->name, t);
 }
 
-static void preset_turn(int32_t e, int all)   /* PRESETS: w silniku; all (HOME trzymany / okno): wszystkie */
+OGS_UI static void preset_turn(int32_t e, int all)   /* PRESETS: w silniku; all (HOME trzymany / okno): wszystkie */
 {
     if (mt_ui())                             /* (v0.64) MULTI: bez ALL PRESETS (tylko silniki ścieżek) */
         all = 0;
@@ -10214,9 +9899,8 @@ static void mt_knob(uint32_t k, int32_t e)   /* (v0.82) K1-K4 na HOME w MULTI: V
         int_text(v, x, 0);
     app_say(h, x);
 }
-static void mt_mute(void)                /* (v0.82) SEL na HOME w MULTI: MUTE wybranej ścieżki */
+static void mt_mute(int32_t t)           /* (v0.82) SEL na HOME w MULTI: MUTE wybranej ścieżki; (1.6.0, P63) SEQ trzymany + OP1-4: ścieżki t */
 {
-    const int32_t t = mt_at_cur();
     char h[4] = {'T', (char)('1' + t), 0, 0};
     if (glob.g[G_MT0 + t] >= NENG)
         return;
@@ -10503,7 +10187,7 @@ static int32_t mod_amt0(void)            /* matryca (WAVE, PHASE): ilość slotu
 {
     return set.eng == ENG_WT ? wt_row(0) + 2 : set.eng == ENG_PD ? pd_row(0) + 2 : -1;
 }
-static const char *mod_name(int32_t j)   /* nazwa celu: matryca — z listy DEST (A POS, B POS ...), stałe — ilość bez „> ” */
+OGS_UI static const char *mod_name(int32_t j)   /* nazwa celu: matryca — z listy DEST (A POS, B POS ...), stałe — ilość bez „> ” */
 {
     int32_t a0 = mod_amt0(), a;
     const char *nm;
@@ -10727,6 +10411,14 @@ OGS_UI static void input(void)
             sq_track_go(key_label(k) - K_OP1);
             continue;
         }
+        if (ui.grp_hold == B_SEQ + 1u && mt_ui() && (keys & bit) && !(ui.keys & bit)
+            && key_label(k) >= K_OP1 && key_label(k) <= K_OP4) {   /* (1.6.0, K65 / P63) SEQ trzymany + OP1-4: MUTE T1-T4 (bez nuty;
+                                                                    * SEQ nie otwiera już ustawień ani strony przy puszczeniu) */
+            eaten |= bit;
+            ui.grp_done = 1;
+            mt_mute(key_label(k) - K_OP1);
+            continue;
+        }
         if ((bit & gk) && (keys & bit) && !(ui.keys & bit)) {   /* (v0.65) LFO / ENV trzymany + OP: strona MOD */
             eaten |= bit;
             ui.gest_src = (uint8_t)((ui.gest_src & 0xF0u) | (uint32_t)key_label(k));
@@ -10936,7 +10628,8 @@ OGS_UI static void input(void)
                 ui.pf_at = plat_ms();
             }
             break;
-        case B_SEQ:                          /* (v0.88) przy puszczeniu: go_seq; trzymany: seq_hold; (v0.66) trzymany + OP1-4 w MULTI = ścieżka */
+        case B_SEQ:                          /* (v0.88) przy puszczeniu: go_seq; trzymany 0,7 s: seq_hold; (1.6.0) trzymany + OP1-4 w MULTI =
+                                              * MUTE ścieżki (v0.66-v0.89: ścieżka, od v0.90 SEL + OP) */
             if (ui.page >= V_GLO || PANEL_PAGE(ui.page) || ui.page == V_SQT || ui.page == V_SQN || ui.page == V_SCN) {
                 ui.grp_hold = (uint8_t)(k + 1u);
                 ui.grp_done = 0;
@@ -10949,7 +10642,7 @@ OGS_UI static void input(void)
             ui.arp_at = plat_ms();
             break;
         case B_PLAY:                         /* NOTES (zatrzymany): krótko = od kursora, trzymany = od początku */
-            if (!sq.play && ((ui.page == V_SEQ && ui.sq_pg == SQ_NOTES) || ui.page == V_SQN)) {
+            if (!sq.play && ((ui.page == V_SEQ && sq_roll()) || ui.page == V_SQN)) {
                 ui.play_hold = 1;
                 ui.play_at = plat_ms();
             } else {
@@ -11010,16 +10703,16 @@ OGS_UI static void input(void)
                 } else if (ui.sq_pg == SQ_RACK) {   /* (v0.57) RACK: wiersz (dźwięk) */
                     ui.rk_row = (uint8_t)clamp((int32_t)ui.rk_row + (e > 0 ? 1 : -1), 0, 15);
                     rk_view();
-                } else if (ui.sq_pg == SQ_NOTES && ui.sel_hold)
+                } else if (sq_roll() && ui.sel_hold)
                     sq_range(e);
-                else if (ui.sq_pg == SQ_NOTES)
+                else if (sq_roll())
                     sq_cursor((int32_t)ui.sq_cur + e * (int32_t)sq_grid());
                 else                             /* (v0.88) ustawienia SEQ: strony */
                     sq_set_turn(e);
                 continue;
             }
             if (ui.page == V_SQN) {          /* karta nuty: wiersz */
-                ui.sqn_row = (uint8_t)clamp((int32_t)ui.sqn_row + e, 0, NSN - 1);
+                ui.sqn_row = (uint8_t)clamp((int32_t)ui.sqn_row + e, 0, ui.sq_pg == SQ_AUTO ? 3 : NSN - 1);   /* (1.6.0) AUTO: 4 */
                 ui.redraw = 1;
                 continue;
             }
@@ -11084,8 +10777,9 @@ OGS_UI static void input(void)
                 name_char(e);
                 continue;
             }
-            if (ui.page == V_SAVE) {         /* okno SAVE: SELECT przełącza NADPISZ / NOWY */
-                ui.save_new ^= 1u;
+            if (ui.page == V_SAVE) {         /* okno SAVE: SELECT przełącza NADPISZ / NOWY; (1.6.0) FM6: w kółko z SEND AS DX7 */
+                const uint32_t nn = save_n();
+                ui.save_new = (uint8_t)((ui.save_new + (e > 0 ? 1u : nn - 1u)) % nn);
                 ui.redraw = 1;
                 continue;
             }
@@ -11129,7 +10823,7 @@ OGS_UI static void input(void)
             }
             else if (ui.page == V_SEQ && ui.sel_hold) {   /* SEQ: SEL trzymany + ALGO = długość wzoru; (v0.88) co beat / krok / takt: OPTIONS */
                 ui.sel_used = 1;
-                if (ui.sq_pg == SQ_NOTES)        /* (v0.91, decyzja użytkownika 2026-11-03) NOTES: SEL + ALGO = długość wzoru co GRID
+                if (sq_roll())                   /* (v0.91, decyzja użytkownika 2026-11-03) NOTES: SEL + ALGO = długość wzoru co GRID
                                                   * (v0.90: długość nuty); RACK i ustawienia: wzór co BEAT */
                     sq_len_grid(e);
                 else
@@ -11146,7 +10840,7 @@ OGS_UI static void input(void)
                 text_cat(t, n);
                 app_say("STEPS", t);
                 ui.redraw = 1;
-            } else if (ui.page == V_SEQ && ui.sq_pg == SQ_NOTES) {   /* NOTES: ALGO = GRID (jak snap w FL) */
+            } else if (ui.page == V_SEQ && sq_roll()) {   /* NOTES (i AUTO): ALGO = GRID (jak snap w FL) */
                 int32_t g = clamp((int32_t)sqp.grid + (e > 0 ? 1 : -1), 0, 5);
                 if (g != sqp.grid) {
                     sqp.grid = (uint8_t)g;
@@ -11513,8 +11207,8 @@ static void body_blit(void)
 static const uint8_t MG_EDIT[] = {0, 1, 2, 3, 12, 4, 5, 6, 7, 13, 14}, MG_ENV[] = {8, 9}, MG_LFO[] = {10, 11},
                      MG_ALL[] = {8, 9, 10, 11, 0, 1, 2, 3, 12, 4, 5, 6, 7, 13, 14};   /* (v1.1.0) 14 TUNE na końcu: reszta bez przesunięcia */
 static const uint8_t XG_EDIT[] = {0, 1, 2, 3, 4, 5, XP_OPLVL, XP_OPVOL, 6, 7, XP_UNI, XP_FILT, XP_VINT},   /* (v0.68) */
-                     XG_ENV[] = {8, 9, 10, 11, 12, 13, 14, XP_FENV}, XG_LFO[] = {15, 16, 17},
-                     XG_ALL[] = {8, 9, 10, 11, 12, 13, 14, XP_FENV, 15, 16, 17, 0, 1, 2, 3, 4, 5, XP_OPLVL, XP_OPVOL, 6, 7,
+                     XG_ENV[] = {XP_AENV, 8, 9, 10, 11, 12, 13, 14, XP_FENV}, XG_LFO[] = {15, 16, 17},   /* (1.6.1) AMP ENV pierwsza */
+                     XG_ALL[] = {XP_AENV, 8, 9, 10, 11, 12, 13, 14, XP_FENV, 15, 16, 17, 0, 1, 2, 3, 4, 5, XP_OPLVL, XP_OPVOL, 6, 7,
                                  XP_UNI, XP_FILT, XP_VINT};
 static const uint8_t WG_EDIT[] = {0, 1, WP_WARP2, WP_UNI, 2, 3, WP_OSCL, 4, 5, 6, 7, WP_F2, WP_MACRO, WP_VINT},
                      WG_ENV[] = {8, 9, 10, WP_ENV4},
@@ -11547,7 +11241,7 @@ static const engine_t ENG[NENG] = {
      P_CUT, {P_MODE, P_PRIO, -1}, 0, moog_reset, moog_load_preset, moog_preset_name, moog_note_on, moog_note_off,
      moog_all_off, moog_render, moog_knob, moog_sel, moog_more, moog_def, moog_vget, moog_vset, moog_text, moog_label_page, moog_page_label,
      moog_has_graph, moog_graph, moog_held_note, moog_scope_semi, moog_sounding, 0, 0, moog_gest, moog_moddepth},
-    {"FM6", X, NX, NXPAGES, NDXP, XPAGE_NAME, {XG_EDIT, XG_ENV, XG_LFO, XG_ALL}, {13, 8, 3, 24}, XP_ALGO, X_MODE,
+    {"FM6", X, NX, NXPAGES, NDXP, XPAGE_NAME, {XG_EDIT, XG_ENV, XG_LFO, XG_ALL}, {13, 9, 3, 25}, XP_ALGO, X_MODE,
      X_ALG, {X_MODE, X_PRIO, X_VOICES}, 0, dx_reset, dx_load, dx_preset_name, dx_note_on, dx_note_off, dx_all_off,
      dx_render, dx_knob, dx_sel, dx_more, dx_def, dx_vget, dx_vset, dx_text, dx_label_page, dx_page_label,
      dx_has_graph, dx_graph, dx_held_note, dx_scope_semi, dx_sounding, 0, 0, dx_gest, dx_moddepth},
@@ -12369,25 +12063,28 @@ static void footer(void)
 
 OGS_UIN static void draw_save(void)            /* okno SAVE: NADPISZ / NOWY */
 {
-    static const char *const OPT[2] = {"OVERWRITE", "NEW PRESET"};
+    static const char *const OPT[3] = {"OVERWRITE", "NEW PRESET", "SEND AS DX7"};
+    const uint32_t lo = 0, nn = save_n();
+    const int32_t dy = nn > 2u ? 30 : 40, y0 = nn > 2u ? 30 : 34;   /* (1.6.0) FM6 z OVERWRITE: 3 niższe pozycje */
     char t[24], n[8];
     int32_t i;
     cv_begin(240, BODY_H, C_BLACK);
     cv_text(8, 4, &FONT_M, "SAVE", C_WHITE);
     preset_name(CUR, t);
     cv_text(232 - text_w(&FONT_XS, t), 12, &FONT_XS, t, C_GRAY);
-    for (i = 0; i < 2; i++) {
-        int on = ui.save_new == (uint32_t)i;
-        const char *o = text_w(&FONT_B, OPT[i]) <= 216 ? OPT[i] : "NEW";   /* za długie: samo NEW */
-        cv_rect(8, 34 + i * 40, 224, 34, on ? C_DIM : C_LINE);
-        center(40 + i * 40, &FONT_B, o, on ? C_WHITE : C_GRAY);
+    for (i = 0; i < (int32_t)nn; i++) {
+        const uint32_t o = lo + (uint32_t)i;
+        int on = ui.save_new == o;
+        const char *s = text_w(&FONT_B, OPT[o]) <= 216 ? OPT[o] : "NEW";   /* za długie: samo NEW */
+        cv_rect(8, y0 + i * dy, 224, dy - 6, on ? C_DIM : C_LINE);
+        center(y0 + 6 + i * dy - (nn > 2u ? 1 : 0), &FONT_B, s, on ? C_WHITE : C_GRAY);
     }
     t[0] = 0;                                /* ile miejsc USER zajętych (wspólne dla silników) */
     text_cat(t, "USER ");
     int_text(user_count(), n, 0);
     text_cat(t, n);
     text_cat(t, " / 128 USED");
-    center(112, &FONT_XS, t, C_GRAY);
+    center(nn > 2u ? 124 : 112, &FONT_XS, t, C_GRAY);
     foot_hint = "SELECT: CHOOSE   SEL: OK   HOME: CANCEL";
     body_blit();
 }
@@ -13315,6 +13012,8 @@ OGS_UI static void draw_notes_page(void)                /* NOTES: piano roll na 
     uint32_t L = sq_len(), V = sq_span(), bar0 = sq_bar0(), g = sq_grid(), i, r, pass;
     int32_t low = ui.sq_low, cx = rx(ui.sq_cur, bar0), cw = (int32_t)(g * RW / V), rows = RROWS, rh = RH;
     int dense = cw < 5;                          /* gęsto: grid tylko na ćwierćnutach */
+    const int ap_on = ui.sq_pg == SQ_AUTO;       /* (1.6.0) AUTO: nuty ścieżki linii szare w tle, na nich linie */
+    const uint32_t apt = ap_on ? ap_lane_trk() : 0u;
     sq_ac_new();
     for (r = 0; r < rows; r++) {                /* klawiatura z lewej, tło wierszy: czarne klawisze ciemniejsze (v1.1.0 - v1.1.2:
                                                   * wiersze skali jaśniejsze; v1.2.0 usunięte, decyzja użytkownika) */
@@ -13351,13 +13050,13 @@ OGS_UI static void draw_notes_page(void)                /* NOTES: piano roll na 
     /* (v0.66) MULTI: najpierw nuty innych ścieżek (ghost), na nich wybranej. (v0.92, użytkownik 2026-11-04: krótka nuta wewnątrz
      * długiej była niewidoczna) nuty wybranej od najdłuższych do najkrótszych (pass 1-3), zaznaczone na samym wierzchu (pass 4);
      * nuta na innej ma czarne szczeliny przy końcach */
-    for (pass = 0; pass < 5u; pass++)
+    for (pass = 0; pass < (ap_on ? 1u : 5u); pass++)
     for (i = 0; i < SQ_NN; i++) {                /* nuty: jasność = velocity, zaznaczone białe (jak w Melodee) */
         const sqn_t *q = &sqp.n[i];
         int32_t row, x0, x1, y;
         uint16_t c;
         uint32_t sl;
-        if (!q->vel || q->t >= L || q->t >= bar0 + V || (uint32_t)sq_mine(q) != (pass ? 1u : 0u))
+        if (!q->vel || q->t >= L || q->t >= bar0 + V || (ap_on ? SQN_TRK(q) != apt : (uint32_t)sq_mine(q) != (pass ? 1u : 0u)))
             continue;
         sl = pass ? sq_shown(q) : q->len;        /* (v0.87) perkusja: ile naprawdę trwa */
         if (pass && (SQ_ISSEL(i) ? 4u : sl > 4u * g ? 1u : sl > g ? 2u : 3u) != pass)
@@ -13417,6 +13116,8 @@ OGS_UI static void draw_notes_page(void)                /* NOTES: piano roll na 
             }
         }
     }
+    if (ap_on)
+        ap_draw(rows * rh, bar0, V, L);
     cv_rect(cx, 0, cw, 2, C_WHITE);              /* kursor: obrys komórki (jak w Melodee) */
     cv_rect(cx, rows * rh - 2, cw, 2, C_WHITE);
     cv_rect(cx, 0, 2, rows * rh, C_WHITE);
@@ -13953,27 +13654,36 @@ static void draw_perf(void)              /* PERFORM: 4 gałki, klawiatura (trzym
 
 OGS_UIN static void draw_sqt(void)                       /* narzędzia wzoru: SELECT wybiera, SEL robi, HOME wraca */
 {
+    const int32_t first = ui.sqt_cur < 7 ? 0 : ui.sqt_cur - 6, cp = ui.sqt_cur == ST_CPAT || ui.sqt_cur == ST_CTRK;
     int32_t i;
     cv_begin(240, BODY_H, C_BLACK);
     sq_title("TOOLS", "PATTERN");
-    for (i = 0; i < NST; i++) {
-        int32_t y = 28 + i * 16, on = i == ui.sqt_cur;   /* (v0.87) 7 wierszy + napis nad wyższym paskiem podpowiedzi */
+    for (i = first; i < first + 7; i++) {       /* (v0.87) 7 wierszy + napis nad wyższym paskiem podpowiedzi; (1.6.0) 9 pozycji: lista
+                                                 * jedzie za kursorem, pasek z prawej */
+        int32_t y = 28 + (i - first) * 16, on = i == ui.sqt_cur;
+        char m[8] = {'T', (char)('1' + ui.sqt_from), 0};
         if (on)
             cv_rect(4, y - 1, 232, 16, C_HI);
         cv_text(12, y, &FONT_S, i == ST_CLEAR && mt_ui() ? "CLEAR TRACK" : ST_NAME[i], on ? C_BLACK : C_WHITE);
-        if (i == ST_MOVE) {                      /* (v0.66.2) z której ścieżki (gałka) */
-            char m[3] = {'T', (char)('1' + ui.sqt_from), 0};
-            cv_text(228 - text_w(&FONT_S, m), y, &FONT_S, m, on ? C_BLACK : C_HI);
+        if (i == ST_CPAT || i == ST_CTRK) {      /* (1.6.0) z którego wzoru (gałka), jak w nagłówku NOTES: P01 */
+            m[0] = 'P';
+            m[1] = (char)('0' + (ui.sqt_src + 1) / 10);
+            m[2] = (char)('0' + (ui.sqt_src + 1) % 10);
+            m[3] = 0;
         }
+        if (i == ST_MOVE || i == ST_CPAT || i == ST_CTRK)   /* (v0.66.2) z której ścieżki (gałka) */
+            cv_text(228 - text_w(&FONT_S, m), y, &FONT_S, m, on ? C_BLACK : C_HI);
         if (i >= ST_ZINV) {                      /* kierunek gałki: wartość po prawej */
             const char *v = L_INV[glob.g[i == ST_ZINV ? G_SQZINV : G_SQK1INV]];
             cv_text(228 - text_w(&FONT_S, v), y, &FONT_S, v, on ? C_BLACK : C_HI);
         }
     }
+    cv_rect(236, 27 + first * 112 / NST, 2, 112 * 7 / NST, C_DIM);   /* (1.6.0) pasek przewijania */
     if (ui.sqt_sure)
-        center(28 + NST * 16, &FONT_XS, ui.sqt_cur == ST_CLEAR && mt_ui() ? "SEL AGAIN: CLEAR THIS TRACK"
+        center(28 + 7 * 16, &FONT_XS, cp ? "SEL AGAIN: REPLACE NOTES" : ui.sqt_cur == ST_CLEAR && mt_ui() ? "SEL AGAIN: CLEAR THIS TRACK"
                                        : "SEL AGAIN: CLEAR ALL NOTES", RGB(255, 70, 60));
-    foot_hint = ui.sqt_cur == ST_MOVE ? "KNOB: FROM TRACK   SEL: MOVE   HOME: BACK" : "SELECT: CHOOSE   SEL: DO IT   HOME: BACK";
+    foot_hint = ui.sqt_cur == ST_MOVE ? "KNOB: FROM TRACK   SEL: MOVE   HOME: BACK"
+              : cp ? "KNOB: FROM PATTERN   SEL: COPY   HOME: BACK" : "SELECT: CHOOSE   SEL: DO IT   HOME: BACK";
     body_blit();
 }
 
@@ -14174,16 +13884,23 @@ OGS_UIN static void draw_note(void)            /* SYSTEM > BACKUP / CALIBRATION:
     body_blit();
 }
 
+#include "ogs_auto.c"                          /* (1.6.0) AUTO: automatyka parametrów w SEQ */
+
 static void draw(void)
 {
-    if ((ui.page == V_SEQ && ui.sq_pg == SQ_NOTES) || ui.page == V_SQN) {   /* NOTES: cały ekran; karta nuty na nim */
+    if ((ui.page == V_SEQ && sq_roll()) || ui.page == V_SQN) {   /* NOTES (i AUTO): cały ekran; karta nuty na nim */
         notes_top();
         cv_begin(240, BODY_H, C_BLACK);
         draw_notes_page();
-        if (ui.page == V_SQN)
+        if (ui.page == V_SQN && ui.sq_pg == SQ_AUTO)
+            ap_card_draw();
+        else if (ui.page == V_SQN)
             draw_sqn();
         cv_blit(0, 32);
-        notes_chips();
+        if (ui.sq_pg == SQ_AUTO)
+            ap_chips();
+        else
+            notes_chips();
         return;
     }
     if (ui.page != V_HOME)                   /* HOME bez górnego paska (wszystko w pierwszym wierszu i na dole) */
@@ -14308,6 +14025,7 @@ OGS_UI void app_frame(void)
     uint32_t now, pct;
     int32_t note;
     input();
+    ap_frame();                              /* (1.6.0) AUTO: koniec dotyku gałki, SAVE po zmianach z linii */
     if (mx_lv && mt_xg <= 0.0f) {            /* (v1.4.0) do SOLO: wyjście cicho, bliźniaki do flasha, potem pula dla łańcucha */
         mx_store();
         mx_lv = 0;
@@ -14482,7 +14200,8 @@ OGS_UI void app_frame(void)
             ui.grp_hold = 0;
             if (b == B_SEQ && !ui.grp_done)
                 go_seq();
-        } else if (!ui.grp_done && now - ui.grp_at >= 400u) {
+        } else if (!ui.grp_done && now - ui.grp_at >= (b == B_SEQ ? HOME_HOLD_MS : 400u)) {   /* (1.6.0, P63) SEQ: 0,7 s jak HOME
+                                                                                         * (czas na SEQ + OP1-4 = MUTE) */
             ui.grp_done = 1;
             if (b == B_SEQ)                  /* (v0.88) ustawienia sekwencera; w MULTI w nich też sceny */
                 seq_hold();
@@ -14497,7 +14216,7 @@ OGS_UI void app_frame(void)
         uint32_t p = sq.pos / 12u;
         if (p != at) {
             at = p;
-            if (ui.sq_pg == SQ_NOTES && now - ui.sq_moved > 2000u && sq.pos / sq_span() != ui.sq_cur / sq_span()) {
+            if (sq_roll() && now - ui.sq_moved > 2000u && sq.pos / sq_span() != ui.sq_cur / sq_span()) {
                 ui.sq_cur = sq.pos / sq_span() * sq_span();   /* widok: takty, które grają */
                 sq_pick(0);
                 ui.redraw = 1;
@@ -14508,7 +14227,7 @@ OGS_UI void app_frame(void)
                 } else {
                     ui.redraw_roll = 1;
                 }
-            } else if (ui.sq_pg == SQ_NOTES) {
+            } else if (sq_roll()) {
                 static uint32_t bar;
                 if (sq.pos / SQ_BAR != bar) {     /* nowy takt: pasek u góry też */
                     bar = sq.pos / SQ_BAR;
@@ -14643,7 +14362,7 @@ OGS_UI void app_frame(void)
         draw();
     } else if (ui.redraw_roll) {
         ui.redraw_roll = 0;
-        if (ui.page == V_SEQ && ui.sq_pg == SQ_NOTES) {
+        if (ui.page == V_SEQ && sq_roll()) {
             cv_begin(240, BODY_H, C_BLACK);
             draw_notes_page();
             cv_blit(0, 32);

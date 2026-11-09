@@ -1,5 +1,10 @@
 # Changelog
 
+## v1.6.1 — 2026-11-09
+Źródła MPL OG Synth 1.6.1 „Amp env” razem z niewydaną 1.6.0 „Auto” (AUTO — automatyka w SEQ, kod silnika w pliku zamkniętym
+ogs_auto.c; MULTI: SEQ + OP1-4 = MUTE ścieżek, ustawienia SEQ po 0,7 s; TOOLS: COPY PATTERN / TRACK FROM; FM6: SAVE > SEND AS DX7
+i AMP ENV; gest_matrix: n < 0 = czwarte pole nie jest VIA; usunięte przenoszenie zapisów sprzed 1.0).
+
 ## v1.5.1 — 2026-11-09
 Źródła MPL OG Synth 1.5.1 „Controls out” (GLO > MIDI > CONTROLS OUT: gałki i przyciski FM1 wysyłają MIDI do DAW — nauczone w MIDI
 LEARN swoim CC / kanałem / zakresem, inne CC 21-28 i 102-115, echo z DAW pomijane; scena MULTI pamięta wzór SEQ, SEQ > OPTIONS > SCENE;

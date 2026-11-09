@@ -135,10 +135,13 @@ enum { GEST_NOTGT = -1, GEST_FULL = -2, GEST_NOSRC = -3 };
 #define GEST_ENV 0x20
 #define GEST_DEF 0xF
 
-/* matryca: wiersz = SOURCE, DEST, AMOUNT, VIA (row(i): id SOURCE slotu i); s, d: numery źródła i celu w silniku */
+/* matryca: wiersz = SOURCE, DEST, AMOUNT, VIA (row(i): id SOURCE slotu i); s, d: numery źródła i celu w silniku;
+ * (1.6.1) n < 0: -n wierszy, czwarte pole nie jest VIA (FM6: AMP ENV) — założenie slotu go nie zeruje */
 static inline int32_t gest_matrix(int16_t *p, int32_t n, int32_t (*row)(int32_t i), int32_t s, int32_t d, int32_t op)
 {
-    int32_t i, fr = -1;
+    int32_t i, fr = -1, via = n > 0;
+    if (!via)
+        n = -n;
     for (i = 0; i < n; i++) {
         int32_t b = row(i);
         if (p[b] == s && p[b + 1] == d) {
@@ -154,7 +157,8 @@ static inline int32_t gest_matrix(int16_t *p, int32_t n, int32_t (*row)(int32_t 
     if (fr < 0)
         return GEST_FULL;
     p[fr + 2] = 0;                                  /* (ilość 0: założenie niczego nie zmienia w dźwięku) */
-    p[fr + 3] = 0;
+    if (via)
+        p[fr + 3] = 0;
     p[fr + 1] = (int16_t)d;
     p[fr] = (int16_t)s;
     return fr + 2;
