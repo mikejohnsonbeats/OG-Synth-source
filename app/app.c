@@ -4157,7 +4157,12 @@ static int bank_frame(const uint8_t *p, uint32_t n)   /* p: bez F0 / F7 */
 }
 
 /* mikro-test CPU (SysEx 0x12): takty 360 MHz x10 na iterację (z przerwaniem audio w tle: mierzyć w ciszy);
- * volatile, żeby kompilator nie wyrzucił pętli */
+ * volatile, żeby kompilator nie wyrzucił pętli. (P66) Tylko w buildzie pomiarowym (OGS_BENCH=1, tools/bench.py): w wydaniu
+ * miejsce we flashu i 512 B puli */
+#ifndef OGS_BENCH
+#define OGS_BENCH 0
+#endif
+#if OGS_BENCH
 static volatile float bench_f[4] = {0.5f, 1.0001f, 0.25f, 0.0f};
 static volatile uint32_t bench_u[2] = {0x12345678u, 0x01000193u};
 /* (v0.34) zapis / odczyt bufora 16 bitów jak w ogs_fx.c: stary (clamp + warunek) i nowy (na bitach), do porównania na FM1 */
@@ -4216,6 +4221,7 @@ static uint32_t bench(uint32_t k)
     bench_u[0] = u + acc;
     return t0 * 150u / N;
 }
+#endif
 
 static void bank_ack(uint8_t cmd, uint8_t nr)   /* v0.37: ramka banku DX7 / CZ doszła -> F0 7D 4F 47 53 24 cmd nr F7
                                                   * (OG SYNTH MANAGER czeka na to i ponawia zgubione; powtórzona
@@ -4426,6 +4432,7 @@ OGS_UI int app_sysex(const uint8_t *p, uint32_t n)
                 E->p[id] = (int16_t)clamp((int32_t)(p[7] | p[8] << 7) - 8192, E->def(id)->lo, E->def(id)->hi);
             return 1;
         }
+#if OGS_BENCH
         if (p[4] == 0x12u) {                 /* mikro-test CPU: F0 7D 4F 47 53 12 F7 -> 13 + takty x10 na iterację (po 2 x 7 bit) */
             uint8_t a[6 + 2 * 15 + 1] = {0xF0, 0x7D, 0x4F, 0x47, 0x53, 0x13};
             uint32_t k;
@@ -4438,6 +4445,7 @@ OGS_UI int app_sysex(const uint8_t *p, uint32_t n)
             plat_sysex_send(a, sizeof a);
             return 1;
         }
+#endif
         if (p[4] == 0x10u) {                 /* pomiar: F0 7D 4F 47 53 10 r [e] F7 -> 11 cpu% szczyt% xruns (3 x 7 bit) silnik;
                                               * r=1 zeruje szczyt, e=1..NENG przełącza silnik (e-1) */
             uint32_t x = plat_xruns();
@@ -6400,7 +6408,7 @@ static uint32_t sq_span(void)                    /* widok: ile ticków na szerok
 }
 static int32_t sq_vbars(void) { return (int32_t)(sq_span() / SQ_BAR); }   /* (testy: 0 = mniej niż takt) */
 
-static void sq_zoom(int32_t vert, int32_t e)     /* (v0.89) SEL + K1: pion, SEL + K2: poziom */
+OGS_UI static void sq_zoom(int32_t vert, int32_t e)     /* (v0.89) SEL + K1: pion, SEL + K2: poziom */
 {
     char t[16], n[8];
     t[0] = 0;
