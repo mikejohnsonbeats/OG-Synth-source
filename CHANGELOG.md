@@ -1,5 +1,9 @@
 # Changelog
 
+## v1.6.2 — 2026-11-09
+Źródła MPL OG Synth 1.6.2 „Clock” (ARP za zegarem MIDI z TRS / USB, paczki F8, ARP SWING — kod w pliku zamkniętym
+ogs_seq.c; app.c: mikro-test CPU SysEx 0x12 tylko przy OGS_BENCH=1, sq_zoom minsize; app.h: wersja).
+
 ## v1.6.1 — 2026-11-09
 Źródła MPL OG Synth 1.6.1 „Amp env” razem z niewydaną 1.6.0 „Auto” (AUTO — automatyka w SEQ, kod silnika w pliku zamkniętym
 ogs_auto.c; MULTI: SEQ + OP1-4 = MUTE ścieżek, ustawienia SEQ po 0,7 s; TOOLS: COPY PATTERN / TRACK FROM; FM6: SAVE > SEND AS DX7
