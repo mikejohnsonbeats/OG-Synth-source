@@ -258,6 +258,7 @@ static struct {
     uint32_t st_mine[(SQ_NN + 31) / 32]; /* wpis krokowy: dodane w tym akordzie (nie usuwać) */
     uint8_t sqt_cur, sqt_sure;           /* okno narzędzi wzoru */
     uint8_t sqt_from;                    /* (v0.66.2) MOVE HERE FROM: ścieżka, z której nuty (gałka) */
+    uint8_t sqt_src;                     /* (1.6.0, P62) COPY PATTERN / TRACK FROM: wzór, z którego (gałka) */
     int16_t sq_note;                     /* NOTES: podświetlona nuta (jedna, jak w Melodee), -1 pusty krok */
     uint8_t sq_rng;                      /* NOTES: zaznaczony zakres (SEL + SELECT, jak w FL): edycja i karta na wszystkich */
     uint32_t sq_ra, sq_re;               /* zakres: komórka startu i końca (tick w gridzie, w obie strony) */
@@ -358,6 +359,14 @@ OGS_UI static void input(void)
             eaten |= bit;
             ui.sel_used = 1;
             sq_track_go(key_label(k) - K_OP1);
+            continue;
+        }
+        if (ui.grp_hold == B_SEQ + 1u && mt_ui() && (keys & bit) && !(ui.keys & bit)
+            && key_label(k) >= K_OP1 && key_label(k) <= K_OP4) {   /* (1.6.0, K65 / P63) SEQ trzymany + OP1-4: MUTE T1-T4 (bez nuty;
+                                                                    * SEQ nie otwiera już ustawień ani strony przy puszczeniu) */
+            eaten |= bit;
+            ui.grp_done = 1;
+            mt_mute(key_label(k) - K_OP1);
             continue;
         }
         if ((bit & gk) && (keys & bit) && !(ui.keys & bit)) {   /* (v0.65) LFO / ENV trzymany + OP: strona MOD */
@@ -569,7 +578,8 @@ OGS_UI static void input(void)
                 ui.pf_at = plat_ms();
             }
             break;
-        case B_SEQ:                          /* (v0.88) przy puszczeniu: go_seq; trzymany: seq_hold; (v0.66) trzymany + OP1-4 w MULTI = ścieżka */
+        case B_SEQ:                          /* (v0.88) przy puszczeniu: go_seq; trzymany 0,7 s: seq_hold; (1.6.0) trzymany + OP1-4 w MULTI =
+                                              * MUTE ścieżki (v0.66-v0.89: ścieżka, od v0.90 SEL + OP) */
             if (ui.page >= V_GLO || PANEL_PAGE(ui.page) || ui.page == V_SQT || ui.page == V_SQN || ui.page == V_SCN) {
                 ui.grp_hold = (uint8_t)(k + 1u);
                 ui.grp_done = 0;
@@ -582,7 +592,7 @@ OGS_UI static void input(void)
             ui.arp_at = plat_ms();
             break;
         case B_PLAY:                         /* NOTES (zatrzymany): krótko = od kursora, trzymany = od początku */
-            if (!sq.play && ((ui.page == V_SEQ && ui.sq_pg == SQ_NOTES) || ui.page == V_SQN)) {
+            if (!sq.play && ((ui.page == V_SEQ && sq_roll()) || ui.page == V_SQN)) {
                 ui.play_hold = 1;
                 ui.play_at = plat_ms();
             } else {
@@ -643,16 +653,16 @@ OGS_UI static void input(void)
                 } else if (ui.sq_pg == SQ_RACK) {   /* (v0.57) RACK: wiersz (dźwięk) */
                     ui.rk_row = (uint8_t)clamp((int32_t)ui.rk_row + (e > 0 ? 1 : -1), 0, 15);
                     rk_view();
-                } else if (ui.sq_pg == SQ_NOTES && ui.sel_hold)
+                } else if (sq_roll() && ui.sel_hold)
                     sq_range(e);
-                else if (ui.sq_pg == SQ_NOTES)
+                else if (sq_roll())
                     sq_cursor((int32_t)ui.sq_cur + e * (int32_t)sq_grid());
                 else                             /* (v0.88) ustawienia SEQ: strony */
                     sq_set_turn(e);
                 continue;
             }
             if (ui.page == V_SQN) {          /* karta nuty: wiersz */
-                ui.sqn_row = (uint8_t)clamp((int32_t)ui.sqn_row + e, 0, NSN - 1);
+                ui.sqn_row = (uint8_t)clamp((int32_t)ui.sqn_row + e, 0, ui.sq_pg == SQ_AUTO ? 3 : NSN - 1);   /* (1.6.0) AUTO: 4 */
                 ui.redraw = 1;
                 continue;
             }
@@ -717,8 +727,9 @@ OGS_UI static void input(void)
                 name_char(e);
                 continue;
             }
-            if (ui.page == V_SAVE) {         /* okno SAVE: SELECT przełącza NADPISZ / NOWY */
-                ui.save_new ^= 1u;
+            if (ui.page == V_SAVE) {         /* okno SAVE: SELECT przełącza NADPISZ / NOWY; (1.6.0) FM6: w kółko z SEND AS DX7 */
+                const uint32_t nn = save_n();
+                ui.save_new = (uint8_t)((ui.save_new + (e > 0 ? 1u : nn - 1u)) % nn);
                 ui.redraw = 1;
                 continue;
             }
@@ -762,7 +773,7 @@ OGS_UI static void input(void)
             }
             else if (ui.page == V_SEQ && ui.sel_hold) {   /* SEQ: SEL trzymany + ALGO = długość wzoru; (v0.88) co beat / krok / takt: OPTIONS */
                 ui.sel_used = 1;
-                if (ui.sq_pg == SQ_NOTES)        /* (v0.91, decyzja użytkownika 2026-11-03) NOTES: SEL + ALGO = długość wzoru co GRID
+                if (sq_roll())                   /* (v0.91, decyzja użytkownika 2026-11-03) NOTES: SEL + ALGO = długość wzoru co GRID
                                                   * (v0.90: długość nuty); RACK i ustawienia: wzór co BEAT */
                     sq_len_grid(e);
                 else
@@ -779,7 +790,7 @@ OGS_UI static void input(void)
                 text_cat(t, n);
                 app_say("STEPS", t);
                 ui.redraw = 1;
-            } else if (ui.page == V_SEQ && ui.sq_pg == SQ_NOTES) {   /* NOTES: ALGO = GRID (jak snap w FL) */
+            } else if (ui.page == V_SEQ && sq_roll()) {   /* NOTES (i AUTO): ALGO = GRID (jak snap w FL) */
                 int32_t g = clamp((int32_t)sqp.grid + (e > 0 ? 1 : -1), 0, 5);
                 if (g != sqp.grid) {
                     sqp.grid = (uint8_t)g;
@@ -988,6 +999,7 @@ OGS_UI void app_frame(void)
     uint32_t now, pct;
     int32_t note;
     input();
+    ap_frame();                              /* (1.6.0) AUTO: koniec dotyku gałki, SAVE po zmianach z linii */
     if (mx_lv && mt_xg <= 0.0f) {            /* (v1.4.0) do SOLO: wyjście cicho, bliźniaki do flasha, potem pula dla łańcucha */
         mx_store();
         mx_lv = 0;
@@ -1162,7 +1174,8 @@ OGS_UI void app_frame(void)
             ui.grp_hold = 0;
             if (b == B_SEQ && !ui.grp_done)
                 go_seq();
-        } else if (!ui.grp_done && now - ui.grp_at >= 400u) {
+        } else if (!ui.grp_done && now - ui.grp_at >= (b == B_SEQ ? HOME_HOLD_MS : 400u)) {   /* (1.6.0, P63) SEQ: 0,7 s jak HOME
+                                                                                         * (czas na SEQ + OP1-4 = MUTE) */
             ui.grp_done = 1;
             if (b == B_SEQ)                  /* (v0.88) ustawienia sekwencera; w MULTI w nich też sceny */
                 seq_hold();
@@ -1177,7 +1190,7 @@ OGS_UI void app_frame(void)
         uint32_t p = sq.pos / 12u;
         if (p != at) {
             at = p;
-            if (ui.sq_pg == SQ_NOTES && now - ui.sq_moved > 2000u && sq.pos / sq_span() != ui.sq_cur / sq_span()) {
+            if (sq_roll() && now - ui.sq_moved > 2000u && sq.pos / sq_span() != ui.sq_cur / sq_span()) {
                 ui.sq_cur = sq.pos / sq_span() * sq_span();   /* widok: takty, które grają */
                 sq_pick(0);
                 ui.redraw = 1;
@@ -1188,7 +1201,7 @@ OGS_UI void app_frame(void)
                 } else {
                     ui.redraw_roll = 1;
                 }
-            } else if (ui.sq_pg == SQ_NOTES) {
+            } else if (sq_roll()) {
                 static uint32_t bar;
                 if (sq.pos / SQ_BAR != bar) {     /* nowy takt: pasek u góry też */
                     bar = sq.pos / SQ_BAR;
@@ -1323,7 +1336,7 @@ OGS_UI void app_frame(void)
         draw();
     } else if (ui.redraw_roll) {
         ui.redraw_roll = 0;
-        if (ui.page == V_SEQ && ui.sq_pg == SQ_NOTES) {
+        if (ui.page == V_SEQ && sq_roll()) {
             cv_begin(240, BODY_H, C_BLACK);
             draw_notes_page();
             cv_blit(0, 32);
