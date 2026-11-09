@@ -29,6 +29,16 @@ ever down: the firmware package, an offline copy of the install page (runs on yo
   mode). Without it, a Mac can put the stock firmware back with the
   [felucca-bsp tools](https://github.com/hugelton/felucca-bsp/tree/main/tools).
 
+## Switching firmware
+- OG Synth keeps its sounds and settings in its own part of the FM-1's flash. It doesn't read projects or sounds saved by
+  other firmwares, and another firmware may overwrite OG Synth's.
+- Back up first: https://ogsynth.cc/backup/. "Back to the stock firmware" on the install page erases OG Synth's data before
+  it writes the stock firmware, so the stock firmware starts clean. DX7 banks and WAVE tables sent from the Manager aren't in
+  the backup: keep their files.
+- Updating from an older OG Synth keeps your sounds and settings.
+- Identity (what the FM-1 answers to installers): `FM-1_1313` and the version, 1.6.3 = `FM-1_1313010603`
+  (`FM-1_11` and the version up to 1.6.2).
+
 ## What is here
 - `app/`: the application (panel, screen, saving, MIDI, Manager and backup pages), `LICENSE`: MPL-2.0
 - `patches/`: changes to [fm1-base](https://github.com/charlesvestal/fm1-base) and

@@ -1,5 +1,10 @@
 # Changelog
 
+## v1.6.3 — 2026-11-09
+Źródła MPL OG Synth 1.6.3 „Hub” (własny numer firmware FM-1_1313XXYYZZ dla The Firmware Hub — fm1.toml id_prefix, stary
+FM-1_11 w id_old; łatka fm1-base: strona kopii i WIPE przed stock znają oba numery, „Back to the stock firmware” czeka na
+zamknięcie portów MIDI po WIPE — błąd od 1.0.2; app.h: wersja). README: sekcja Switching firmware.
+
 ## v1.6.2 — 2026-11-09
 Źródła MPL OG Synth 1.6.2 „Clock” (ARP za zegarem MIDI z TRS / USB, paczki F8, ARP SWING — kod w pliku zamkniętym
 ogs_seq.c; app.c: mikro-test CPU SysEx 0x12 tylko przy OGS_BENCH=1, sq_zoom minsize; app.h: wersja).

@@ -656,11 +656,42 @@ index 71a57cd..10a767a 100755
          lines.append("")
          print(f"font {name}: {ttf} {px}px h {h}, digit adv {glyphs[ord('0') - first][0]}, {len(data)} B")
      print(f"font set {FONTSET}: {sum(len(l) for l in lines if l.startswith('    0x')) // 6} B (approx)")
+diff --git a/tools/make_site.py b/tools/make_site.py
+index a0317e1..49a97d4 100755
+--- a/tools/make_site.py
++++ b/tools/make_site.py
+@@ -71,7 +71,8 @@ def backup_values(app, conf):
+         raise SystemExit(f"{app}/app.h: backup = true needs APP_BACKUP_MAGIC 0x........u and APP_BACKUP_VERSION N")
+     magic = int(m.group(1), 16).to_bytes(4, "little").decode("ascii")
+     name = conf.get("name", Path(app).name)
+-    return {"NAME": name, "ID": conf.get("id_prefix", ""), "MAGIC": magic, "BACKUP_VERSION": v.group(1),
++    ids = [conf.get("id_prefix", "")] + list(conf.get("id_old", []))   # OGS 1.6.3: the old identity too
++    return {"NAME": name, "ID": "|".join(ids), "MAGIC": magic, "BACKUP_VERSION": v.group(1),
+             "EXT": conf.get("backup_ext", "bak"), "HOLDS": conf.get("backup_holds", f"everything {name} saves"),
+             "EXTRA": "", "EXTRAS_JS": "const EXTRAS = [];",
+             "TERMINAL": "You can also back up from a terminal. Run <code>python3 tools/fm1_backup.py</code> in fm1-base's "
 diff --git a/web/backup/index.html b/web/backup/index.html
-index f3e945c..fa3364e 100644
+index f3e945c..81a2e66 100644
 --- a/web/backup/index.html
 +++ b/web/backup/index.html
-@@ -448,7 +448,16 @@ $("backup").addEventListener("click", async () => {
+@@ -117,6 +117,7 @@ const PB = (() => {
+   const HEAD = 16, REC = 8, PAYLOAD_MAX = 3840, MAXDATA = 512;
+   const PLAYING = 10, DECLINED = 11;
+   const ID = FW.id;                                                // the firmware's package identity (its prefix)
++  const IDS = ID.split("|");                                       // OGS 1.6.3: and its old ones ("FM-1_1313|FM-1_11")
+   const DELAY = { poll: 500, idle: 10000, ask: 75000, first: 3000, hs: 1000 };   // ms, as fm1_backup.py
+   const ERRORS = {
+     1: "the file's size", 2: "the transfer (a piece of the file did not arrive)", 3: "the file's head",
+@@ -293,7 +294,7 @@ const PB = (() => {
+       try { await input.open(); await output.open(); } catch (_) { continue; }
+       const link = makeLink(input, output);
+       const id = await handshake(link);
+-      if (id && id.startsWith(ID)) return { link, id, name: input.name };
++      if (id && IDS.some((p) => id.startsWith(p))) return { link, id, name: input.name };
+       if (id) other = other || id;
+       link.close();
+     }
+@@ -448,7 +449,16 @@ $("backup").addEventListener("click", async () => {
      dev = await connect();
      say(`Receiving the backup from ${esc(FW.name)}&hellip;`);
      progress(0);
@@ -692,7 +723,7 @@ index 4e182de..a02d6f7 100644
  __attribute__((used, visibility("default"))) uint32_t web_lit_keys(void) { return lit_keys; }
  __attribute__((used, visibility("default"))) uint32_t web_dim_buttons(void) { return dim_btn; }
 diff --git a/web/fm1ota.js b/web/fm1ota.js
-index 482c784..9ee7033 100644
+index 482c784..5937592 100644
 --- a/web/fm1ota.js
 +++ b/web/fm1ota.js
 @@ -11,6 +11,9 @@ const HS_QUERY = [0xF0, 0x00, 0x32, 0x45, 0x00, 0x00, 0x00, 0x40, 0x7F, 0xF7];
@@ -778,7 +809,7 @@ index 482c784..9ee7033 100644
          continue;
        }
        if (r.len > MAXDATA || r.addr + r.len > image.length) throw fail("badreq", `bad request ${r.addr.toString(16)}+${r.len}`);
-@@ -206,8 +220,24 @@ export class Updater {
+@@ -206,8 +220,30 @@ export class Updater {
      }
    }
  
@@ -786,9 +817,11 @@ index 482c784..9ee7033 100644
 -  async install(image, product, onStep, sha256) {
 +  // OGS 1.0.2: before the stock firmware, the running OG Synth (its identity starts with prefix) erases its data above
 +  // stock's flash.bin (stock found our presets there: "janked"). F0 7D 4F 47 53 2D "WIPE" F7 -> 24 2D 00. true: erased;
-+  // false: another firmware, or one that does not know it (1.0.1 and older): nothing changes, the install goes on
++  // false: another firmware, or one that does not know it (1.0.1 and older): nothing changes, the install goes on.
++  // OGS 1.6.3: prefix may be a list (the identity changed: FM-1_1313, FM-1_11 = 1.6.2 and older)
 +  async wipeApp(prefix, ms = 15000) {
-+    const dev = await this.find((id) => !IS_OTA(id) && id.text.startsWith(prefix));
++    const ps = [].concat(prefix);
++    const dev = await this.find((id) => !IS_OTA(id) && ps.some((p) => id.text.startsWith(p)));
 +    if (!dev) return false;
 +    dev.link.drain();
 +    dev.link.send([0xF0, 0x7D, 0x4F, 0x47, 0x53, 0x2D, 0x57, 0x49, 0x50, 0x45, 0xF7]);
@@ -796,7 +829,11 @@ index 482c784..9ee7033 100644
 +    let ok = false;
 +    for (let m; !ok && Date.now() - t0 < ms && (m = await dev.link.read(ms - (Date.now() - t0)));)
 +      ok = m.length >= 8 && m[1] === 0x7D && m[5] === 0x24 && m[6] === 0x2D;
-+    dev.link.close();
++    // OGS 1.6.3: the stock install opens the same ports right after: wait until they are closed (ogsynth.cc: close
++    // returns a promise) and a moment more. Without it Edge did not deliver the next handshake: "FM-1 not found" right
++    // after "wipe done", every time (2026-11-09, real FM-1; the FM-1 itself answered 3 ms after the WIPE)
++    await dev.link.close();
++    await sleep(1000);
 +    return ok;
 +  }
 +
@@ -805,7 +842,7 @@ index 482c784..9ee7033 100644
      const step = onStep || (() => {});
      const dev = await this.find((id) => !IS_OTA(id));
      if (!dev) throw fail("notfound", "FM-1 not found (USB cable, and no other app using it?)");
-@@ -217,18 +247,27 @@ export class Updater {
+@@ -217,18 +253,27 @@ export class Updater {
      step("start", dev.id.text);
      dev.link.send(UPGRADE);
      await sleep(2000);
@@ -836,7 +873,7 @@ index 482c784..9ee7033 100644
      if (!back) throw fail("noreturn", "the device did not come back: power-cycle it");
      back.link.close();
      if (back.id.text !== product) throw fail("mismatch", `installed, but the device reports ${back.id.text}`, back.id.text);
-@@ -280,10 +319,10 @@ export class Updater {
+@@ -280,10 +325,10 @@ export class Updater {
    }
  
    // step 2 with the loader found by find()/waitFor()
@@ -850,7 +887,7 @@ index 482c784..9ee7033 100644
      return s2;
    }
 diff --git a/web/installer.html b/web/installer.html
-index 6e65819..528ebb3 100644
+index 6e65819..e36ac9e 100644
 --- a/web/installer.html
 +++ b/web/installer.html
 @@ -147,11 +147,14 @@ const TEXT = {
@@ -1038,7 +1075,7 @@ index 6e65819..528ebb3 100644
    let appState = null;
    if (APP && APP.before && !isStock) {
      try { appState = await APP.before(midi, appUi); }
-@@ -389,20 +506,33 @@ async function run(img, product, isStock, sha256) {
+@@ -389,20 +506,35 @@ async function run(img, product, isStock, sha256) {
        if (k === "bootstart" || k === "bootwrite") sayK(k);
        if (k === "bootdone") { $("bar").value = 100; sayK("bootdone"); }
      };
@@ -1074,9 +1111,11 @@ index 6e65819..528ebb3 100644
 +        }
 +        installed = !!done;
 +      } else {
-+        if (isStock && meta.product.startsWith("FM-1_11")) {   /* OGS 1.0.2: OG Synth's data out of stock's way */
++        /* OGS 1.0.2: OG Synth's data out of stock's way; 1.6.3: its own identity FM-1_1313, FM-1_11 = 1.6.2 and older */
++        const OGS_IDS = ["FM-1_1313", "FM-1_11"];
++        if (isStock && OGS_IDS.some((p) => meta.product.startsWith(p))) {
 +          sayK("wipe");
-+          log(`wipe ${(await up.wipeApp("FM-1_11")) ? "done" : "skipped"}`);
++          log(`wipe ${(await up.wipeApp(OGS_IDS)) ? "done" : "skipped"}`);
 +        }
 +        await up.install(img, product, step, sha256);
 +        if (withBoot) await up.installBoot(boot, product, step);
@@ -1085,7 +1124,7 @@ index 6e65819..528ebb3 100644
      }
    } catch (e) {
      if (isStock && e && e.code === "mismatch") { $("bar").value = 100; sayK("stockdone"); }   /* stock names itself its own way */
-@@ -410,6 +540,7 @@ async function run(img, product, isStock, sha256) {
+@@ -410,6 +542,7 @@ async function run(img, product, isStock, sha256) {
      else sayK("error", e && e.message);
      log(String(e && e.stack || e));
    }
@@ -1093,7 +1132,7 @@ index 6e65819..528ebb3 100644
    if (installed && APP && APP.after && !isStock) {
      try { await APP.after(midi, appUi, appState); }
      catch (e) { say(String(e && e.message || e)); log(String(e && e.stack || e)); }
-@@ -417,6 +548,7 @@ async function run(img, product, isStock, sha256) {
+@@ -417,6 +550,7 @@ async function run(img, product, isStock, sha256) {
    writing = false;
    $("go").disabled = !image;
    $("stockgo").disabled = !stock;
