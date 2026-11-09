@@ -1,6 +1,9 @@
 # The template's build settings (tools/build.py)
 name = "OGS"              # APP_NAME is in app.h; this names the build's files
-id_prefix = "FM-1_11"          # package identity (each firmware its own): dev FM-1_1100, releases FM-1_11XXYYZZ
+id_prefix = "FM-1_1313"        # package identity (each firmware its own): dev FM-1_131300, releases FM-1_1313XXYYZZ
+                               # OGS 1.6.3: own number for The Firmware Hub (user's choice 1313; 10 digits: FM-1_\d{3,8}
+                               # and LOOM-8's FM-1_1\d{7} on the hub match FM-1_11XXYYZZ). Pages also know the old one:
+id_old = ["FM-1_11"]           # 1.6.2 and older (fm1-base template default): backup page, wipe before stock
 usb_manufacturer = "Mike Johnson Beats"
 usb_product = "OG Synth"
 o2 = ["ogs_moog_dsp.c", "ogs_dx7_dsp.c", "ogs_fx.c", "ogs_wt_dsp.c", "ogs_pd_dsp.c", "ogs_va_dsp.c", "ogs_bit_dsp.c", "ogs_west_dsp.c", "ogs_morph_dsp.c", "ogs_dm_dsp.c", "ogs_dual_dsp.c", "ogs_phys_dsp.c", "ogs_formant_dsp.c"]   # DSP na -O2 (reszta -Os): DX7, efekty, WAVE, PHASE, analog (VCO), BIT, WEST, MORPH, 88 / 99, DUAL, PHYS, FORMANT
