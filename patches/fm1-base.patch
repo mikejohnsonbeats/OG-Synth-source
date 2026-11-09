@@ -102,11 +102,41 @@ index 4d4f45c..b83da6c 100644
                  a = (gx & 1u) ? (a & 15u) : (a >> 4);
                  if (!a || (uint32_t)px >= cv_w || py < cv_y0 || py >= cv_y1)
                      continue;
+diff --git a/device/lcd.c b/device/lcd.c
+index b82c594..24c92f6 100644
+--- a/device/lcd.c
++++ b/device/lcd.c
+@@ -75,11 +75,15 @@ static void lcd_window(uint32_t x0, uint32_t y0, uint32_t x1, uint32_t y1)
+ }
+ 
+ static uint16_t lcd_fillbuf[240];
++/* OGS 1.6.4: the screen kept black (SCREEN OFF) with its backlight on: fills and blits do nothing until it is cleared.
++ * With the backlight off (PA2) FM-1s cut the speaker, the LEDs and the keys until switched off and on (inbox #13,
++ * reproduced on an older unit; the CPU and USB went on) */
++static uint8_t lcd_dark;
+ 
+ static void lcd_fill(uint32_t x, uint32_t y, uint32_t w, uint32_t h, uint16_t c)
+ {
+     uint32_t i, n, k, sw = (uint16_t)((c >> 8) | (c << 8));
+-    if (!w || !h || x >= 240u || y >= 240u)
++    if (lcd_dark || !w || !h || x >= 240u || y >= 240u)
+         return;
+     if (x + w > 240u)
+         w = 240u - x;
+@@ -103,7 +107,7 @@ static void lcd_fill(uint32_t x, uint32_t y, uint32_t w, uint32_t h, uint16_t c)
+ 
+ static void lcd_blit(uint32_t x, uint32_t y, uint32_t w, uint32_t h, const uint16_t *px)
+ {
+-    if (!w || !h)
++    if (lcd_dark || !w || !h)
+         return;
+     lcd_window(x, y, x + w - 1u, y + h - 1u);
+     lcd_data(px, w * h * 2u);
 diff --git a/device/main_fm1.c b/device/main_fm1.c
-index dd7cde2..f9db7e6 100644
+index dd7cde2..10c47b3 100644
 --- a/device/main_fm1.c
 +++ b/device/main_fm1.c
-@@ -722,6 +722,7 @@ static void fm1_fault(const fm1_crash_t *c)
+@@ -722,9 +722,11 @@ static void fm1_fault(const fm1_crash_t *c)
      fm1_reboot();
  }
  
@@ -114,7 +144,11 @@ index dd7cde2..f9db7e6 100644
  static void enter_uboot(const char *why)
  {
      fm1_audio_stop();
-@@ -844,7 +845,13 @@ static void fm1_main(void)
++    lcd_dark = 0;                                   /* OGS 1.6.4: a system screen shows also over SCREEN OFF's black */
+     lcd_fill(0, 0, 240, 240, C_BLACK);
+     sys_box(0, 110, 240, SYS_S, why, C_WHITE, 1);
+     fm1_delay_ms(20);
+@@ -844,7 +846,13 @@ static void fm1_main(void)
                                                       * VDDIO 3.2 V, WiFi's regulator automatic (fm1_sys.h) */
          fm1_clock_read(clock_boot);
          clock_fix = (int8_t)fm1_clock_stock();      /* the stock 360 MHz, whichever bootloader started us (fm1_clock.h) */
@@ -129,7 +163,7 @@ index dd7cde2..f9db7e6 100644
  #if FM1B_WIFI
          if (flash_ok)
              FL_FAR(fl_uid_ram)(flash_uid);
-@@ -934,11 +941,18 @@ static void fm1_main(void)
+@@ -934,11 +942,18 @@ static void fm1_main(void)
              int32_t a = fm1_an.con || fm1_an.pend ? (int32_t)fm1_an.master : fm1_adc_read(FM1_ADC_MASTER);
              if (a >= 0) {
                  knob += (a * 16 - knob) / 8;
@@ -151,7 +185,7 @@ index dd7cde2..f9db7e6 100644
              batt_t = fm1_ms;
              if (b > 0)
                  batt_raw = batt_raw ? batt_raw + (b - batt_raw) / 16 : b;
-@@ -983,6 +997,8 @@ static void fm1_main(void)
+@@ -983,6 +998,8 @@ static void fm1_main(void)
          }
          if (usb.uboot_req)
              enter_uboot("UBOOT (USB)");
@@ -339,7 +373,7 @@ index 151a650..1baa972 100644
 +    return st_commit(obj, len, cur, cur < 0 ? 0u : h.seq);
 +}
 diff --git a/device/unity.c b/device/unity.c
-index 512374b..2adf572 100644
+index 512374b..75efbb3 100644
 --- a/device/unity.c
 +++ b/device/unity.c
 @@ -121,6 +121,7 @@ static volatile uint32_t fm1_ms;  /* milliseconds since boot (TIMER4-based, TIME
@@ -443,6 +477,22 @@ index 512374b..2adf572 100644
  #include "storage.c"
  
  struct bootguard_s { uint32_t magic, failed, pending; };
+@@ -180,6 +243,7 @@ static int ota_fread(uint32_t off, void *p, uint32_t n) { return st_read(off, p,
+ static void ota_show(uint32_t step, int32_t code)
+ {
+     static const char *const STEP[] = {"", "PACKAGE", "CHECK HEAD", "LOADER", "CONFIRM", "RESTART"};
++    lcd_dark = 0;                                   /* OGS 1.6.4: a system screen shows also over SCREEN OFF's black */
+     lcd_fill(0, 0, 240, 240, C_BLACK);
+     sys_box(0, 92, 240, SYS_S, "UPDATE", C_WHITE, 1);
+     if (step < 9u) {
+@@ -284,6 +348,7 @@ static int rs_note(uint32_t addr)                   /* (past the question: no se
+ static int rs_playing(void) { return app_backup_playing() != 0; }
+ static void rs_screen(const char *a, const char *b)
+ {
++    lcd_dark = 0;                                   /* OGS 1.6.4: a system screen shows also over SCREEN OFF's black */
+     lcd_fill(0, 0, 240, 240, C_BLACK);
+     sys_box(0, 92, 240, SYS_S, a, C_WHITE, 1);
+     if (b)
 diff --git a/host/plat_host.c b/host/plat_host.c
 index 85620fd..f3a3e8a 100644
 --- a/host/plat_host.c
