@@ -14062,13 +14062,23 @@ OGS_UI void app_frame(void)
         lcd_fill(0, 0, 240, 240, C_BLACK);
         ui.redraw = 1;
     }
-    {                                        /* GLO SCREEN OFF: podświetlenie gaśnie po czasie bez dotyku panelu */
+    {                                        /* GLO SCREEN OFF: ekran czarny po czasie bez dotyku panelu */
         uint32_t off = SCROFF_S[glob.g[G_SCROFF]] * 1000u;
         int dark = off && now - ui.input_at >= off;
         if (dark != ui.screen_off) {
             ui.screen_off = (uint8_t)dark;
 #ifndef PLAT_HOST
-            fm1_lcd_backlight(!dark);
+            /* (1.6.4, skrzynka #13, odtworzone na FM1) podświetlenie zostaje włączone: zgaszone (PA2) przy małym poborze
+             * prądu FM1 wyłączał głośnik, diody i klawiaturę aż do wyłączenia zasilania (procesor i USB działały dalej).
+             * Teraz jedno wypełnienie na czarno, potem lcd.c nic nie rysuje (lcd_dark); po przebudzeniu cały ekran od nowa
+             * (jak po logo) */
+            if (dark) {
+                lcd_fill(0, 0, 240, 240, C_BLACK);
+                lcd_dark = 1;
+            } else {
+                lcd_dark = 0;
+                lcd_fill(0, 0, 240, 240, C_BLACK);
+            }
 #endif
             ui.redraw = 1;
         }

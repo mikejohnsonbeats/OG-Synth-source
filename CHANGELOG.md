@@ -1,5 +1,9 @@
 # Changelog
 
+## v1.6.4 — 2026-11-09
+Źródła MPL OG Synth 1.6.4 „Wake” (GLO > SCREEN OFF: podświetlenie zostaje, ekran czarny — app.c i łatka fm1-base lcd.c `lcd_dark`;
+ekrany systemowe UPDATE / RESTORE FROM USB? / UPDATE MODE widoczne na czarnym ekranie — unity.c, main_fm1.c; app.h: wersja).
+
 ## v1.6.3 — 2026-11-09
 Źródła MPL OG Synth 1.6.3 „Hub” (własny numer firmware FM-1_1313XXYYZZ dla The Firmware Hub — fm1.toml id_prefix, stary
 FM-1_11 w id_old; łatka fm1-base: strona kopii i WIPE przed stock znają oba numery, „Back to the stock firmware” czeka na
