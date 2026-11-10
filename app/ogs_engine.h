@@ -33,6 +33,7 @@ static struct {
     int8_t npit;                             /* (v0.92) perkusja, nuta z SEQ: PITCH tej nuty w półtonach (RACK SEL + K1) */
     float dlen;                              /* (v0.92) perkusja, nuta z SEQ: długość nuty w s (0: brzmienie); dłuższa
                                               * niż brzmienie = zanik rozciągnięty do niej */
+    uint8_t gid;                             /* (glide 1.7.0) nuta z SEQ ze skokami: jej numer (1..8) dla głosów (0: brak) */
 } ctl = {0.0f, 0.0f, 0.0f, 440.0f, 0, 0, 120.0f, 0};
 #define SLIDE_GLIDE 32                       /* czas glide nuty z SLIDE, gdy brzmienie ma GLIDE 0 */
 
@@ -122,6 +123,9 @@ typedef struct {
      * grają do końca), czas wybrzmienia dźwięku tej nuty w sekundach (długość nuty na ekranie) */
     void (*note_cut)(int32_t note);
     float (*sound_s)(int32_t note);
+    /* (glide 1.7.0, 0: brak — perkusja) zaawansowany glide z SEQ: głosy nuty note uruchomione przez nutę SEQ o numerze gid na
+     * wysokość note + semi (półtony); ta sama nuta z klawiatury / MIDI / innej nuty SEQ zostaje */
+    void (*note_bend)(int32_t note, uint32_t gid, float semi);
 } engine_t;
 
 /* v0.35: gest „trzymaj LFO / ENV + kręć gałką”. src = GEST_LFO / GEST_ENV | klawisz OP1..OP4 (0..3) albo GEST_DEF

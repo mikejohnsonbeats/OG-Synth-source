@@ -302,7 +302,7 @@ static const pdef_t GDEF[NGALL] = {
     {"MULTI MASTER", 0, 2, 0, F_LIST, LI(L_MTMST)},   /* 41 (v0.77) */
     {"SEND", 0, 16383, 0, F_NUM, 0}, {"SEND", 0, 16383, 0, F_NUM, 0},   /* 42-45 (v0.82): G_MTS0 */
     {"SEND", 0, 16383, 0, F_NUM, 0}, {"SEND", 0, 16383, 0, F_NUM, 0},
-    {"LINK", 0, 511, 0, F_NUM, 0}, {"", 0, 15, 0, F_NUM, 0},   /* 46-47 (v0.88): G_MFXOFF, G_SQUNIT (v0.92: COUNT IN) */
+    {"LINK", 0, 511, 0, F_NUM, 0}, {"", 0, 31, 0, F_NUM, 0},   /* 46-47 (v0.88): G_MFXOFF, G_SQUNIT (v0.92: COUNT IN; glide: bit 4) */
     {"MULTI", 0, 1, 0, F_LIST, LI(L_ONOFF)},     /* 48 (v0.64): MULTI, ścieżki T1-T4 (silnik, NENG = pusta) */
     {"T1", 0, NENG, ENG_MORPH, F_NUM, 0}, {"T2", 0, NENG, ENG_MOOG, F_NUM, 0}, {"T3", 0, NENG, ENG_VCO, F_NUM, 0},
     {"T4", 0, NENG, ENG_DCO, F_NUM, 0},
@@ -772,16 +772,23 @@ static void mt_pan_t(int32_t t, float *pl, float *pr)
 static void mt_ev_do(uint32_t k)             /* przerwanie audio: zdarzenie k (wskaźniki już na jego ścieżce) */
 {
     const engine_t *x = &ENG[mt_eng[mt_ev[k].t]];
+    if (mt_ev[k].on == 2u) {                 /* (glide 1.7.0) wysokość nuty (półtony x 256 w dl) */
+        if (x->note_bend)                    /* (vel: numer skoków nuty) */
+            x->note_bend((int32_t)mt_ev[k].note, mt_ev[k].vel, (float)(int16_t)mt_ev[k].dl * (1.0f / 256.0f));
+        return;
+    }
     if (mt_ev[k].on) {
         ctl.slide = mt_ev[k].slide & 1u;
         ctl.slide_from = mt_ev[k].from;
         ctl.npit = mt_ev[k].pit;
         ctl.dlen = (float)mt_ev[k].dl * 0.001f;
+        ctl.gid = mt_ev[k].slide >> 4;           /* (glide 1.7.0) numer skoków nuty dla jej głosów */
         LANE_KEEP();
         mt_lim_on(mt_ev[k].t, (int32_t)mt_ev[k].note);   /* (v0.75) limit nut ścieżki */
         x->note_on((int32_t)mt_ev[k].note, (float)mt_ev[k].vel / 127.0f);
         LANE_BACK();
         mt_kick(mt_ev[k].t, (int32_t)mt_ev[k].note);
+        ctl.gid = 0;
         ctl.slide = 0;
         ctl.npit = 0;
         ctl.dlen = 0.0f;
@@ -1067,6 +1074,7 @@ static void eng_on(const engine_t *e, int32_t key, float v);   /* (v0.39) nuty d
 static void eng_on_m(const engine_t *e, int32_t key, float v, uint32_t m);   /* ... z podanym akordem (1: bez) */
 static uint32_t chord_at(int32_t key);       /* akord brzmienia, które gra, na klawiszu key (bit k = +k półtonów; v1.1.0: KEY 3 / 7) */
 static void eng_off(const engine_t *e, int32_t key);
+static void eng_glide(const engine_t *e, int32_t key, uint32_t gid, float semi);   /* (glide 1.7.0) wysokość nuty z SEQ (z akordem) */
 /* (1.6.0) AUTO (ogs_auto.c, dołączony przed draw): linie w parametry co tick SEQ, wczytanie / zapis razem ze wzorem, gałki, ekran */
 static void ap_tick(uint32_t p);
 static void ap_load(int32_t pat);
@@ -1213,6 +1221,16 @@ static void eng_off(const engine_t *e, int32_t key)
         }
     nt_key[key & 127] = 0;
     sub_track();
+}
+static void eng_glide(const engine_t *e, int32_t key, uint32_t gid, float semi)   /* (glide 1.7.0) akord nuty jedzie cały, równolegle */
+{
+    const uint32_t m = nt_key[key & 127] ? nt_key[key & 127] : 1u;
+    uint32_t k;
+    if (!e->note_bend)
+        return;
+    for (k = 0; k < 32u; k++)
+        if (m >> k & 1u && key + (int32_t)k < 128)
+            e->note_bend(key + (int32_t)k, gid, semi);
 }
 static uint32_t chord_at(int32_t key) { return eng_play < NENG && mt_drum(eng_play) ? 1u : chord_of(xt_play(), key); }   /* (v0.92) perkusja: bez CHORD */
 static void eng_on(const engine_t *e, int32_t key, float v) { eng_on_m(e, key, v, chord_at(key)); }
@@ -4852,6 +4870,27 @@ __attribute__((used, visibility("default"))) int32_t ogs_sqn(int32_t i, int32_t 
     const sqn_t *q = &sqp.n[(uint32_t)i % SQ_NN];
     return w == 0 ? q->t : w == 1 ? q->len : w == 2 ? q->note : w == 3 ? q->vel : w == 4 ? q->fl : w == 6 ? sqp.x[(uint32_t)i % SQ_NN] : q->chance;   /* (v0.92) 6: x */
 }
+__attribute__((used, visibility("default"))) int32_t ogs_vsemi(int32_t i)   /* (glide 1.7.0) testy: głos i silnika na szkielecie: cel
+                                                                                    * wysokości x 100 (-1: cisza) */
+{
+    const skv_t *c = &skc[(uint32_t)i % SK_NV];
+    return c->on ? (int32_t)(c->tgt * 100.0f + 0.5f) : -1;
+}
+__attribute__((used, visibility("default"))) int32_t ogs_semi(void)   /* (glide 1.7.0) testy: wysokość najnowszego głosu silnika x 100 */
+{
+    return eng_play < NENG ? (int32_t)(ENG[eng_play].scope_semi() * 100.0f + 0.5f) : -1;
+}
+__attribute__((used, visibility("default"))) void ogs_sqn_set(int32_t i, int32_t w, int32_t v)   /* (glide) testy: pole nuty jak ogs_sqn */
+{
+    sqn_t *q = &sqp.n[(uint32_t)i % SQ_NN];
+    if (w == 0) q->t = (uint16_t)v;
+    else if (w == 1) q->len = (uint16_t)v;
+    else if (w == 2) q->note = (uint8_t)v;
+    else if (w == 3) q->vel = (uint8_t)v;
+    else if (w == 4) q->fl = (uint8_t)v;
+    else if (w == 5) q->chance = (uint8_t)v;
+    else if (w == 6) sqp.x[(uint32_t)i % SQ_NN] = (uint8_t)v;
+}
 __attribute__((used, visibility("default"))) const uint8_t *ogs_sq_flash(int32_t pat) { return plat_data(sq_off(pat)); }
 static uint8_t web_dx_out[164];                  /* (1.6.0) testy: ostatnia ramka SEND AS DX7 (na PC plat_sysex_send nic nie wysyła) */
 __attribute__((used, visibility("default"))) const uint8_t *ogs_dx_out(void) { return web_dx_out; }
@@ -5053,6 +5092,8 @@ static struct {
     uint8_t sqt_from;                    /* (v0.66.2) MOVE HERE FROM: ścieżka, z której nuty (gałka) */
     uint8_t sqt_src;                     /* (1.6.0, P62) COPY PATTERN / TRACK FROM: wzór, z którego (gałka) */
     int16_t sq_note;                     /* NOTES: podświetlona nuta (jedna, jak w Melodee), -1 pusty krok */
+    int16_t gp_par;                      /* (glide) edycja skoków: nuta (rodzic) */
+    uint8_t gp_on;                       /* (glide) NOTES: edycja skoków nuty gp_par (karta nuty > GLIDE przy ADVANCED) */
     uint8_t sq_rng;                      /* NOTES: zaznaczony zakres (SEL + SELECT, jak w FL): edycja i karta na wszystkich */
     uint32_t sq_ra, sq_re;               /* zakres: komórka startu i końca (tick w gridzie, w obie strony) */
     uint8_t play_hold;                   /* PLAY w NOTES: krótko = od kursora, trzymany = od początku */
@@ -5096,6 +5137,14 @@ __attribute__((used, visibility("default"))) int32_t ogs_pf(int32_t w)   /* test
          : w == 8 ? (int32_t)ogs_pf_mem : w == 9 ? ogs_pf_cv : w == 10 ? ogs_pf_cstep : w == 11 ? ui.pf_bank   /* (v0.91) krzywe */
          : w >= 200 && w < 200 + (int32_t)sizeof glob.gbc ? glob.gbc[w - 200] : ui.pf_mac[w & 3];   /* (8: pamięć PF_MEM_*, v0.47.2) */
 }
+__attribute__((used, visibility("default"))) void ogs_gp_view(int32_t low, int32_t zh, int32_t zv, int32_t bars, int32_t cur)   /* (glide) testy: widok NOTES */
+{
+    ui.sq_low = low;
+    ui.sq_zh = (uint8_t)zh;
+    ui.sq_zv = (uint8_t)zv;
+    sqp.bars = (uint8_t)bars;
+    ui.sq_cur = (uint32_t)cur;
+}
 #pragma pop_macro("__attribute__")
 #endif
 #define QUICK_MS 2000u
@@ -5126,7 +5175,8 @@ static int32_t ui_sq(int32_t w)          /* (testy; 17 MORE, 18 strona szybka, 1
          : w == 28 ? (int32_t)(sq_len() / SQ_STEP) : w == 29 ? (int32_t)rk_led_note : w == 30 ? (int32_t)rk_led_play   /* (v0.87) */
          : w == 31 ? (int32_t)vol_pct() : w == 32 ? (int32_t)label_lit() : w == 33 ? fx_cur()->type   /* (v0.88) */
          : w == 34 ? (int32_t)sq_led_full : w == 35 ? (int32_t)sq_led_mid : w == 36 ? (int32_t)(uintptr_t)ui.msg[0]   /* (v0.90) */
-         : w == 37 ? ui.sqn_row : w >= 40 && w < 40 + SCN_N * MT_N ? glob.scn[(w - 40) / MT_N].pre[(w - 40) % MT_N]   /* (v0.90) testy: presety scen */
+         : w == 37 ? ui.sqn_row : w == 38 ? ui.gp_on : w == 39 ? ui.gp_par   /* (glide) edycja skoków */
+         : w >= 40 && w < 40 + SCN_N * MT_N ? glob.scn[(w - 40) / MT_N].pre[(w - 40) % MT_N]   /* (v0.90) testy: presety scen */
          : w >= 1000 ? (sq_ac_ok = 0, (int32_t)sq_shown(&sqp.n[(uint32_t)(w - 1000) % SQ_NN]))
          : (int32_t)ui.sq_cur;
 }
@@ -6347,7 +6397,9 @@ static const char *const L_CINL[] = {"OFF", "1 BEAT", "2 BEATS", "1 BAR", "2 BAR
 static const char *const L_RECQ[] = {"OFF", "1/4", "1/8", "1/8T", "1/16", "1/16T", "1/32"};
 static const pdef_t RCDEF[4] = {{"BPM", 40, 300, 120, F_NUM, 0}, {"METRONOME", 0, 2, 0, F_LIST, LI(L_CLICK)},
                                 {"COUNT IN", 0, 4, 0, F_LIST, LI(L_CINL)}, {"QUANTIZE", 0, 6, 0, F_LIST, LI(L_RECQ)}};
-static int32_t rc_cin(void) { return glob.g[G_SQUNIT] >= 8 ? glob.g[G_SQUNIT] & 7 : 4; }   /* bit 0 ON, bity 1-2 LEN (domyślnie 1 BAR) */
+static int32_t rc_cin(void) { return (glob.g[G_SQUNIT] & 15) >= 8 ? glob.g[G_SQUNIT] & 7 : 4; }   /* bit 0 ON, bity 1-2 LEN (domyślnie 1 BAR) */
+/* (glide) TOOLS > GLIDE: SIMPLE (0, jak dotąd; stare zapisy) / ADVANCED (bit 4 pola G_SQUNIT: w GLO nie ma wolnych pól) */
+static int gp_adv(void) { return glob.g[G_SQUNIT] >> 4 & 1; }
 static int32_t rc_get(int32_t k)
 {
     return k == 0 ? (sqp.bpm10 + 5) / 10 : k == 1 ? sqp.click : k == 2 ? (rc_cin() & 1 ? (rc_cin() >> 1) + 1 : 0) : sqp.recq;
@@ -6383,11 +6435,12 @@ static const pdef_t SQDEF[2][4] = {
     {{"HUMANIZE", 0, 100, 0, F_NUM, 0}, {"VEL RANDOM", 0, 100, 0, F_NUM, 0}, {"GATE", 25, 200, 100, F_NUM, 0},
      {"CLICK", 0, 2, 0, F_LIST, LI(L_CLICK)}},
 };
-enum { ST_QUANT, ST_DOUBLE, ST_CLEAR, ST_CLRALL, ST_MOVE, ST_CPAT, ST_CTRK, ST_ZINV, ST_K1INV, NST };   /* (v0.66.1) CLEAR: wybrana
+enum { ST_QUANT, ST_DOUBLE, ST_CLEAR, ST_CLRALL, ST_MOVE, ST_CPAT, ST_CTRK, ST_ZINV, ST_K1INV, ST_GLIDE, NST };   /* (v0.66.1) CLEAR: wybrana
                                                                                                     * ścieżka; (1.6.0, P62) COPY */
 static const char *const ST_NAME[NST] = {"QUANTIZE NOTES", "DOUBLE LENGTH", "CLEAR PATTERN", "CLEAR ALL TRACKS", "MOVE HERE FROM",
                                          "COPY PATTERN FROM", "COPY TRACK FROM", "ZOOM (SEL + K1)",
-                                         "K1 NOTES / SCROLL"};
+                                         "K1 NOTES / SCROLL", "GLIDE"};
+static const char *const L_GLMODE[2] = {"SIMPLE", "ADVANCED"};   /* (glide) TOOLS > GLIDE */
 
 static uint32_t sq_sel[(SQ_NN + 31) / 32];       /* zaznaczone nuty (NOTES): z komórki kursora */
 static uint32_t sq_dirty_at;
@@ -6563,6 +6616,54 @@ OGS_UI static void su_swap(uint32_t k)
         su_e[k].x = x;
     }
 }
+
+/* (glide) skoki idą za nutą pi (już zmienioną): skoki starej nuty (start ot, wysokość on, ta sama ścieżka) przesunięte o dt ticków,
+ * wysokości docelowe o dp (K2 na nucie przenosi cały łańcuch), z nowym startem i wysokością nuty; skok poza nutą (skrócona, usunięta:
+ * vel 0, przeniesiona przez koniec wzoru) znika. dup: kopie (nuta pi = kopia o dt dalej), stare zostają; 1 = zabrakło miejsca. */
+static uint32_t gp_wrap(int32_t t) { const int32_t L = (int32_t)sq_len(); return (uint32_t)((t % L + L) % L); }
+OGS_UIN static int gp_fix(uint32_t pi, uint32_t ot, uint32_t on, int32_t dt, int32_t dp, int dup)
+{
+    const sqn_t *p = &sqp.n[pi];
+    uint32_t i, j = 0, st;
+    if (dup && !gp_wrap(dt))                     /* kopia w tym samym miejscu (zakres = cały wzór): te same skoki */
+        return 0;
+    for (i = 0; i < SQ_NN; i++) {
+        sqn_t *g = &sqp.n[i];
+        if (!SQN_GP(g) || GP_P(g) != ot || g->vel != on + 1u || SQN_TRK(g) != SQN_TRK(p))
+            continue;
+        if (dup) {
+            for (; j < SQ_NN && sqp.n[j].vel; j++)
+                ;
+            if (j == SQ_NN)
+                return 1;
+            sq_u(j);
+            sqp.n[j] = *g;
+            sqp.x[j] = sqp.x[i];
+            g = &sqp.n[j];
+        } else {
+            sq_u(i);
+        }
+        st = gp_wrap((int32_t)GP_S(g) + dt);
+        g->t = (uint16_t)(GP_T | st);
+        g->note = (uint8_t)clamp((int32_t)g->note + dp, 0, 127);
+        gp_setp(g, p->t);
+        g->vel = (uint8_t)(p->note + 1u);
+        if (!p->vel || !p->len || st < p->t || st >= (uint32_t)p->t + p->len)
+            g->vel = 0;
+    }
+    return 0;
+}
+#define GP_NC 3                                  /* (glide) wiersze karty skoku (ogs_glide.c) */
+static int gp_live(void);
+static int32_t gp_at(const uint16_t *o, uint32_t n);
+static void gp_enter(int32_t pi);
+static void gp_exit(void);
+static void gp_cursor(int32_t e);
+static void gp_knob(uint32_t k, int32_t e);
+static void gp_card_turn(int32_t e);
+static void gp_card_ok(void);
+static void gp_card_draw(void);
+static void gp_chips(void);
 
 static void sq_cursor(int32_t to);
 static void sq_undo(int32_t e)                   /* SEL + K4: e < 0 cofa, e > 0 ponawia (o tyle kroków) */
@@ -6897,6 +6998,7 @@ static void sq_len_edit(int32_t mode, int32_t d, uint32_t key)
         else
             n->len = (uint16_t)nl;
         ui.sq_len = n->len;                      /* nowe nuty: ta długość (jak w FL) */
+        gp_fix(i, n->t, n->note, 0, 0, 0);       /* (glide) skoki za nowym końcem znikają */
     }
     sq_changed();
 }
@@ -6969,6 +7071,7 @@ static void sq_toggle(uint32_t note, uint32_t vel)   /* SEL + klawisz w kursorze
     if (i >= 0) {
         sq_u((uint32_t)i);
         sqp.n[i].vel = 0;
+        gp_fix((uint32_t)i, sqp.n[i].t, sqp.n[i].note, 0, 0, 0);   /* (glide) skoki z nutą */
         sq_changed();
         app_say("NOTE", "DELETED");
     } else {
@@ -6983,12 +7086,17 @@ OGS_UI static void sq_quantize(int all)                 /* nuty do gridu (all 1:
     uint32_t i, g = all || !sqp.recq ? sq_grid() : SQ_GRID[(sqp.recq - 1u) % 6u], L = sq_len();   /* (v0.92) nagranie: QUANTIZE z REC */
     for (i = 0; i < SQ_NN; i++) {
         sqn_t *n = &sqp.n[i];
-        if (!n->vel || (!all && !(n->fl & SQF_NEW)) || (all == 1 && !sq_mine(n)) || (all == 2 && !sq_tgt(i)))   /* (wszystkie: wybranej ścieżki) */
+        uint32_t t0;
+        if (!n->vel || !n->len || SQN_GP(n) || (!all && !(n->fl & SQF_NEW)) || (all == 1 && !sq_mine(n)) || (all == 2 && !sq_tgt(i)))   /* (wszystkie:
+                                                  * wybranej ścieżki; glide: skok nie, jedzie z nutą) */
             continue;
         if (all)
             sq_u(i);
+        t0 = n->t;
         n->t = (uint16_t)((n->t + g / 2u) / g * g % L);
         n->fl &= (uint8_t)~SQF_NEW;
+        if (all)                                 /* (glide) skoki o tyle samo */
+            gp_fix(i, t0, n->note, (int32_t)n->t - (int32_t)t0, 0, 0);
     }
     sq_changed();
 }
@@ -7630,7 +7738,7 @@ static void sq_knob(uint32_t k, int32_t e)
             sq_changed();
         } else {
             const int32_t c = v ? 1 | (v - 1) << 1 : rc_cin() & 6;   /* OFF: długość zostaje */
-            glob.g[G_SQUNIT] = (int16_t)(8 | c);
+            glob.g[G_SQUNIT] = (int16_t)((glob.g[G_SQUNIT] & 16) | 8 | c);   /* (glide: bit 4 zostaje) */
             glob_dirty = 1;
         }
         return;
@@ -7691,6 +7799,10 @@ static void sq_knob(uint32_t k, int32_t e)
         sq_undo(e);
         return;
     }
+    if (gp_live()) {                             /* (glide) edycja skoków */
+        gp_knob(k, e);
+        return;
+    }
     if (k == 0) {                                /* K1: nuty kroku od dołu (ta sama wysokość: od prawej), dalej: widok; (1.0.0, decyzja
                                                   * użytkownika 2026-11-04) w lewo = w górę (do v0.92 w prawo; INVERTED = dawny kierunek) */
         sq_vert(glob.g[G_SQK1INV] ? e : -e);
@@ -7713,12 +7825,15 @@ static void sq_knob(uint32_t k, int32_t e)
     sq_um(0x100u + k + ((uint32_t)(ui.sq_note + 1) << 4) + ((uint32_t)ui.sq_rng << 15));
     for (i = 0; i < SQ_NN; i++) {                /* podświetlona albo wszystkie z zakresu */
         sqn_t *n = &sqp.n[i];
+        uint32_t o0;
         if (!sq_tgt(i))
             continue;
+        o0 = n->note;
         sq_u(i);
         if (k == 1) {                            /* K2 PITCH */
             n->note = (uint8_t)clamp((int32_t)n->note + d, 0, 127);
             ui.sq_pitch = n->note;
+            gp_fix(i, n->t, o0, 0, (int32_t)n->note - (int32_t)o0, 0);   /* (glide) cały łańcuch skoków jedzie z nutą */
         } else {                                 /* K4 VELOCITY */
             n->vel = (uint8_t)clamp((int32_t)n->vel + d, 1, 127);
         }
@@ -7750,6 +7865,15 @@ static void sqn_value(int32_t row, char *t)     /* wartość wiersza karty */
             text_cat(t, n);
             text_cat(t, " TICKS");
         }
+    } else if (row == SN_GLIDE && gp_adv()) {   /* (glide) ADVANCED: ile skoków, SEL edytuje */
+        uint16_t o[GP_MAX];
+        const uint32_t n = ui.sq_rng ? 0u : gp_list((uint32_t)(sq_tgt_first() >= 0 ? sq_tgt_first() : 0), o);
+        if (n) {
+            int_text((int32_t)n, t, 0);
+            text_cat(t, n > 1u ? " GLIDES" : " GLIDE");
+        } else {
+            text_cat(t, "SEL: EDIT");
+        }
     } else if (row == SN_GLIDE) {
         text_cat(t, q->fl & SQF_GLIDE ? "ON" : "OFF");
     } else if (row == SN_CHANCE) {
@@ -7773,15 +7897,17 @@ static void sqn_turn(int32_t e)                  /* karta: gałka zmienia warto�
 {
     uint32_t L = sq_len(), i;
     int32_t f = sq_tgt_first();
-    if (f < 0 || ui.sqn_row > SN_RATCH)
+    if (f < 0 || ui.sqn_row > SN_RATCH || (ui.sqn_row == SN_GLIDE && gp_adv()))   /* (glide) ADVANCED: GLIDE tylko SEL */
         return;
     sq_um(0x500u + ui.sqn_row + ((uint32_t)(ui.sq_note + 1) << 4) + ((uint32_t)ui.sq_rng << 15));
     if (ui.sqn_row == SN_MOVE && ui.sq_rng) {   /* zakres jedzie razem z nutami (o krok, nie o tick) */
         int32_t g = (int32_t)sq_grid(), sh = (e > 0 ? 1 : -1) * g;
         for (i = 0; i < SQ_NN; i++)
             if (sq_tgt(i)) {
+                const uint32_t ot = sqp.n[i].t;
                 sq_u(i);
                 sqp.n[i].t = (uint16_t)(((int32_t)sqp.n[i].t + sh + 4 * (int32_t)L) % (int32_t)L);
+                gp_fix(i, ot, sqp.n[i].note, sh, 0, 0);   /* (glide) skoki jadą z nutą */
             }
         ui.sq_ra = (uint32_t)(((int32_t)ui.sq_ra + sh + 4 * (int32_t)L) % (int32_t)L);
         ui.sq_re = (uint32_t)(((int32_t)ui.sq_re + sh + 4 * (int32_t)L) % (int32_t)L);
@@ -7796,7 +7922,9 @@ static void sqn_turn(int32_t e)                  /* karta: gałka zmienia warto�
             continue;
         sq_u(i);
         if (ui.sqn_row == SN_MOVE) {             /* tick po ticku (poza gridem); kursor idzie za nutą */
+            const uint32_t ot = q->t;
             q->t = (uint16_t)(((int32_t)q->t + e + 4 * (int32_t)L) % (int32_t)L);
+            gp_fix(i, ot, q->note, e, 0, 0);     /* (glide) skoki jadą z nutą */
             ui.sq_cur = q->t / sq_grid() * sq_grid();
         } else if (ui.sqn_row == SN_GLIDE) {
             q->fl = (uint8_t)(e > 0 ? q->fl | SQF_GLIDE : q->fl & ~SQF_GLIDE);
@@ -7818,6 +7946,13 @@ static void sqn_ok(void)                         /* karta: SEL (na wszystkich ed
     if (f < 0)
         return;
     q = &sqp.n[f];
+    if (ui.sqn_row == SN_GLIDE && gp_adv()) {    /* (glide) ADVANCED: edycja skoków tej nuty */
+        if (ui.sq_rng)
+            app_say("GLIDE", "ONE NOTE AT A TIME");
+        else
+            gp_enter(f);
+        return;
+    }
     sq_um(0);
     if (ui.sqn_row == SN_QUANT || ui.sqn_row == SN_VELR) {   /* (v0.90) nuta albo zaznaczenie; karta zostaje (VEL RANDOM: znowu) */
         if (ui.sqn_row == SN_QUANT) {
@@ -7836,6 +7971,7 @@ static void sqn_ok(void)                         /* karta: SEL (na wszystkich ed
             uint32_t src[(SQ_NN + 31) / 32];     /* (v0.90) bity zamiast listy: 56 B na stosie, było 896 B stałego RAM (UNDO) */
             for (i = 0; i < SQ_NN; i++)
                 src[i >> 5] = (i & 31u ? src[i >> 5] : 0u) | (uint32_t)sq_tgt(i) << (i & 31u);
+
             for (i = 0; i < SQ_NN; i++) {
                 if (!(src[i >> 5] >> (i & 31u) & 1u))
                     continue;
@@ -7849,6 +7985,8 @@ static void sqn_ok(void)                         /* karta: SEL (na wszystkich ed
                 sqp.n[j] = sqp.n[i];
                 sqp.x[j] = sqp.x[i];
                 sqp.n[j].t = (uint16_t)((sqp.n[i].t + w) % L);
+                if ((full = (uint32_t)gp_fix(j, sqp.n[i].t, sqp.n[i].note, (int32_t)w, 0, 1)) != 0)   /* (glide) skoki na kopii */
+                    break;
             }
             ui.sq_ra = (lo + w) % L;
             ui.sq_re = (ui.sq_ra + w - sq_grid()) % L;
@@ -7860,9 +7998,10 @@ static void sqn_ok(void)                         /* karta: SEL (na wszystkich ed
             for (i = 0; i < SQ_NN; i++)
                 if (sq_tgt(i)) {
                     sq_u(i);
-                    if (ui.sqn_row == SN_DEL)
+                    if (ui.sqn_row == SN_DEL) {
                         sqp.n[i].vel = 0;
-                    else
+                        gp_fix(i, sqp.n[i].t, sqp.n[i].note, 0, 0, 0);   /* (glide) skoki z nutą */
+                    } else
                         sqp.n[i].fl = (uint8_t)(on ? sqp.n[i].fl | SQF_GLIDE : sqp.n[i].fl & ~SQF_GLIDE);
                 }
             if (ui.sqn_row == SN_DEL) {
@@ -7896,9 +8035,13 @@ static void sqn_ok(void)                         /* karta: SEL (na wszystkich ed
         sqp.n[j] = c;
         sqp.x[j] = sqp.x[f];
         ui.sq_note = j;
-        app_say("NOTE", "DUPLICATED");
+        if (gp_fix((uint32_t)j, q->t, q->note, (int32_t)sq_grid(), 0, 1))   /* (glide) skoki na kopii */
+            app_say("PATTERN FULL", "448 NOTES");
+        else
+            app_say("NOTE", "DUPLICATED");
     } else if (ui.sqn_row == SN_DEL) {
         q->vel = 0;
+        gp_fix((uint32_t)f, q->t, q->note, 0, 0, 0);   /* (glide) skoki z nutą */
         ui.sq_note = sq_cell_note(0);
         ui.page = V_SEQ;
         app_say("NOTE", "DELETED");
@@ -7938,6 +8081,13 @@ static void sq_sel_short(void)                   /* SEL krótko: NOTES = GLIDE, 
     }
     (void)i;
     (void)all;
+    if (gp_live()) {                             /* (glide) edycja skoków: karta skoku */
+        ui.page = V_SQN;
+        ui.sqn_row = 0;
+        ui.knob = -1;
+        ui.redraw = 1;
+        return;
+    }
     if (sq_tgt_first() < 0) {                    /* pusty krok (i pusty zakres): jak wpisać */
         app_say("EMPTY STEP", "PLAY KEYS OR TURN K2");
         return;
@@ -7999,7 +8149,7 @@ OGS_UIN static void sqt_copy(int all)
     for (i = 0; i < SQ_NN; i++) {
         const sqn_t c = q->n[i];
         const uint32_t o = X0 + i;
-        if (!c.vel || c.vel > 127u || c.note > 127u || (!all && SQN_TRK(&c) != t))
+        if (!c.vel || c.vel > (c.t & GP_T ? 128u : 127u) || c.note > 127u || (!all && SQN_TRK(&c) != t))   /* (glide: skok do 128) */
             continue;
         if (all) {                               /* wzór: to samo miejsce */
             j = i;
@@ -8038,9 +8188,13 @@ static void sqt_ok(void)                         /* okno narzędzi wzoru: SEL ro
         sqt_copy(ui.sqt_cur == ST_CPAT);
         return;
     }
-    if (ui.sqt_cur == ST_ZINV || ui.sqt_cur == ST_K1INV) {   /* kierunek gałki: przełącza, okno zostaje */
+    if (ui.sqt_cur == ST_ZINV || ui.sqt_cur == ST_K1INV || ui.sqt_cur == ST_GLIDE) {   /* kierunek gałki: przełącza, okno zostaje;
+                                                                                    * (glide) GLIDE: SIMPLE / ADVANCED */
         int32_t g = ui.sqt_cur == ST_ZINV ? G_SQZINV : G_SQK1INV;
-        glob.g[g] = (int16_t)!glob.g[g];
+        if (ui.sqt_cur == ST_GLIDE)
+            glob.g[G_SQUNIT] = (int16_t)(glob.g[G_SQUNIT] ^ 16);
+        else
+            glob.g[g] = (int16_t)!glob.g[g];
         glob_dirty = 1;                          /* zapis przy wyjściu (glob_commit, jak GLO) */
         ui.redraw = 1;
         return;
@@ -8064,6 +8218,18 @@ static void sqt_ok(void)                         /* okno narzędzi wzoru: SEL ro
         sq.hold = 1;
         for (i = 0; i < nsrc; i++) {             /* kopia każdej nuty o długość wzoru dalej */
             uint32_t j;
+            if (SQN_GP(&sqp.n[i]) && GP_S(&sqp.n[i]) < L) {   /* (glide) skok: kopia z kopią swojej nuty (start skosu i rodzica + L) */
+                for (j = 0; j < SQ_NN && sqp.n[j].vel; j++)
+                    ;
+                if (j == SQ_NN)
+                    break;
+                sq_u(j);
+                sqp.n[j] = sqp.n[i];
+                sqp.x[j] = sqp.x[i];
+                sqp.n[j].t = (uint16_t)(sqp.n[i].t + L);
+                gp_setp(&sqp.n[j], GP_P(&sqp.n[i]) + L);
+                continue;
+            }
             if (!sqp.n[i].vel || sqp.n[i].t >= L)
                 continue;
             for (j = 0; j < SQ_NN && sqp.n[j].vel; j++)
@@ -8117,7 +8283,7 @@ static void sqt_ok(void)                         /* okno narzędzi wzoru: SEL ro
 static void sq_keys(uint32_t pressed, uint32_t released, uint32_t keys)   /* klawisze na stronie NOTES */
 {
     uint32_t k;
-    if (ui.page != V_SEQ || ui.sq_pg != SQ_NOTES || sq.play)
+    if (ui.page != V_SEQ || ui.sq_pg != SQ_NOTES || sq.play || ui.gp_on)   /* (glide) edycja skoków: klawisze tylko grają */
         return;
     /* wpis (jak w Melodee): na pustym kroku klawisze wpisują nutę / akord, po puszczeniu kursor dalej; na kroku z nutami
      * tylko grają (REC: wpisują i tam; ta sama nuta w kursorze usuwa) */
@@ -8133,6 +8299,7 @@ static void sq_keys(uint32_t pressed, uint32_t released, uint32_t keys)   /* kla
                 if (i >= 0 && !(ui.st_mine[i >> 5] >> (i & 31) & 1u)) {
                     sq_u((uint32_t)i);
                     sqp.n[i].vel = 0;            /* REC: ta sama nuta w kursorze usuwa */
+                    gp_fix((uint32_t)i, sqp.n[i].t, sqp.n[i].note, 0, 0, 0);   /* (glide) */
                     sq_changed();
                 } else if (i < 0 && (i = sq_add((uint32_t)note, v)) >= 0) {
                     ui.st_mine[i >> 5] |= 1u << (i & 31);
@@ -8159,11 +8326,24 @@ static void sq_keys(uint32_t pressed, uint32_t released, uint32_t keys)   /* kla
     ui.redraw = 1;
 }
 
+/* (P71, K74 mc0de; decyzja użytkownika 2026-11-10) zmiany z czasu grania albo REC (też wpis krokowy) zapisują się zaraz po STOP /
+ * REC OFF, gdy tylko ucichnie (cisza 1 s), bez czekania 5 s od zmiany i 10 s od dotknięcia — wyłączenie FM1 tuż po zatrzymaniu
+ * gubiło nuty (po włączeniu starsza wersja wzoru). Zapis flasha dalej tylko w ciszy (nie przerywa dźwięku). */
+static uint8_t sq_stop_save;
 static void sq_autosave(uint32_t now)            /* wzór i ustawienia SEQ / ARP: w ciszy, 5 s po zmianie */
 {
-    if ((!sqp_dirty && !sqg_dirty) || sq.play || sq.rec || ar.nl || backup_hold || !out_quiet()
-        || now - sq_dirty_at < AUTOSAVE_MS || now - ui.input_at < FLASH_IDLE_MS)
+    if (!sqp_dirty && !sqg_dirty) {
+        sq_stop_save = 0;
         return;
+    }
+    if (sq.play || sq.rec) {                     /* gra / nagrywa: po zatrzymaniu od razu */
+        sq_stop_save = 1;
+        return;
+    }
+    if (ar.nl || backup_hold || !out_quiet()
+        || (!sq_stop_save && (now - sq_dirty_at < AUTOSAVE_MS || now - ui.input_at < FLASH_IDLE_MS)))
+        return;
+    sq_stop_save = 0;
     if (sqp_dirty)
         sq_store();
     if (sqg_dirty)
@@ -8645,6 +8825,8 @@ OGS_UI static void knob_turn(uint32_t k, int32_t e)
     if (ui.page == V_SQN) {                  /* karta nuty: każda gałka zmienia wiersz */
         if (ui.sq_pg == SQ_AUTO)             /* (1.6.0) karta AUTO */
             ap_card_turn(e);
+        else if (gp_live())                  /* (glide) karta skoku */
+            gp_card_turn(e);
         else
             sqn_turn(e);
         return;
@@ -9138,6 +9320,8 @@ static void save_ok(void)               /* SEL w oknach: zatwierdza (HOME anuluj
     } else if (ui.page == V_SQN) {
         if (ui.sq_pg == SQ_AUTO)                 /* (1.6.0) karta AUTO */
             ap_card_ok();
+        else if (gp_live())                      /* (glide) karta skoku */
+            gp_card_ok();
         else
             sqn_ok();
     }
@@ -9188,6 +9372,10 @@ static void home_key(void)               /* HOME: wraca; w ALL PRESETS / ENGINE 
     if (ui.page == V_SQT || ui.page == V_SQN) {   /* narzędzia wzoru, karta nuty: z powrotem */
         ui.page = V_SEQ;
         ui.redraw = 1;
+        return;
+    }
+    if (ui.page == V_SEQ && gp_live()) {     /* (glide) edycja skoków: z powrotem do nut */
+        gp_exit();
         return;
     }
     if (sq_in_set()) {                       /* (v0.88) ustawienia SEQ: widok (RACK / NOTES); (v0.90) lista scen: główny ekran (niżej) */
@@ -9986,7 +10174,17 @@ static void mt_scene_save(void)
     glob.scm[mt_scn] = glob.mfx;             /* (v0.85) MASTER FX */
     glob_dirty = 1;                          /* (zapis w ciszy jak GLO MULTI) */
     mt_gdirty = 1;
-    if (ed >= 0) {                           /* niezapisane brzmienie: scena pamięta zapisany preset */
+    if (!sq.rec) {                           /* (P71, decyzja użytkownika 2026-11-10) SAVE sceny zapisuje też nuty wzoru i numer wzoru
+                                              * od razu (scena pamięta tylko numer; nuty zapisywały się same dopiero w ciszy); gdy gra:
+                                              * krótka pauza w dźwięku, jak przy zmianie wzoru; w trakcie nagrywania nie (nuty trzymane) */
+        if (sqp_dirty)
+            sq_store();
+        if (sqg_dirty)
+            sqg_store();
+    }
+    if (sqp_dirty) {                         /* (nie zapisało się: flash albo nagrywanie) */
+        app_say("PATTERN", "NOT SAVED");
+    } else if (ed >= 0) {                    /* niezapisane brzmienie: scena pamięta zapisany preset */
         t[0] = 'T';
         t[1] = (char)('1' + ed);
         t[2] = 0;
@@ -10477,7 +10675,7 @@ OGS_UI static void input(void)
             ui.sel_used = 1;
             continue;
         }
-        if (ui.sel_hold && ui.page == V_SEQ && ui.sq_pg == SQ_NOTES && (keys & bit) && !(ui.keys & bit)) {
+        if (ui.sel_hold && ui.page == V_SEQ && ui.sq_pg == SQ_NOTES && !ui.gp_on && (keys & bit) && !(ui.keys & bit)) {
             eaten |= bit;                        /* NOTES: SEL trzymany + klawisz = nuta w kursorze (dodaj / usuń); (v0.90) w MULTI OP1-4: ścieżka (wyżej) */
             sq_toggle((uint32_t)note, key_vel(k));
             ui.sel_used = 1;
@@ -10711,6 +10909,11 @@ OGS_UI static void input(void)
                 } else if (ui.sq_pg == SQ_RACK) {   /* (v0.57) RACK: wiersz (dźwięk) */
                     ui.rk_row = (uint8_t)clamp((int32_t)ui.rk_row + (e > 0 ? 1 : -1), 0, 15);
                     rk_view();
+                } else if (gp_live()) {      /* (glide) edycja skoków: kursor po nucie (SEL + SELECT: nic) */
+                    if (ui.sel_hold)
+                        ui.sel_used = 1;
+                    else
+                        gp_cursor(e);
                 } else if (sq_roll() && ui.sel_hold)
                     sq_range(e);
                 else if (sq_roll())
@@ -10720,7 +10923,8 @@ OGS_UI static void input(void)
                 continue;
             }
             if (ui.page == V_SQN) {          /* karta nuty: wiersz */
-                ui.sqn_row = (uint8_t)clamp((int32_t)ui.sqn_row + e, 0, ui.sq_pg == SQ_AUTO ? 3 : NSN - 1);   /* (1.6.0) AUTO: 4 */
+                ui.sqn_row = (uint8_t)clamp((int32_t)ui.sqn_row + e, 0, ui.sq_pg == SQ_AUTO ? 3 : ui.gp_on ? GP_NC - 1 : NSN - 1);   /* (1.6.0)
+                                                                                                            * AUTO: 4; (glide) karta skoku: 3 */
                 ui.redraw = 1;
                 continue;
             }
@@ -11248,43 +11452,43 @@ static const engine_t ENG[NENG] = {
     {"MINI", P, NP, NPAGES, NPRESETS, PAGE_NAME, {MG_EDIT, MG_ENV, MG_LFO, MG_ALL}, {11, 2, 2, 15}, 7, P_MODE,
      P_CUT, {P_MODE, P_PRIO, -1}, 0, moog_reset, moog_load_preset, moog_preset_name, moog_note_on, moog_note_off,
      moog_all_off, moog_render, moog_knob, moog_sel, moog_more, moog_def, moog_vget, moog_vset, moog_text, moog_label_page, moog_page_label,
-     moog_has_graph, moog_graph, moog_held_note, moog_scope_semi, moog_sounding, 0, 0, moog_gest, moog_moddepth},
+     moog_has_graph, moog_graph, moog_held_note, moog_scope_semi, moog_sounding, 0, 0, moog_gest, moog_moddepth, 0, 0, moog_note_bend},
     {"FM6", X, NX, NXPAGES, NDXP, XPAGE_NAME, {XG_EDIT, XG_ENV, XG_LFO, XG_ALL}, {13, 9, 3, 25}, XP_ALGO, X_MODE,
      X_ALG, {X_MODE, X_PRIO, X_VOICES}, 0, dx_reset, dx_load, dx_preset_name, dx_note_on, dx_note_off, dx_all_off,
      dx_render, dx_knob, dx_sel, dx_more, dx_def, dx_vget, dx_vset, dx_text, dx_label_page, dx_page_label,
-     dx_has_graph, dx_graph, dx_held_note, dx_scope_semi, dx_sounding, 0, 0, dx_gest, dx_moddepth},
+     dx_has_graph, dx_graph, dx_held_note, dx_scope_semi, dx_sounding, 0, 0, dx_gest, dx_moddepth, 0, 0, dx_note_bend},
     {"WAVE", W, NW, NWPAGES, NWTP, WPAGE_NAME, {WG_EDIT, WG_ENV, WG_LFO, WG_ALL}, {14, 4, 22, 40}, 7, W_VMODE,
      W_APOS, {W_VMODE, W_VOICES, -1}, wt_init, wt_reset, wt_load, wt_preset_name, wt_note_on, wt_note_off, wt_all_off,
      wt_render, wt_knob, wt_sel, wt_more, wt_def, wt_vget, wt_vset, wt_text, wt_label_page, wt_page_label, wt_has_graph,
-     wt_graph, wt_held_note, wt_scope_semi, wt_sounding, wt_graph_live, wt_step, wt_gest, wt_moddepth},
+     wt_graph, wt_held_note, wt_scope_semi, wt_sounding, wt_graph_live, wt_step, wt_gest, wt_moddepth, 0, 0, wt_note_bend},
     {"PHASE", Z, NZ, NZPAGES, NZP, ZPAGE_NAME, {ZG_EDIT, ZG_ENV, ZG_LFO, ZG_ALL}, {8, 5, 6, 19}, 5, Z_VMODE,
      Z_DCW1, {Z_VMODE, Z_VOICES, -1}, pd_init, pd_reset, pd_load, pd_preset_name, pd_note_on, pd_note_off, pd_all_off,
      pd_render, pd_knob, pd_sel, pd_more, pd_def, pd_vget, pd_vset, pd_text, pd_label_page, pd_page_label, pd_has_graph,
-     pd_graph, pd_held_note, pd_scope_semi, pd_sounding, pd_graph_live, 0, pd_gest, pd_moddepth},
+     pd_graph, pd_held_note, pd_scope_semi, pd_sounding, pd_graph_live, 0, pd_gest, pd_moddepth, 0, 0, pd_note_bend},
     {"VCO", V, NV, NVPAGES, NVP, VPAGE_NAME, {VG_EDIT, VG_ENV, VG_LFO, VG_ALL}, {6, 2, 3, 11}, 4, V_MODE,
      V_CUT, {V_MODE, V_UNI, -1}, vc_init, vc_reset, vc_load, vc_preset_name, vc_note_on, vc_note_off, vc_all_off,
      vc_render, vc_knob, vc_sel, vc_more, vc_def, 0, 0, vc_text, vc_label_page, vc_page_label, vc_has_graph,
-     vc_graph, sk_held_note, vc_scope_semi, sk_sounding, vc_graph_live, 0, vc_gest, vc_moddepth},
+     vc_graph, sk_held_note, vc_scope_semi, sk_sounding, vc_graph_live, 0, vc_gest, vc_moddepth, 0, 0, sk_note_bend},
     {"SVF", S, NS, NSPAGES, NSP, SPAGE_NAME, {SG_EDIT, SG_ENV, SG_LFO, SG_ALL}, {6, 2, 3, 11}, 4, S_MODE,
      S_CUT, {S_MODE, S_UNI, -1}, sm_init, sm_reset, sm_load, sm_preset_name, sm_note_on, sm_note_off, sm_all_off,
      sm_render, sm_knob, sm_sel, sm_more, sm_def, 0, 0, sm_text, sm_label_page, sm_page_label, sm_has_graph,
-     sm_graph, sk_held_note, sm_scope_semi, sk_sounding, sm_graph_live, 0, sm_gest, sm_moddepth},
+     sm_graph, sk_held_note, sm_scope_semi, sk_sounding, sm_graph_live, 0, sm_gest, sm_moddepth, 0, 0, sk_note_bend},
     {"DCO", J, NJ, NJPAGES, NJP, JPAGE_NAME, {JG_EDIT, JG_ENV, JG_LFO, JG_ALL}, {6, 2, 2, 10}, 3, J_MODE,
      J_CUT, {J_MODE, J_UNI, -1}, jn_init, jn_reset, jn_load, jn_preset_name, jn_note_on, jn_note_off, jn_all_off,
      jn_render, jn_knob, jn_sel, jn_more, jn_def, 0, 0, jn_text, jn_label_page, jn_page_label, jn_has_graph,
-     jn_graph, sk_held_note, jn_scope_semi, sk_sounding, jn_graph_live, 0, jn_gest, jn_moddepth},
+     jn_graph, sk_held_note, jn_scope_semi, sk_sounding, jn_graph_live, 0, jn_gest, jn_moddepth, 0, 0, sk_note_bend},
     {"8BIT", B, NBT, NBPAGES, NBTP, BPAGE_NAME, {BG_EDIT, BG_ENV, BG_LFO, BG_ALL}, {7, 2, 2, 11}, 3, B_MODE,
      B_CRUSH, {B_MODE, B_UNI, -1}, bt_init, bt_reset, bt_load, bt_preset_name, bt_note_on, bt_note_off, bt_all_off,
      bt_render, bt_knob, bt_sel, bt_more, bt_def, 0, 0, bt_text, bt_label_page, bt_page_label, bt_has_graph,
-     bt_graph, sk_held_note, bt_scope_semi, sk_sounding, bt_graph_live, 0, bt_gest, bt_moddepth},
+     bt_graph, sk_held_note, bt_scope_semi, sk_sounding, bt_graph_live, 0, bt_gest, bt_moddepth, 0, 0, sk_note_bend},
     {"LPG", WSP, NWS, NWSPAGES, NWSP, WSPAGE_NAME, {QG_EDIT, QG_ENV, QG_LFO, QG_ALL}, {8, 2, 2, 12}, 4, WS_MODE,
      WS_FOLD, {WS_MODE, WS_UNI, -1}, ws_init, ws_reset, ws_load, ws_preset_name, ws_note_on, ws_note_off, ws_all_off,
      ws_render, ws_knob, ws_sel, ws_more, ws_def, 0, 0, ws_text, ws_label_page, ws_page_label, ws_has_graph,
-     ws_graph, sk_held_note, ws_scope_semi, sk_sounding, ws_graph_live, 0, ws_gest, ws_moddepth},
+     ws_graph, sk_held_note, ws_scope_semi, sk_sounding, ws_graph_live, 0, ws_gest, ws_moddepth, 0, 0, sk_note_bend},
     {"ALPHA", JA, NJ, NJPAGES, NAP, JPAGE_NAME, {JG_EDIT, JG_ENV, JG_LFO, JG_ALL}, {6, 2, 2, 10}, 3, J_MODE,   /* (v0.49: kod DCO) */
      J_CUT, {J_MODE, J_UNI, -1}, al_init, jn_reset, al_load, al_preset_name, al_note_on, al_note_off, jn_all_off,
      al_render, al_knob, jn_sel, al_more, al_def, 0, 0, al_text, jn_label_page, jn_page_label, jn_has_graph,
-     al_graph, sk_held_note, al_scope_semi, sk_sounding, jn_graph_live, 0, al_gest, al_moddepth},
+     al_graph, sk_held_note, al_scope_semi, sk_sounding, jn_graph_live, 0, al_gest, al_moddepth, 0, 0, sk_note_bend},
     {"MORPH", MP, NMPP, NMPPAGES, NMPK, MPPAGE_NAME, {MPG_EDIT, MPG_ENV, MPG_LFO, MPG_ALL}, {3, 1, 2, 6}, 4, MP_MODE,   /* (v0.50:
                                                                                             * perkusja, propozycja) */
      MP_MORPH, {MP_MODE, -1, -1}, mp_init, mp_reset, mp_load, mp_preset_name, mp_note_on, mp_note_off, mp_all_off,
@@ -11309,12 +11513,12 @@ static const engine_t ENG[NENG] = {
                                                                                           * propozycja) */
      PH_POS, {PH_MODE, PH_UNI, -1}, ph_init, ph_reset, ph_load, ph_preset_name, ph_note_on, ph_note_off, ph_all_off,
      ph_render, ph_knob, ph_sel, ph_more, ph_def, 0, 0, ph_text, ph_label_page, ph_page_label, ph_has_graph,
-     ph_graph, sk_held_note, ph_scope_semi, sk_sounding, ph_graph_live, 0, ph_gest, ph_moddepth},
+     ph_graph, sk_held_note, ph_scope_semi, sk_sounding, ph_graph_live, 0, ph_gest, ph_moddepth, 0, 0, sk_note_bend},
     {"FORMANT", FO, NFOR, NFOPAGES, NFOP, FOPAGE_NAME, {FG_EDIT, FG_ENV, FG_LFO, FG_ALL}, {6, 3, 2, 11}, 0, FO_MODE,   /* (v0.84:
                                                                                           * propozycja) */
      FO_VOWEL, {FO_MODE, FO_UNI, -1}, fo_init, fo_reset, fo_load, fo_preset_name, fo_note_on, fo_note_off, fo_all_off,
      fo_render, fo_knob, fo_sel, fo_more, fo_def, fo_vget, fo_vset, fo_text, fo_label_page, fo_page_label, fo_has_graph,
-     fo_graph, sk_held_note, fo_scope_semi, sk_sounding, fo_graph_live, 0, fo_gest, fo_moddepth},
+     fo_graph, sk_held_note, fo_scope_semi, sk_sounding, fo_graph_live, 0, fo_gest, fo_moddepth, 0, 0, sk_note_bend},
 };
 
 static void draw_graph(int32_t page)
@@ -12775,12 +12979,18 @@ static uint16_t rgb_mix(uint16_t a, uint16_t b, int32_t k)   /* a -> b, k 0..64 
     return (uint16_t)((ra + (rb - ra) * k / 64) << 11 | (ga + (gb - ga) * k / 64) << 5 | (ba + (bb - ba) * k / 64));
 }
 
+/* (P71, decyzja użytkownika 2026-11-10) nuty wzoru jeszcze nie w pamięci (SEQ stoi): w nagłówkach SEQ czerwone NOT SAVED, bez migania;
+ * znika po zapisie (w ciszy; po STOP / REC OFF od razu) — wtedy można wyłączyć FM1 */
+static int sq_unsaved(void) { return sqp_dirty && !sq.play; }
+#define NOT_SAVED "NOT SAVED"
+#define NOT_SAVED_C RGB(255, 90, 80)
 static void sq_title(const char *name, const char *right)   /* wiersz nazwy strony SEQ / ARP */
 {
-    int32_t x = cv_text(8, 4, &FONT_M, name, C_WHITE);
-    (void)x;
+    const int32_t x = cv_text(8, 4, &FONT_M, name, C_WHITE), xr = right ? 232 - text_w(&FONT_XS, right) : 232;
     if (right)
-        cv_text(232 - text_w(&FONT_XS, right), 12, &FONT_XS, right, C_GRAY);
+        cv_text(xr, 12, &FONT_XS, right, C_GRAY);
+    if (ui.page == V_SEQ && sq_unsaved() && x + 8 + text_w(&FONT_XS, NOT_SAVED) + 8 <= xr)   /* (P71) */
+        cv_text(x + 8, 12, &FONT_XS, NOT_SAVED, NOT_SAVED_C);
 }
 
 OGS_UI static void sq_state(char *t)                    /* PLAY / REC / STOP i wzór */
@@ -12858,6 +13068,8 @@ static void notes_top_mt(void)                   /* (v0.66) NOTES w MULTI: ście
     text_cat(t, n);
     text_cat(t, " BPM");
     x = cv_text(8, 16, &FONT_XS, t, sq.rec ? RGB(255, 70, 60) : C_GRAY) + 10;
+    if (sq_unsaved())                            /* (P71) */
+        x = cv_text(x, 16, &FONT_XS, NOT_SAVED, NOT_SAVED_C) + 10;
     bw = nb > 8u ? 4 : 6;                        /* takty: kreski, bieżący jasny, grający biały */
     for (i = 0; i < nb && x + bw < 232; i++, x += bw + 2) {
         uint16_t col = sq_bar_seen(i) ? C_HI : C_DIM;
@@ -12883,7 +13095,7 @@ static void notes_top(void)                      /* górny pasek NOTES: wzór, s
         x = cv_text(8, 6, &FONT_B, ui.msg[0], C_WHITE);
         cv_text(x + 8, 6, &FONT_B, ui.msg[1], C_HI);
     } else if (sel_long()) {                     /* (v0.90) SEL trzymany: SELECT i ALGO (gałki: pasek na dole) */
-        cv_text(8, 9, &FONT_XS, "SELECT: RANGE     ALGO: PATTERN x GRID", C_HI);
+        cv_text(8, 9, &FONT_XS, ui.gp_on ? "HOME: BACK     ALGO: PATTERN x GRID" : "SELECT: RANGE     ALGO: PATTERN x GRID", C_HI);   /* (glide) */
     } else if (plat_ms() < sq_hint_until) {      /* (v0.91) po wejściu: podpowiedź (NOTES nie ma paska) */
         cv_text(8, 9, &FONT_XS, NOTES_HINT, C_DIM);
     } else {
@@ -12893,7 +13105,14 @@ static void notes_top(void)                      /* górny pasek NOTES: wzór, s
             text_cat(t, "0");
         int_text(sqg.pat + 1, n, 0);
         text_cat(t, n);
-        x = cv_text(8, 6, &FONT_B, t, C_HI);
+        if (ui.gp_on) {                          /* (glide) edycja skoków: GLIDE i nuta zamiast numeru wzoru */
+            note_name(sqp.n[ui.gp_par].note, t);
+            x = cv_text(8, 6, &FONT_B, "GLIDE", C_HI);
+            x = cv_text(x + 6, 6, &FONT_B, t, C_WHITE);
+            nb = 0;                              /* (bez kresek taktów: miejsce) */
+        } else {
+            x = cv_text(8, 6, &FONT_B, t, C_HI);
+        }
         if (sq.rec || sq.play)
             x = cv_text(x + 6, 6, &FONT_B, sq.rec ? (sq.play ? "REC" : "STEP") : "PLAY",
                         sq.rec ? RGB(255, 70, 60) : C_WHITE);
@@ -12909,7 +13128,16 @@ static void notes_top(void)                      /* górny pasek NOTES: wzór, s
             cv_text(xr, 8, &FONT_XS, "BPM", C_DIM);
             xb = xr - 4 - text_w(&FONT_B, n);
             cv_text(xb, 6, &FONT_B, n, C_GRAY);
-            cv_text(xb - 10 - text_w(&FONT_B, t), 6, &FONT_B, t, C_WHITE);
+            xb -= 10 + text_w(&FONT_B, t);       /* (xb: początek kroku w takcie) */
+            if (sq_unsaved()) {                  /* (P71) NOT SAVED zamiast kresek taktów; ciasno (STEP, GLIDE): zamiast kroku w takcie */
+                const int32_t xn = (sq.rec || ui.gp_on ? x : 44) + 8;
+                if (xn + text_w(&FONT_XS, NOT_SAVED) + 6 <= xb)
+                    cv_text(xb, 6, &FONT_B, t, C_WHITE);
+                cv_text(xn, 10, &FONT_XS, NOT_SAVED, NOT_SAVED_C);
+                nb = 0;
+            } else {
+                cv_text(xb, 6, &FONT_B, t, C_WHITE);
+            }
         }
         bw = nb > 8u ? 4 : 8;                    /* takty: kreski, bieżący jasny, grający biały */
         x = sq.rec || sq.play ? 108 : 52;
@@ -12924,6 +13152,24 @@ static void notes_top(void)                      /* górny pasek NOTES: wzór, s
     cv_blit(0, 0);
 }
 
+/* (glide, miejsce: jedno rysowanie zamiast kopii) chipy pod gałkami: podpowiedź przy trzymanym SEL (NOTES, AUTO, skoki) i chip
+ * „nazwa mała + wartość” (AUTO, skoki); za szeroko: sama wartość na środku. Ekrany piksel w piksel jak wcześniej. */
+OGS_UIN static void chip_hint(int32_t k, const char *s)
+{
+    const int32_t bx = 2 + k * 60;
+    if (s[0])
+        note_bar(bx, bx + 56, 2, 22, C_LINE);
+    cv_text(bx + (56 - text_w(&FONT_XS, s)) / 2, 7, &FONT_XS, s, C_HI);
+}
+OGS_UIN static void chip_nv(int32_t k, const char *nm, const char *v, int lit, uint16_t vc)
+{
+    const int32_t bx = 2 + k * 60, lw = text_w(&FONT_XS, nm), vw = text_w(&FONT_S, v), fit = lw + vw + 9 <= 52;
+    note_bar(bx, bx + 56, 2, 22, lit ? C_HI : C_LINE);
+    if (fit)
+        cv_text(bx + 4, 7, &FONT_XS, nm, lit ? C_BLACK : C_GRAY);
+    cv_text(fit ? bx + 52 - vw : bx + (56 - vw) / 2, 5, &FONT_S, v, lit ? C_BLACK : vc);
+}
+
 static void notes_chips(void)                    /* dół NOTES: 4 chipy = 4 gałki: NOTE (wybór), PITCH, LEN, VEL */
 {
     static const char *const NM[4] = {"", "", "LEN", "VEL"};
@@ -12933,11 +13179,8 @@ static void notes_chips(void)                    /* dół NOTES: 4 chipy = 4 ga�
     sq_ac_new();
     cv_begin(240, 26, C_BLACK);
     if (sel_long()) {                            /* (v0.90, decyzja użytkownika 2026-11-03) SEL trzymany: co robią gałki */
-        for (k = 0; k < 4; k++) {
-            const int32_t bx = 2 + k * 60;
-            note_bar(bx, bx + 56, 2, 22, C_LINE);
-            cv_text(bx + (56 - text_w(&FONT_XS, SH[k])) / 2, 7, &FONT_XS, SH[k], C_HI);
-        }
+        for (k = 0; k < 4; k++)
+            chip_hint(k, SH[k]);
         cv_blit(0, 214);
         return;
     }
@@ -12984,34 +13227,109 @@ static void notes_chips(void)                    /* dół NOTES: 4 chipy = 4 ga�
     cv_blit(0, 214);
 }
 
+/* (glide, miejsce: jedno rysowanie zamiast trzech kopii) karta na piano rollu (karta nuty, AUTO, skoku): ramka, tytuł duży i podpis
+ * mały z prawej; wiersze po 18 px (podświetlony = ui.sqn_row; czerwone = usuwanie; val 0: bez wartości). Piksel w piksel jak było. */
+OGS_UIN static void card_top(int32_t nrow, const char *title, const char *tag)
+{
+    const int32_t y0 = 5, x0 = 30, w = 180;
+    cv_rect(x0 - 2, y0 - 2, w + 4, nrow * 18 + 32, C_HI);
+    cv_rect(x0, y0, w, nrow * 18 + 28, RGB(12, 12, 15));
+    if (title)
+        cv_text(x0 + 10, y0 + 5, &FONT_B, title, C_WHITE);
+    if (tag)
+        cv_text(x0 + w - 10 - text_w(&FONT_XS, tag), y0 + 6, &FONT_XS, tag, C_GRAY);
+}
+OGS_UIN static void card_row(int32_t i, const char *name, const char *val, int red)
+{
+    const int32_t x0 = 30, w = 180, y = 30 + i * 18, on = i == ui.sqn_row;
+    if (on)
+        note_bar(x0 + 4, x0 + w - 4, y - 2, 17, C_HI);
+    cv_text(x0 + 10, y, &FONT_S, name, on ? C_BLACK : red ? RGB(255, 90, 80) : C_WHITE);
+    if (val)
+        cv_text(x0 + w - 10 - text_w(&FONT_XS, val), y + 1, &FONT_XS, val, on ? C_BLACK : C_HI);
+}
+
 OGS_UIN static void draw_sqn(void)                       /* karta nuty na piano rollu: SELECT wiersz, gałka zmienia, SEL robi */
 {
     char t[24];
-    int32_t i, y0 = 5, x0 = 30, w = 180, h = NSN * 18 + 28;   /* (v0.90) 8 wierszy po 18 px */
-    cv_rect(x0 - 2, y0 - 2, w + 4, h + 4, C_HI);
-    cv_rect(x0, y0, w, h, RGB(12, 12, 15));
+    int32_t i;                                   /* (v0.90) 8 wierszy po 18 px */
     if (ui.sq_rng) {                             /* zakres: ile nut */
         uint32_t c = 0;
         for (i = 0; i < SQ_NN; i++)
             c += (uint32_t)sq_tgt((uint32_t)i);
         int_text((int32_t)c, t, 0);
         text_cat(t, " NOTES");
-        cv_text(x0 + 10, y0 + 5, &FONT_B, t, C_WHITE);
-        cv_text(x0 + w - 10 - text_w(&FONT_XS, "SELECTION"), y0 + 6, &FONT_XS, "SELECTION", C_GRAY);
+        card_top(NSN, t, "SELECTION");
     } else if (ui.sq_note >= 0) {
         note_name(sqp.n[ui.sq_note].note, t);
-        cv_text(x0 + 10, y0 + 5, &FONT_B, t, C_WHITE);
-        cv_text(x0 + w - 10 - text_w(&FONT_XS, "NOTE"), y0 + 6, &FONT_XS, "NOTE", C_GRAY);
+        card_top(NSN, t, "NOTE");
+    } else {
+        card_top(NSN, 0, 0);
     }
     for (i = 0; i < NSN; i++) {
-        int32_t y = y0 + 25 + i * 18, on = i == ui.sqn_row;
-        if (on)
-            note_bar(x0 + 4, x0 + w - 4, y - 2, 17, C_HI);
-        cv_text(x0 + 10, y, &FONT_S, SN_NAME[i], on ? C_BLACK : i == SN_DEL ? RGB(255, 90, 80) : C_WHITE);
         sqn_value(i, t);
-        if (i != SN_DEL)
-            cv_text(x0 + w - 10 - text_w(&FONT_XS, t), y + 1, &FONT_XS, t, on ? C_BLACK : C_HI);
+        card_row(i, SN_NAME[i], i != SN_DEL ? t : 0, i == SN_DEL);
     }
+}
+
+/* (glide) nuta ze skokami: jeden pas, na skosie przechodzi na nową wysokość (wygląd A, decyzja użytkownika 2026-11-10). Pędzel
+ * kwadratowy tak duży jak nuta (kolumna = suma sąsiadów +-h/2): stromy skos jest tak samo gruby jak nuta i się nie rwie. Najpierw
+ * czarna obwódka całego pasa: nuta narysowana później przecina wcześniejszą czysto (skrzyżowania). sel: -2 zwykła nuta; edytowana
+ * (-1 bez skoku w kursorze, k = skok k w kursorze): znaczniki startu i końca skosów nad i pod pasem (wygląd C), skok k biały
+ * (skos i znaczniki), inne szare. */
+OGS_UIN static void gp_draw(uint32_t pi, const uint16_t *o, uint32_t n, int32_t x0, int32_t x1, uint32_t bar0, uint32_t V, int32_t low,
+                            int32_t rows, int32_t rh, uint16_t c, int32_t sel)   /* (minsize jak draw_notes_page) */
+{
+    const int32_t h = rh - (rh > 8 ? 3 : 2), ymax = rows * rh, w = h / 2, nx = x1 - x0 < RW + 1 ? x1 - x0 : RW + 1;
+    int16_t yy[RW + 1];
+    uint8_t ss[RW + 1];                          /* bit 0: skos skoku sel, bit 1: znacznik skoku sel, bit 2: znacznik innego */
+    int32_t pass, x, j;
+    for (x = 0; x < nx; x++) {
+        const uint32_t t = bar0 + (uint32_t)(((x0 + x - RX) * (int32_t)V + (int32_t)V / 2) / RW);
+        const float p = gp_pitch(pi, o, n, t);
+        uint32_t k, f = 0;
+        yy[x] = (int16_t)((float)(low + rows - 1) * (float)rh - p * (float)rh + 1.5f);
+        for (k = 0; sel > -2 && k < n; k++) {
+            const sqn_t *g = &sqp.n[o[k]];
+            const uint32_t s0 = GP_S(g), d = GP_DUR(g) ? GP_DUR(g) : 1u;
+            const int32_t xa = x0 + x - rx(s0, bar0), xb = x0 + x - rx(s0 + d, bar0);
+            const int mk = xa == 0 || xa == 1 || xb == 0 || xb == -1;   /* znaczniki 2 px: od startu w prawo, od końca w lewo */
+            if ((int32_t)k == sel)
+                f |= (uint32_t)(t >= s0 && t < s0 + d) | (uint32_t)mk << 1;
+            else
+                f |= (uint32_t)mk << 2;
+        }
+        ss[x] = (uint8_t)f;
+    }
+    for (pass = 0; pass < 2; pass++)
+        for (x = 0; x < nx; x++) {
+            int32_t a = yy[x], b = yy[x] + h;
+            for (j = x - w; j <= x + w; j++)     /* pędzel */
+                if (j >= 0 && j < nx) {
+                    a = yy[j] < a ? yy[j] : a;
+                    b = yy[j] + h > b ? yy[j] + h : b;
+                }
+            if (!pass) {                         /* obwódka */
+                a--;
+                b++;
+            } else if (x == 0 || x == nx - 1) {  /* zaokrąglone końce */
+                a++;
+                b--;
+            }
+            if (pass && (ss[x] & 6u)) {          /* znaczniki nad i pod pasem (4 px, 1 px odstępu od obwódki) */
+                const uint16_t mc = ss[x] & 2u ? C_WHITE : RGB(150, 152, 158);
+                if (a - 6 >= 0)
+                    cv_rect(x0 + x, a - 6, 1, 4, mc);
+                if (b + 6 <= ymax)
+                    cv_rect(x0 + x, b + 2, 1, 4, mc);
+            }
+            if (a < 0)
+                a = 0;
+            if (b > ymax)
+                b = ymax;
+            if (b > a)
+                cv_rect(x0 + x, a, 1, b - a, !pass ? C_BLACK : (ss[x] & 1u) ? C_WHITE : c);
+        }
 }
 
 OGS_UI static void draw_notes_page(void)                /* NOTES: piano roll na całą wysokość (rzędy 14 px), takt na szerokość */
@@ -13022,6 +13340,10 @@ OGS_UI static void draw_notes_page(void)                /* NOTES: piano roll na 
     int dense = cw < 5;                          /* gęsto: grid tylko na ćwierćnutach */
     const int ap_on = ui.sq_pg == SQ_AUTO;       /* (1.6.0) AUTO: nuty ścieżki linii szare w tle, na nich linie */
     const uint32_t apt = ap_on ? ap_lane_trk() : 0u;
+    const int ged = gp_live();                   /* (glide) edycja skoków */
+    int gpa = 0;                                 /* (glide) są skoki we wzorze (inaczej bez szukania) */
+    for (i = 0; i < SQ_NN && !gpa; i++)
+        gpa = SQN_GP(&sqp.n[i]);
     sq_ac_new();
     for (r = 0; r < rows; r++) {                /* klawiatura z lewej, tło wierszy: czarne klawisze ciemniejsze (v1.1.0 - v1.1.2:
                                                   * wiersze skali jaśniejsze; v1.2.0 usunięte, decyzja użytkownika) */
@@ -13064,7 +13386,10 @@ OGS_UI static void draw_notes_page(void)                /* NOTES: piano roll na 
         int32_t row, x0, x1, y;
         uint16_t c;
         uint32_t sl;
-        if (!q->vel || q->t >= L || q->t >= bar0 + V || (ap_on ? SQN_TRK(q) != apt : (uint32_t)sq_mine(q) != (pass ? 1u : 0u)))
+        uint16_t go[GP_MAX];
+        uint32_t gn;
+        if (!q->vel || SQN_GP(q) || q->t >= L || q->t >= bar0 + V
+            || (ap_on ? SQN_TRK(q) != apt : (uint32_t)sq_mine(q) != (pass ? 1u : 0u)))
             continue;
         sl = pass ? sq_shown(q) : q->len;        /* (v0.87) perkusja: ile naprawdę trwa */
         if (pass && (SQ_ISSEL(i) ? 4u : sl > 4u * g ? 1u : sl > g ? 2u : 3u) != pass)
@@ -13078,6 +13403,17 @@ OGS_UI static void draw_notes_page(void)                /* NOTES: piano roll na 
             x1 = rx(L, bar0);
         if (x1 < x0 + 3)
             x1 = x0 + 3;
+        gn = gpa ? gp_list(i, go) : 0u;
+        if (gn && (pass || SQN_TRK(q))) {        /* (glide) nuta ze skokami: jeden pas przez wysokości */
+            const int ed = ged && (int32_t)i == ui.gp_par;
+            c = !pass ? RGB(46, 48, 58) : ed ? C_HI : SQ_ISSEL(i) && !ged ? C_WHITE : rgb_mix(C_DIM, C_HI, 20 + q->vel * 44 / 127);
+            if (pass && q->chance < 100u && !ed)
+                c = rgb_mix(C_BLACK, c, 20 + q->chance * 44 / 100);
+            if (pass && ged && !ed)              /* edycja: inne nuty przygaszone */
+                c = rgb_mix(C_BLACK, c, 30);
+            gp_draw(i, go, gn, x0, x1, bar0, V, low, rows, rh, c, ed ? gp_at(go, gn) : -2);
+            continue;
+        }
         if (!pass) {                             /* ghost (bez edycji); perkusja: znacznik uderzenia u góry */
             if (!SQN_TRK(q))                     /* (T1 = perkusja) */
                 cv_rect(x0, 3, 2, 4, RGB(92, 94, 106));
@@ -13085,9 +13421,11 @@ OGS_UI static void draw_notes_page(void)                /* NOTES: piano roll na 
                 note_bar(x0, x1, row * rh + 1, rh - (rh > 8 ? 3 : 2), RGB(46, 48, 58));
             continue;
         }
-        c = SQ_ISSEL(i) ? C_WHITE : rgb_mix(C_DIM, C_HI, 20 + q->vel * 44 / 127);
+        c = SQ_ISSEL(i) && !ged ? C_WHITE : rgb_mix(C_DIM, C_HI, 20 + q->vel * 44 / 127);
         if (q->chance < 100u)                    /* szansa < 100 %: przygaszona */
             c = rgb_mix(C_BLACK, c, 20 + q->chance * 44 / 100);
+        if (ged)                                 /* (glide) edycja skoków: edytowana pełnym kolorem, reszta przygaszona */
+            c = (int32_t)i == ui.gp_par ? C_HI : rgb_mix(C_BLACK, c, 30);
         if (row < 0 || row >= rows) {           /* poza widokiem: znacznik na brzegu */
             cv_rect(x0, row < 0 ? 0 : rows * rh - 3, x1 - x0, 3, c);
             continue;
@@ -13681,8 +14019,8 @@ OGS_UIN static void draw_sqt(void)                       /* narzędzia wzoru: SE
         }
         if (i == ST_MOVE || i == ST_CPAT || i == ST_CTRK)   /* (v0.66.2) z której ścieżki (gałka) */
             cv_text(228 - text_w(&FONT_S, m), y, &FONT_S, m, on ? C_BLACK : C_HI);
-        if (i >= ST_ZINV) {                      /* kierunek gałki: wartość po prawej */
-            const char *v = L_INV[glob.g[i == ST_ZINV ? G_SQZINV : G_SQK1INV]];
+        if (i >= ST_ZINV) {                      /* kierunek gałki: wartość po prawej; (glide) GLIDE: SIMPLE / ADVANCED */
+            const char *v = i == ST_GLIDE ? L_GLMODE[gp_adv()] : L_INV[glob.g[i == ST_ZINV ? G_SQZINV : G_SQK1INV]];
             cv_text(228 - text_w(&FONT_S, v), y, &FONT_S, v, on ? C_BLACK : C_HI);
         }
     }
@@ -13893,6 +14231,7 @@ OGS_UIN static void draw_note(void)            /* SYSTEM > BACKUP / CALIBRATION:
 }
 
 #include "ogs_auto.c"                          /* (1.6.0) AUTO: automatyka parametrów w SEQ */
+#include "ogs_glide.c"                         /* (glide) ZAAWANSOWANY GLIDE: edycja skoków w NOTES */
 
 static void draw(void)
 {
@@ -13902,11 +14241,15 @@ static void draw(void)
         draw_notes_page();
         if (ui.page == V_SQN && ui.sq_pg == SQ_AUTO)
             ap_card_draw();
+        else if (ui.page == V_SQN && ui.gp_on)   /* (glide) karta skoku */
+            gp_card_draw();
         else if (ui.page == V_SQN)
             draw_sqn();
         cv_blit(0, 32);
         if (ui.sq_pg == SQ_AUTO)
             ap_chips();
+        else if (ui.gp_on)                       /* (glide) */
+            gp_chips();
         else
             notes_chips();
         return;
@@ -13990,12 +14333,25 @@ OGS_UI void app_splash(void)
     char t[16] = "V";
     lcd_fill(0, 0, 240, 240, RGB(0, 0, 0));
     cv_begin(240, (uint32_t)h, RGB(0, 0, 0));
-    {                                        /* (v0.41) serie (ogs_logo.h): dekodowane w pętli rysowania */
-        uint32_t at = 0, left = 0, v = 0;
+    {                                        /* (v0.41) serie (ogs_logo.h): dekodowane w pętli rysowania; (glide, 2026-11-10) bajt
+                                              * serii z kodu Huffmana (kanoniczny, jak puff: długość po długości) — ten sam obraz */
+        uint32_t at = 0, left = 0, v = 0, k = 0;
         for (y = 0; y < OGS_LOGO_H; y++)
             for (x = 0; x < OGS_LOGO_W; x++) {
                 if (!left) {
-                    uint32_t b = at < sizeof OGS_LOGO ? OGS_LOGO[at++] : 0u;
+                    uint32_t b = 0, code = 0, first = 0, idx = 0, n;
+                    for (n = 1; k < OGS_LOGO_N && n < 16u && at < 8u * sizeof OGS_LOGO; n++) {
+                        code |= OGS_LOGO[at >> 3] >> (7u - (at & 7u)) & 1u;
+                        at++;
+                        if (code - first < OGS_LOGO_NL[n]) {
+                            b = OGS_LOGO_SYM[idx + code - first];
+                            break;
+                        }
+                        idx += OGS_LOGO_NL[n];
+                        first = (first + OGS_LOGO_NL[n]) << 1;
+                        code <<= 1;
+                    }
+                    k++;
                     v = b & 0x80u ? b >> 3 & 15u : 0u;
                     left = (b & 0x80u ? b & 7u : b) + 1u;
                 }
