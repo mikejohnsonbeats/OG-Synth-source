@@ -1,5 +1,12 @@
 # Changelog
 
+## v1.7.0 — 2026-11-10
+Źródła MPL OG Synth 1.7.0 „Glide” (zaawansowany glide w NOTES: rysowanie skoków, karta nuty > GLIDE, TOOLS > GLIDE: SIMPLE /
+ADVANCED, skoki idą za nutą — app.c; edycja skoków i dźwięk w plikach zamkniętych ogs_glide.c, ogs_seq.c i silnikach;
+ogs_engine.h: `note_bend` i `ctl.gid`; pewniejszy zapis wzoru — zapis zaraz po STOP / REC OFF, SAVE sceny zapisuje nuty,
+„NOT SAVED” w nagłówkach SEQ; logo startowe kodem Huffmana — ogs_logo.h + dekoder w app.c; wspólne rysowanie karty i chipów;
+app.h: wersja).
+
 ## v1.6.4 — 2026-11-09
 Źródła MPL OG Synth 1.6.4 „Wake” (GLO > SCREEN OFF: podświetlenie zostaje, ekran czarny — app.c i łatka fm1-base lcd.c `lcd_dark`;
 ekrany systemowe UPDATE / RESTORE FROM USB? / UPDATE MODE widoczne na czarnym ekranie — unity.c, main_fm1.c; app.h: wersja).

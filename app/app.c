@@ -260,6 +260,8 @@ static struct {
     uint8_t sqt_from;                    /* (v0.66.2) MOVE HERE FROM: ścieżka, z której nuty (gałka) */
     uint8_t sqt_src;                     /* (1.6.0, P62) COPY PATTERN / TRACK FROM: wzór, z którego (gałka) */
     int16_t sq_note;                     /* NOTES: podświetlona nuta (jedna, jak w Melodee), -1 pusty krok */
+    int16_t gp_par;                      /* (glide) edycja skoków: nuta (rodzic) */
+    uint8_t gp_on;                       /* (glide) NOTES: edycja skoków nuty gp_par (karta nuty > GLIDE przy ADVANCED) */
     uint8_t sq_rng;                      /* NOTES: zaznaczony zakres (SEL + SELECT, jak w FL): edycja i karta na wszystkich */
     uint32_t sq_ra, sq_re;               /* zakres: komórka startu i końca (tick w gridzie, w obie strony) */
     uint8_t play_hold;                   /* PLAY w NOTES: krótko = od kursora, trzymany = od początku */
@@ -419,7 +421,7 @@ OGS_UI static void input(void)
             ui.sel_used = 1;
             continue;
         }
-        if (ui.sel_hold && ui.page == V_SEQ && ui.sq_pg == SQ_NOTES && (keys & bit) && !(ui.keys & bit)) {
+        if (ui.sel_hold && ui.page == V_SEQ && ui.sq_pg == SQ_NOTES && !ui.gp_on && (keys & bit) && !(ui.keys & bit)) {
             eaten |= bit;                        /* NOTES: SEL trzymany + klawisz = nuta w kursorze (dodaj / usuń); (v0.90) w MULTI OP1-4: ścieżka (wyżej) */
             sq_toggle((uint32_t)note, key_vel(k));
             ui.sel_used = 1;
@@ -653,6 +655,11 @@ OGS_UI static void input(void)
                 } else if (ui.sq_pg == SQ_RACK) {   /* (v0.57) RACK: wiersz (dźwięk) */
                     ui.rk_row = (uint8_t)clamp((int32_t)ui.rk_row + (e > 0 ? 1 : -1), 0, 15);
                     rk_view();
+                } else if (gp_live()) {      /* (glide) edycja skoków: kursor po nucie (SEL + SELECT: nic) */
+                    if (ui.sel_hold)
+                        ui.sel_used = 1;
+                    else
+                        gp_cursor(e);
                 } else if (sq_roll() && ui.sel_hold)
                     sq_range(e);
                 else if (sq_roll())
@@ -662,7 +669,8 @@ OGS_UI static void input(void)
                 continue;
             }
             if (ui.page == V_SQN) {          /* karta nuty: wiersz */
-                ui.sqn_row = (uint8_t)clamp((int32_t)ui.sqn_row + e, 0, ui.sq_pg == SQ_AUTO ? 3 : NSN - 1);   /* (1.6.0) AUTO: 4 */
+                ui.sqn_row = (uint8_t)clamp((int32_t)ui.sqn_row + e, 0, ui.sq_pg == SQ_AUTO ? 3 : ui.gp_on ? GP_NC - 1 : NSN - 1);   /* (1.6.0)
+                                                                                                            * AUTO: 4; (glide) karta skoku: 3 */
                 ui.redraw = 1;
                 continue;
             }
