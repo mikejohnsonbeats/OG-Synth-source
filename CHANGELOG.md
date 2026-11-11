@@ -1,5 +1,10 @@
 # Changelog
 
+## v1.7.1 — 2026-11-11
+Źródła MPL OG Synth 1.7.1 „Clean” (z niewydaną 1.7.0: glide i zapis wzorów — v1.7.0 wyżej). Czyste wyjście wszystkich silników: limiter
+-2 dB z wyprzedzeniem (kod w pliku zamkniętym ogs_fx.c) i wyjście liniowe zamiast tanh — app.c; FM6: ALGORITHM w trakcie nuty przez bramkę
+bez trzasków — app.c; sinus FM6 z interpolacją w plikach zamkniętych; app.h: wersja.
+
 ## v1.7.0 — 2026-11-10
 Źródła MPL OG Synth 1.7.0 „Glide” (zaawansowany glide w NOTES: rysowanie skoków, karta nuty > GLIDE, TOOLS > GLIDE: SIMPLE /
 ADVANCED, skoki idą za nutą — app.c; edycja skoków i dźwięk w plikach zamkniętych ogs_glide.c, ogs_seq.c i silnikach;

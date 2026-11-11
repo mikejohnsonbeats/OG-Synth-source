@@ -98,6 +98,10 @@ void app_render(int32_t *lr, uint32_t n, uint32_t master_q12)
         } else {
             ogs_fx_render(fx_play(), fx_xplay(), bl, br, c);   /* efekty globalne za silnikiem; (v0.74) bez PERFORM */
         }
+        if (OUT_NEW)                         /* (1.7.1, użytkownik 2026-11-10: „chcę mieć jak najczystsze brzmienie naszych silników”)
+                                              * wszystkie silniki, SOLO i MULTI (za MASTER): limiter -2 dB z wyprzedzeniem, za nim
+                                              * wyjście liniowe (było: tanh od v0.1.0 — głośne akordy „harczały”, FM6 najbardziej) */
+            ogs_fx_limit(bl, br, c);
         sq_click_mix(bl, br, c);             /* metronom za efektami */
         if (eq || eq_g > 0.0f) {             /* SPEAKER EQ włącza się / wyłącza przenikaniem (bez trzasku) */
             if (eq_g <= 0.0f) {              /* od nowa: stan filtra z bieżącego dźwięku */
@@ -118,8 +122,8 @@ void app_render(int32_t *lr, uint32_t n, uint32_t master_q12)
         }
         {
             float mu = mute_g, ms = mute_req ? -1.0f / MUTE_N : 1.0f / MUTE_N;
-            for (i = 0; i < c; i++) {
-                float l = fm_tanhf(bl[i]), r = fm_tanhf(br[i]), m;
+            for (i = 0; i < c; i++) {            /* (1.7.1) wyjście liniowe (szczyt z limitera -2 dB; ±1 tylko na wypadek klik / EQ) */
+                float l = OUT_NEW ? fm_clampf(bl[i], -1.0f, 1.0f) : fm_tanhf(bl[i]), r = OUT_NEW ? fm_clampf(br[i], -1.0f, 1.0f) : fm_tanhf(br[i]), m;
                 pk = fm_maxf(pk, fm_maxf(fm_fabsf(l), fm_fabsf(r)));
                 gain_now += (gain - gain_now) * 0.004f;
                 m = gain_now;
