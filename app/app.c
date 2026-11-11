@@ -1429,6 +1429,13 @@ static void events_in(void)              /* przerwanie audio: nuty z panelu i z 
 }
 
 static float gain_now;
+#ifdef PLAT_WEB
+static uint8_t out_old;                          /* (1.7.1) testy: stare wyjście (tanh, bez limitera) — porównania brzmienia z wersjami
+                                                  * sprzed 1.7.1 (same_sound, fx_same ...): wszystko poza wyjściem bez zmian */
+#define OUT_NEW (!out_old)                        /* (eksport ogs_out_old w bloku eksportów testów niżej) */
+#else
+#define OUT_NEW 1
+#endif
 #define ENG_FADE_N 512u                  /* zmiana silnika: stary cichnie przez tyle próbek (12 ms), potem wymiana RAM */
 static float eng_fade = 1.0f;
 static const fx_slot_t *fx_play(void);   /* efekty bieżącego silnika (fxp niżej) */
@@ -1532,6 +1539,10 @@ void app_render(int32_t *lr, uint32_t n, uint32_t master_q12)
         } else {
             ogs_fx_render(fx_play(), fx_xplay(), bl, br, c);   /* efekty globalne za silnikiem; (v0.74) bez PERFORM */
         }
+        if (OUT_NEW)                         /* (1.7.1, użytkownik 2026-11-10: „chcę mieć jak najczystsze brzmienie naszych silników”)
+                                              * wszystkie silniki, SOLO i MULTI (za MASTER): limiter -2 dB z wyprzedzeniem, za nim
+                                              * wyjście liniowe (było: tanh od v0.1.0 — głośne akordy „harczały”, FM6 najbardziej) */
+            ogs_fx_limit(bl, br, c);
         sq_click_mix(bl, br, c);             /* metronom za efektami */
         if (eq || eq_g > 0.0f) {             /* SPEAKER EQ włącza się / wyłącza przenikaniem (bez trzasku) */
             if (eq_g <= 0.0f) {              /* od nowa: stan filtra z bieżącego dźwięku */
@@ -1552,8 +1563,8 @@ void app_render(int32_t *lr, uint32_t n, uint32_t master_q12)
         }
         {
             float mu = mute_g, ms = mute_req ? -1.0f / MUTE_N : 1.0f / MUTE_N;
-            for (i = 0; i < c; i++) {
-                float l = fm_tanhf(bl[i]), r = fm_tanhf(br[i]), m;
+            for (i = 0; i < c; i++) {            /* (1.7.1) wyjście liniowe (szczyt z limitera -2 dB; ±1 tylko na wypadek klik / EQ) */
+                float l = OUT_NEW ? fm_clampf(bl[i], -1.0f, 1.0f) : fm_tanhf(bl[i]), r = OUT_NEW ? fm_clampf(br[i], -1.0f, 1.0f) : fm_tanhf(br[i]), m;
                 pk = fm_maxf(pk, fm_maxf(fm_fabsf(l), fm_fabsf(r)));
                 gain_now += (gain - gain_now) * 0.004f;
                 m = gain_now;
@@ -4662,6 +4673,7 @@ OGS_UI int app_sysex(const uint8_t *p, uint32_t n)
 #ifdef PLAT_WEB
 #pragma push_macro("__attribute__")          /* host/plat_host.c wyłącza atrybuty: eksporty by znikły */
 #undef __attribute__
+__attribute__((used, visibility("default"))) void ogs_out_old(int32_t on) { out_old = (uint8_t)on; }   /* (1.7.1) testy: wyjście jak do 1.7.0 */
 /* symulator: SysEx z przycisku „Wczytaj bank DX7” (web/emu/app.js) i obszar danych do przechowania w przeglądarce */
 static uint8_t web_sx[SYX_LEN + 16] __attribute__((section(".pool")));
 __attribute__((used, visibility("default"))) uint8_t *ogs_sysex_buf(void) { return web_sx; }
@@ -5220,7 +5232,9 @@ OGS_UI static void set_param(int32_t id, int32_t v)
         int rt = 0;
         for (i = 0; i < 3 && E->retrig[i] >= 0; i++)
             rt |= id == E->retrig[i];
-        if ((rt || d->fmt == F_LIST) && eng_sounding() && dk_w - dk_r < DK_Q) {   /* skok w dźwięku: przy zerze */
+        if ((rt || d->fmt == F_LIST || (id == X_ALG && E == &ENG[ENG_DX7])) && eng_sounding() && dk_w - dk_r < DK_Q) {
+                                             /* skok w dźwięku: przy zerze; (1.7.1) FM6 ALGORITHM też — przełącza całą modulację
+                                              * (w 1.6.4 trzask tuż pod progiem clicks_all, tanh go ściskał; wyjście FM6 bez tanh) */
             uint32_t k = dk_w % DK_Q;
             dk_q[k].eng = set.eng;
             dk_q[k].id = (int16_t)id;
