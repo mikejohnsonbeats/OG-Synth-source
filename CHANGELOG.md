@@ -1,5 +1,12 @@
 # Changelog
 
+## v1.8.0 — 2026-11-14
+Źródła MPL OG Synth 1.8.0 „Song”: SONG i kolejka wzoru (strona SONG, zmiana dokładnie na końcu obiegu — UI w app.c, przygotowanie
+i zamiana w plikach zamkniętych ogs_auto.c / ogs_seq.c), MULTI SEL + K1-K4 = VOL T1-T4 i KEYS LAYER, OCTAVER VOICE (oktawy na
+wolnych głosach, limit MONO / VOICES / UNISON), strony MOD i GLO grupami, ALGO KNOB z paskami, presety z własnymi efektami, okno
+nazwy, SysEx 24 / 26 / 27 (paczka presetów: cały preset w kawałkach z potwierdzeniem) — app.c; ogs_engine.h, ogs_lists.h; Manager
+(app/web/manager.html + nowy paczka_sysex.js: wgrywanie paczki). Dane paczki (app/web/paczka.js, brzmienia) nie wchodzą do źródeł.
+
 ## v1.7.1 — 2026-11-11
 Źródła MPL OG Synth 1.7.1 „Clean” (z niewydaną 1.7.0: glide i zapis wzorów — v1.7.0 wyżej). Czyste wyjście wszystkich silników: limiter
 -2 dB z wyprzedzeniem (kod w pliku zamkniętym ogs_fx.c) i wyjście liniowe zamiast tanh — app.c; FM6: ALGORITHM w trakcie nuty przez bramkę

@@ -40,6 +40,7 @@ void app_render(int32_t *lr, uint32_t n, uint32_t master_q12)
         i = eng_play < NENG ? eng_play : ENG_MOOG;
     if (mt_on) {                             /* MULTI: wybrana ścieżka gra jako „silnik”, bez wymiany RAM */
         mt_focus_in();
+        ly_sync();                           /* (1.8.0) KEYS LAYER: ścieżki z warstwą (po zmianie wybranej) */
         i = eng_play;
     }
     if (i != eng_play && (eng_play >= NENG || eng_fade <= 0.0f)) {
@@ -59,6 +60,8 @@ void app_render(int32_t *lr, uint32_t n, uint32_t master_q12)
         ogs_fx_sync = ((uint32_t)x[XT_SYNC] | (uint32_t)x[XT_SYNC + 1] << 8 | (uint32_t)x[XT_SYNC + 2] << 16) & FX_SYNC_SET;
     }
     ogs_fx_beat = sq.play ? ((float)(int32_t)(sq.T - sq.start_T) + sq.frac) * (1.0f / (float)SQ_PPQN) : -1.0f;
+    ctl.beat = ogs_fx_beat;                  /* (1.8.0, pkt 23) LFO SYNC silników: takt (ogs_lfo_lock) */
+    ctl.blk++;
     if (!fading)
         events_in();
     sq_apply(e);
@@ -123,7 +126,8 @@ void app_render(int32_t *lr, uint32_t n, uint32_t master_q12)
         {
             float mu = mute_g, ms = mute_req ? -1.0f / MUTE_N : 1.0f / MUTE_N;
             for (i = 0; i < c; i++) {            /* (1.7.1) wyjście liniowe (szczyt z limitera -2 dB; ±1 tylko na wypadek klik / EQ) */
-                float l = OUT_NEW ? fm_clampf(bl[i], -1.0f, 1.0f) : fm_tanhf(bl[i]), r = OUT_NEW ? fm_clampf(br[i], -1.0f, 1.0f) : fm_tanhf(br[i]), m;
+                float l = OUT_NEW ? fm_clampf(bl[i], -1.0f, 1.0f) : OUT_LIN ? bl[i] : fm_tanhf(bl[i]);
+                float r = OUT_NEW ? fm_clampf(br[i], -1.0f, 1.0f) : OUT_LIN ? br[i] : fm_tanhf(br[i]), m;
                 pk = fm_maxf(pk, fm_maxf(fm_fabsf(l), fm_fabsf(r)));
                 gain_now += (gain - gain_now) * 0.004f;
                 m = gain_now;
@@ -215,6 +219,8 @@ static struct {
     int8_t pf_mac[4];                    /* gałki: FILTER -100..100, CRUSH, THROW, DEPTH 0..100 */
     uint8_t pf_ord[PF_N], pf_n;          /* kolejność wciśnięć efektów odtwarzania (gra ostatni trzymany) */
     uint8_t pf_bank, cv_last, cv_lat, cv_step;   /* (v0.91) PERFORM: OCT = bank CURVES; krzywa ostatnia, zatrzaśnięte (bit), krok edycji */
+    uint8_t pf_stay;                     /* (1.8.0, P73) PERFORM: 0 zamknięty, 1 otwarty FX (stary gest: puszczony FX zamyka), 2 został
+                                          * otwarty (FX puszczony bez klawisza i gałki): do FX krótko, HOME, przycisku strony */
     uint32_t cv_held;                    /* klawisze krzywych trzymane (bit = klawisz) */
     uint8_t fxl_cur, fxl_top;            /* lista efektów (SEL trzymany): kursor 0..FX_NTYPE (miejsce w FX_ORDER, 0 EMPTY), pierwszy widoczny */
     uint8_t grp_hold, grp_done;          /* EDIT / ENV / LFO trzymany: po chwili pierwsza strona sekcji */
@@ -252,6 +258,7 @@ static struct {
     uint8_t rk_row, rk_top;              /* (v0.57) RACK: wybrany wiersz (dźwięk 0-15), pierwszy widoczny */
     uint16_t rk_step;                    /* RACK: ostatnio dotknięty krok (1/16 od początku wzoru) */
     uint8_t arp_hold, arp_done;          /* ARP trzymany: po chwili ustawienia (puszczony wcześniej: ON / OFF) */
+    uint8_t sq_duph;                     /* (1.8.0, pkt 2C) karta nuty > DUPLICATE: 1 HERE (w tym samym miejscu), 0 NEXT STEP (bajt wyrównania) */
     uint32_t arp_at;
     int32_t arp_back;                    /* ustawienia ARP: skąd przyszliśmy */
     uint32_t sq_cur;                     /* NOTES: kursor (tick, w gridzie) */
@@ -265,11 +272,14 @@ static struct {
     uint8_t sqt_src;                     /* (1.6.0, P62) COPY PATTERN / TRACK FROM: wzór, z którego (gałka) */
     int16_t sq_note;                     /* NOTES: podświetlona nuta (jedna, jak w Melodee), -1 pusty krok */
     int16_t gp_par;                      /* (glide) edycja skoków: nuta (rodzic) */
-    uint8_t gp_on;                       /* (glide) NOTES: edycja skoków nuty gp_par (karta nuty > GLIDE przy ADVANCED) */
+    uint8_t gp_on;                       /* (glide) NOTES: edycja skoków nuty gp_par (karta nuty > GLIDE); (1.8.0, pkt 8) 2: tryb MOVE skoku */
     uint8_t sq_rng;                      /* NOTES: zaznaczony zakres (SEL + SELECT, jak w FL): edycja i karta na wszystkich */
+    uint16_t gp_mv;                      /* (1.8.0, pkt 8) tryb MOVE skoku: jego miejsce (bajty wyrównania) */
     uint32_t sq_ra, sq_re;               /* zakres: komórka startu i końca (tick w gridzie, w obie strony) */
     uint8_t play_hold;                   /* PLAY w NOTES: krótko = od kursora, trzymany = od początku */
     uint8_t rec_hold;                    /* (v0.92) REC: krótko = nagrywanie, trzymany = strona RECORD */
+    uint8_t sq_selp;                     /* (1.7.2) wysokość ostatnio podświetlonej nuty + 1 (0: jeszcze żadna; w wolnym bajcie) */
+    uint8_t mv_on;                       /* (1.8.0) NOTES: tryb MOVE (karta > MOVE): SELECT przesuwa nutę / zaznaczenie o GRID */
     uint32_t rec_at;
     uint32_t play_at;
     uint8_t sq_pitch;                    /* wysokość nowej nuty z K2 (ostatnio wpisana / zmieniona) */
@@ -280,7 +290,7 @@ static struct {
     int8_t cp_a, cp_b, cp_back;          /* skąd, dokąd (dźwięk), strona sprzed okna */
     uint8_t redraw_roll;                 /* odtwarzanie: tylko piano roll (bez paska i chipów: mniej przesyłania) */
     uint8_t redraw;
-} ui = {.page = V_HOME, .knob = -1, .sq_low = 55, .sq_note = -1, .sq_pitch = 60, .sq_zv = 1, .sq_zh = 2, .pf_mac = {0, 0, 0, 100}};
+} ui;                                     /* (1.8.0, miejsce) bez inicjatora: .bss zamiast .data; pola niezerowe: ui_boot() */
 #include "ogs_app_06.c"
 OGS_UI void app_say(const char *a, const char *b)
 {
@@ -375,6 +385,14 @@ OGS_UI static void input(void)
             mt_mute(key_label(k) - K_OP1);
             continue;
         }
+        if (ui.arp_hold && mt_ui() && (keys & bit) && !(ui.keys & bit)
+            && key_label(k) >= K_OP1 && key_label(k) <= K_OP4) {   /* (1.8.0, P77) ARP trzymany + OP1-4: KEYS LAYER T1-T4 (bez nuty; ARP
+                                                                    * nie przełącza się i nie otwiera ustawień) */
+            eaten |= bit;
+            ui.arp_done = 1;
+            mt_layer(key_label(k) - K_OP1);
+            continue;
+        }
         if ((bit & gk) && (keys & bit) && !(ui.keys & bit)) {   /* (v0.65) LFO / ENV trzymany + OP: strona MOD */
             eaten |= bit;
             ui.gest_src = (uint8_t)((ui.gest_src & 0xF0u) | (uint32_t)key_label(k));
@@ -409,8 +427,9 @@ OGS_UI static void input(void)
             }
             ui.sel_used = 1;
         }
-        if (ui.pf_hold && mt_ui() && (keys & bit) && !(ui.keys & bit)) {   /* (v0.47) FX trzymany + klawisz: PERFORM,
-                                                                          * bez nuty; (v0.74) tylko w MULTI */
+        if ((ui.pf_hold || ui.page == V_PERF) && mt_ui() && (keys & bit) && !(ui.keys & bit)) {   /* (v0.47) FX trzymany + klawisz:
+                                                                          * PERFORM, bez nuty; (v0.74) tylko w MULTI; (1.8.0) na ekranie
+                                                                          * PERFORM klawisze zawsze = efekty (też bez FX: otwarty, P73) */
             eaten |= bit;
             pf_key(k, 1);
             continue;
@@ -461,8 +480,8 @@ OGS_UI static void input(void)
         if ((keys & bit) && !(ui.keys & bit)) {
             v = key_vel(k);
             knote[k] = (uint8_t)note;
-            if (glob.g[G_LOCAL])                 /* GLO LOCAL OFF: klawisze tylko do MIDI (dźwięk wraca z DAW) */
-                ev_push(EV_ON(note, v));
+            if (glob.g[G_LOCAL])                 /* GLO LOCAL OFF: klawisze tylko do MIDI (dźwięk wraca z DAW); (1.8.0) EV_KEY: KEYS LAYER */
+                ev_push(EV_ON(note, v) | EV_KEY(53u + k));
             if (glob.g[G_MIDIOUT] && !sqg.arp_on)   /* z ARP na MIDI idą nuty arpeggiatora */
                 plat_midi_send(0x09u | (0x90u | chan) << 8 | (uint32_t)note << 16 | v << 24, TO_USB);
         } else if (!(keys & bit) && (ui.keys & bit)) {
@@ -483,8 +502,10 @@ OGS_UI static void input(void)
         uint32_t bit = 1u << B_SEL;
         if ((btn & bit) && !(ui.btn & bit)) {
             ui.browse = 0;
-            if (ui.page == V_ALLP || ui.page == V_SCN || ui.page == V_LRN) {   /* (v1.0.2) ALL PRESETS: OK przy puszczeniu, trzymany = usuń
-                                                            * USER; w oknie DELETE?: tak; (v1.1.2) lista scen tak samo; (v1.3.0) MIDI LEARN */
+            if (ui.page == V_ALLP || ui.page == V_SCN || ui.page == V_LRN || ui.page == V_ENGP) {   /* (v1.0.2) ALL PRESETS: OK przy
+                                                            * puszczeniu, trzymany = usuń USER; w oknie DELETE?: tak; (v1.1.2) lista scen tak
+                                                            * samo; (v1.3.0) MIDI LEARN; (1.8.0, pkt 35) okno ENGINE: OK przy puszczeniu
+                                                            * (SEL trzymany + gałka: efekty zostają, fx_keep) */
                 if (ui.allp_del) {
                     if (ui.page == V_SCN)
                         scn_del();
@@ -505,12 +526,17 @@ OGS_UI static void input(void)
                 ui.redraw = 1;
             }
         } else if (!(btn & bit) && (ui.btn & bit) && ui.allp_sel) {
+            const int ok = ui.allp_sel == 1; /* (1.8.0, pkt 35) 2: SEL + gałka (efekty zostały): puszczenie nic nie robi */
             ui.allp_sel = 0;                 /* (v1.0.2) krótko (albo trzymany na nie-USER): OK; trzymany na USER: okno DELETE? */
-            if (ui.page == V_ALLP || ui.page == V_SCN || ui.page == V_LRN)
+            if (ok && (ui.page == V_ALLP || ui.page == V_SCN || ui.page == V_LRN || ui.page == V_ENGP))
                 save_ok();
         } else if (!(btn & bit) && (ui.btn & bit) && ui.sel_hold) {
             ui.sel_hold = 0;
             ui.cp_k = 0;
+            if (st_frz) {                        /* (1.8.0) STRETCH: po puszczeniu SEL zaznaczenie znowu = nuty w zakresie */
+                st_frz = 0;
+                sq_pick(0);
+            }
             if (!ui.sel_used && plat_ms() - ui.sel_at < 500u)
                 sel_cycle();
             ui.knob = -1;
@@ -574,7 +600,8 @@ OGS_UI static void input(void)
             break;
         case B_FX:                           /* (v0.47) krótko: przy puszczeniu, trzymany: PERFORM; (v0.74) PERFORM tylko w MULTI —
                                               * w SOLO FX od razu (RACK: FX + klawisz = MUTE, dalej przy puszczeniu) */
-            if (ui.page == V_FX || ui.page >= V_GLO || ui.page == V_SEQ || ui.page == V_ARP) {
+            if (ui.page == V_FX || ui.page >= V_GLO || ui.page == V_SEQ || ui.page == V_ARP || ui.page == V_PERF) {   /* (1.8.0)
+                                                                     * PERFORM, który został otwarty: FX krótko = wyjście (app_frame) */
                 if (!mt_ui() && !rk_on()) {
                     fx_press();
                     break;
@@ -612,6 +639,9 @@ OGS_UI static void input(void)
         default: app_say("SOON", ""); break;
         }
     }
+    if (ui.pf_stay == 2u && (btn & ~ui.btn & ~(1u << B_FX)))   /* (1.8.0) otwarty PERFORM: FX + inny przycisk (SEL, OCT ...) to nie
+                                                               * kliknięcie FX (puszczony nie zamyka) */
+        ui.pf_used = 1;
     for (k = 0; k < NE; k++) {
         const int32_t m = (int8_t)(lr_ec[k] - lr_es[k]), s = lr_stp[k];   /* (v1.3.0) MIDI LEARN: enkodery; kroki z gałek ze stopem bez
                                                                       * przyspieszenia */
@@ -622,6 +652,8 @@ OGS_UI static void input(void)
         if ((e = ko_enc((int)k) + m + s) == 0)   /* (1.5.1) ko_enc: plat_enc + obroty dla CONTROLS OUT */
             continue;
         ui.input_at = plat_ms();                 /* GLO SCREEN OFF: każdy ruch budzi */
+        if (ui.pf_stay == 2u)                    /* (1.8.0) otwarty PERFORM: FX + gałka to nie kliknięcie FX */
+            ui.pf_used = 1;
         if (ui.allp_del && (ui.page == V_ALLP || ui.page == V_SCN))   /* (v1.0.2) okno DELETE?: gałki stoją */
             continue;
         if (ui.mode_until) {
@@ -642,6 +674,7 @@ OGS_UI static void input(void)
                 int32_t id = preset_now(), n;
                 for (n = e < 0 ? -e : e; n > 0; n--)
                     id = sec_jump(id, e);
+                keep_fx = (uint8_t)fx_keep();    /* (1.8.0, pkt 35) SEL trzymany: z obecnymi efektami */
                 preset_go(id);
                 ui.redraw = 1;
                 continue;
@@ -659,10 +692,19 @@ OGS_UI static void input(void)
                 } else if (ui.sq_pg == SQ_RACK) {   /* (v0.57) RACK: wiersz (dźwięk) */
                     ui.rk_row = (uint8_t)clamp((int32_t)ui.rk_row + (e > 0 ? 1 : -1), 0, 15);
                     rk_view();
-                } else if (gp_live()) {      /* (glide) edycja skoków: kursor po nucie (SEL + SELECT: nic) */
+                } else if (ap_mvl()) {       /* (1.8.0) AUTO, tryb MOVE: SELECT o GRID, SEL + SELECT o krok */
+                    ap_move(e);
+                } else if (mv_live()) {      /* (1.8.0) tryb MOVE: SELECT o GRID, SEL + SELECT o tick */
                     if (ui.sel_hold)
                         ui.sel_used = 1;
-                    else
+                    sq_move(e, ui.sel_hold);
+                } else if (gp_live()) {      /* (glide) edycja skoków: kursor po nucie (SEL + SELECT: nic); (1.8.0, pkt 8) tryb MOVE
+                                              * skoku: SELECT o GRID, SEL + SELECT o tick */
+                    if (ui.sel_hold)
+                        ui.sel_used = 1;
+                    if (ui.gp_on == 2)
+                        gp_move(e, ui.sel_hold);
+                    else if (!ui.sel_hold)
                         gp_cursor(e);
                 } else if (sq_roll() && ui.sel_hold)
                     sq_range(e);
@@ -735,8 +777,10 @@ OGS_UI static void input(void)
                 ui.redraw = 1;
                 continue;
             }
-            if (ui.page == V_NAME) {         /* okno nazwy: SELECT zmienia literę */
-                name_char(e);
+            if (ui.page == V_NAME) {         /* okno nazwy: (1.7.2, decyzja użytkownika 2026-11-13) SELECT = kursor (było: litera;
+                                              * OCT- / OCT+ dalej też kursor), K1 = litera */
+                ui.cur = clamp(ui.cur + (e > 0 ? 1 : -1), 0, NAME_LEN - 1);
+                ui.redraw = 1;
                 continue;
             }
             if (ui.page == V_SAVE) {         /* okno SAVE: SELECT przełącza NADPISZ / NOWY; (1.6.0) FM6: w kółko z SEND AS DX7 */
@@ -780,6 +824,7 @@ OGS_UI static void input(void)
                 mt_engine(e);
             }
             else if (ui.page == V_ALLP) {    /* ALL PRESETS: ALGO po silnikach (v0.37, jak po grupach w oknie ENGINE) */
+                keep_fx = (uint8_t)fx_keep();    /* (1.8.0, pkt 35) SEL trzymany: z obecnymi efektami */
                 preset_go(eng_jump(preset_now(), e));
                 ui.redraw = 1;
             }
@@ -802,8 +847,10 @@ OGS_UI static void input(void)
                 text_cat(t, n);
                 app_say("STEPS", t);
                 ui.redraw = 1;
-            } else if (ui.page == V_SEQ && sq_roll()) {   /* NOTES (i AUTO): ALGO = GRID (jak snap w FL) */
-                int32_t g = clamp((int32_t)sqp.grid + (e > 0 ? 1 : -1), 0, 5);
+            } else if (ui.page == V_SEQ && sq_roll()) {   /* NOTES (i AUTO): ALGO = GRID (jak snap w FL); (1.7.2) kolejność 1/1, 1/2,
+                                                       * 1/4 ... 1/32 (numery 7, 6, 0 ... 5), w prawo drobniej */
+                const int32_t r = clamp((sqp.grid >= 6u ? 7 - (int32_t)sqp.grid : (int32_t)sqp.grid + 2) + (e > 0 ? 1 : -1), 0, 7);
+                int32_t g = r < 2 ? 7 - r : r - 2;
                 if (g != sqp.grid) {
                     sqp.grid = (uint8_t)g;
                     sq_changed();
@@ -864,7 +911,9 @@ OGS_UI static void input(void)
                 shown |= 1u << LABEL_KEY[K_OP1 + k];
     {                                            /* (v0.90) SEL trzymany 0,3 s: podpowiedzi (NOTES: pasek gałek, OP1-4) */
         static uint8_t selh_was;
-        const uint8_t h = (uint8_t)(ui.sel_hold && plat_ms() - ui.sel_at >= SEL_SHOW_MS);
+        const uint8_t h = (uint8_t)(((ui.sel_hold || ui.allp_sel) && plat_ms() - ui.sel_at >= SEL_SHOW_MS) | arp_lay() << 1);   /* (1.8.0)
+                                                                                     * też okna ALL PRESETS / ENGINE (podpowiedź SEL + gałka);
+                                                                                     * ARP trzymany: KEYS LAYER */
         if (h != selh_was) {
             selh_was = h;
             ui.redraw = 1;
@@ -886,6 +935,10 @@ OGS_UI static void input(void)
             lit |= 1u << LABEL_KEY[pget(E->mode) ? K_POLY : K_MONO];
         if (ui.sel_hold && sq_sel_trk() && plat_ms() - ui.sel_at >= SEL_SHOW_MS)   /* (v0.90) SEL trzymany w SEQ (MULTI): wybrana ścieżka pełnym */
             lit |= 1u << LABEL_KEY[K_OP1 + glob.g[G_MTFOC]];
+        if (arp_lay())                           /* (1.8.0, P77) ARP trzymany: OP1-4 ścieżek z silnikiem (KEYS LAYER ON: pełnym) */
+            for (k = 0; k < MT_N; k++)
+                if (glob.g[G_MT0 + k] < NENG)
+                    *(MT_LAY(k) ? &lit : &shown) |= 1u << LABEL_KEY[K_OP1 + k];
         int gl = glob.g[G_LIGHTS], kl = glob.g[G_KEYL];
         uint32_t bl = btn
                     | (set.octave > 0 ? 1u << B_OCTUP : set.octave < 0 ? 1u << B_OCTDN : 0u)   /* oktawa poza 0 */
@@ -959,8 +1012,9 @@ OGS_UI static void input(void)
             if (mt_ui())                         /* (v0.85) MASTER FX, gdy ktoś wysyła */
                 fxon |= mt_swant;
             fxon = fxon && ui.page != V_FX ? 1u << B_FX : 0u;
-            if (set.edited[set.eng])             /* brzmienie zmienione: SAVE delikatnie (do wciśnięcia) */
-                fxon |= 1u << B_SAVE;
+            if (ui.page == V_SEQ || ui.page == V_SQT || ui.page == V_SQN ? sqp_dirty || sqg_dirty : set.edited[set.eng])
+                fxon |= 1u << B_SAVE;            /* brzmienie zmienione: SAVE delikatnie (do wciśnięcia); (1.8.0) na stronach SEQ:
+                                                  * wzór niezapisany (SAVE zapisuje wzór) */
             fxon |= secmid;
             if (!sqg.arp_on && (ui.page == V_ARP || sqg.latch))   /* ustawienia ARP, arp wyłączony: przygaszony; (1.5.0) też LATCH
                                                                 * bez ARP (nuty wiszą) */
@@ -1019,6 +1073,7 @@ OGS_UI void app_frame(void)
         mx_hold = 0;
     }
     mx_sync();                               /* (v1.4.0) bliźniaki: przed brzmieniami sceny */
+    sg_frame();                              /* (1.8.0, P75 / P76) SONG / kolejka wzoru (ogs_auto.c) */
     mt_scene_presets();                      /* (v0.73) scena MULTI: brzmienia po przygaszeniu */
     {                                        /* (v0.88) perkusja: inny dźwięk (też MIDI): numer, gałki i wykres strony od razu */
         static int32_t lane = -1;
@@ -1087,7 +1142,7 @@ OGS_UI void app_frame(void)
             ui.redraw = 1;
         }
     }
-    if (ui.allp_sel && now - ui.sel_at >= SEL_EQ_MS
+    if (ui.allp_sel == 1 && now - ui.sel_at >= SEL_EQ_MS     /* (1.8.0, pkt 35) po SEL + gałce (2) nigdy */
         && (ui.page == V_ALLP ? CUR >= ID_USER && CUR < ID_SYX : ui.page == V_SCN && glob.scn[ui.scn_cur].ok)) {   /* (v1.1.2) też scena */
         ui.allp_sel = 0;                     /* (v1.0.2) ALL PRESETS: SEL trzymany 0,8 s na USER = okno DELETE? */
         ui.allp_del = 1;
@@ -1162,12 +1217,27 @@ OGS_UI void app_frame(void)
                 app_say("PLAY", "FROM START");
         }
     }
+    if (ui.pf_stay && ui.page != V_PERF)     /* (1.8.0) z PERFORM wyszedł przycisk strony (EDIT, GLO, SEQ, SELECT ...; też przy trzymanym FX) */
+        pf_leave();
+    if (ui.page == V_PERF) {                 /* (1.8.0) PERFORM nad stroną chwilową / przeglądaniem (2 s bez kręcenia): czas liczy się od
+                                              * wyjścia z PERFORM (było: wracała do HOME w trakcie i zamykała PERFORM, który został) */
+        ui.quick_at = now;
+        ui.browse_until = now + QUICK_MS;
+    }
     if (ui.pf_hold) {                        /* (v0.47) FX: trzymany 300 ms = PERFORM; krótko (puszczenie) = FX / MORE */
         if (!(btn_now() >> B_FX & 1u)) {
             ui.pf_hold = 0;
-            if (ui.page == V_PERF && !ui.pf_keys && !ui.cv_held)   /* (v0.90) klawisz efektu trzymany: strona zostaje (gałki ustawiają efekt) */
-                pf_leave();
-            else if (!ui.pf_used)
+            if (ui.page == V_PERF) {
+                /* (1.8.0, P73: skrzynka #15 „Loud Difficulty”, decyzje użytkownika 2026-11-13) FX trzymany i puszczony bez klawisza efektu
+                 * i gałki: PERFORM zostaje otwarty (klawisze = efekty bez FX) do FX krótko (bez niczego innego), HOME albo przycisku
+                 * strony; stary gest FX + klawisz / gałka: puszczony FX zamyka jak dotąd ((v0.90) klawisz efektu trzymany bez LATCH,
+                 * klawisz krzywej: przy jego puszczeniu); w otwartym FX + klawisz nie zamyka */
+                if (ui.pf_stay == 1u && !ui.pf_used)
+                    ui.pf_stay = 2;
+                else if (ui.pf_stay == 2u ? !ui.pf_used && now - ui.pf_at < 300u : !(ui.pf_latch ? 0u : ui.pf_keys) && !ui.cv_held)
+                    pf_leave();
+                ui.redraw = 1;
+            } else if (!ui.pf_used)
                 fx_press();
         } else if (ui.page != V_PERF && now - ui.pf_at >= 300u && !rk_on()) {   /* (v0.57) RACK: FX + klawisz = MUTE */
             pf_enter();
@@ -1184,7 +1254,8 @@ OGS_UI void app_frame(void)
                                               * SELECT; v0.91 - v1.1.2 tam 1 <-> MORE) */
                 arp_toggle();
             }
-        } else if (!ui.arp_done && now - ui.arp_at >= 400u && !rk_on()) {
+        } else if (!ui.arp_done && now - ui.arp_at >= (mt_ui() ? HOME_HOLD_MS : 400u) && !rk_on()) {   /* (1.8.0) MULTI: 0,7 s, jak SEQ
+                                                                                         * (czas na ARP + OP1-4 = KEYS LAYER) */
             ui.arp_done = 1;
             if (ui.page >= V_GLO || PANEL_PAGE(ui.page) || ui.page == V_SQT || ui.page == V_SQN)
                 go_arp();
@@ -1212,8 +1283,13 @@ OGS_UI void app_frame(void)
         uint32_t p = sq.pos / 12u;
         if (p != at) {
             at = p;
-            if (sq_roll() && now - ui.sq_moved > 2000u && sq.pos / sq_span() != ui.sq_cur / sq_span()) {
+            if (sq_roll() && !ui.gp_on && !ui.mv_on && !ap_mv && now - ui.sq_moved > 2000u && sq.pos / sq_span() != ui.sq_cur / sq_span()) {
+                if (ui.sq_note >= 0)             /* (1.8.0, pkt 31) jak ruch kursora: nuta najbliższa wysokością (było: wybór znikał,
+                                                  * a następny K2 wpisywał nową nutę); edycja glide i MOVE: widok stoi */
+                    ui.sq_selp = (uint8_t)(sqp.n[ui.sq_note].note + 1u);
                 ui.sq_cur = sq.pos / sq_span() * sq_span();   /* widok: takty, które grają */
+                if (!ui.sq_rng)
+                    ui.sq_note = sq_cell_near(ui.sq_selp);
                 sq_pick(0);
                 ui.redraw = 1;
             } else if (ui.sq_pg == SQ_RACK) {   /* (v0.57) RACK: strona kroków za odtwarzaniem */
@@ -1324,14 +1400,20 @@ OGS_UI void app_frame(void)
         go_home();
         app_say("RESTORED", "FROM USB");
     }
-    if (set_dirty && !backup_hold && ui.page >= V_GLO && out_quiet() && now - ui.dirty_at >= AUTOSAVE_MS
+    /* (1.8.0, pkt 4: „po ponownym uruchomieniu ma się otwierać ostatnio używany ...”) zapis sam także na stronach FX / SEQ / ARP /
+     * PERFORM / MOD, karcie nuty i TOOLS (do 1.7.1 tylko HOME, GLO i strony silnika: wyłączenie FM1 na innej stronie gubiło zmiany);
+     * dalej nie w oknach przeglądania (ALL PRESETS, ENGINE, SAVE, nazwa, listy), żeby podgląd nie został „ostatnio używanym” */
+    const int work = ui.page >= V_GLO || PANEL_PAGE(ui.page) || ui.page == V_SQN || ui.page == V_SQT || ui.page == V_MOD;
+    if (set_dirty && !backup_hold && work && out_quiet() && now - ui.dirty_at >= AUTOSAVE_MS
         && now - ui.input_at >= FLASH_IDLE_MS) {
         settings_save();                     /* preset, oktawa, silnik, brzmienie: same, w ciszy (zapis flasha) */
         was_dirty = 0;
     }
-    if (mt_gdirty && !backup_hold && ui.page >= V_GLO && out_quiet() && now - ui.input_at >= FLASH_IDLE_MS) {
+    if ((mt_gdirty || (ui.page == V_GLO && (glob_dirty || mac_bd))) && !backup_hold && work && out_quiet()
+        && now - ui.input_at >= FLASH_IDLE_MS) {   /* (1.8.0) też GLO i ALGO KNOB, gdy zostajesz w GLO (wcześniej: przy wyjściu z GLO) */
+        if (mt_gdirty)
+            glob_dirty = 1;
         mt_gdirty = 0;                       /* (v0.64) MULTI: ścieżki, głośności, MUTE — jak brzmienia, w ciszy */
-        glob_dirty = 1;
         glob_commit();
     }
     scope_on = (ui.page == V_HOME && glob.g[G_VHOME] && !ui.mode_until)   /* (v0.92) też widmo EQ */
