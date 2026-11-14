@@ -8,7 +8,9 @@
 #include <stdint.h>
 #include "ogs_lists.h"
 
-enum { F_NUM, F_SIGNED, F_LIST, F_NONE, F_CUSTOM };   /* F_CUSTOM: tekst wartości robi silnik (text) */
+enum { F_NUM, F_SIGNED, F_LIST, F_NONE, F_CUSTOM, F_RATE };   /* F_CUSTOM: tekst wartości robi silnik (text); (1.8.0, pkt 23)
+                                                 * F_RATE: RATE LFO (tekst jak F_CUSTOM), góra o LFO_XT wyżej niż do 1.7.1 */
+#define LFO_XT 12                                /* (1.8.0, pkt 23) RATE LFO silników: 12 kroków ponad dawną górę (do ~100 Hz) */
 typedef struct {
     const char *name;
     int16_t lo, hi, def;
@@ -25,8 +27,8 @@ static struct {
     float wheel;                             /* mod wheel (CC 1) 0..1 */
     float press;                             /* nacisk: klawisze FM1 i aftertouch MIDI, 0..1 */
     float a4;                                /* strój: A4 w Hz (GLO TUNE) */
-    uint8_t slide;                           /* sekwencer: ta nuta wjeżdża glide z poprzedniej (legato, jak slide w FL) */
-    int8_t slide_from;                       /* z której nuty (trzymana jeszcze przez sekwencer) */
+    /* (1.8.0, pkt 36) slide / slide_from (stary SIMPLE GLIDE sekwencera: nuta wjeżdżała z poprzedniej) usunięte; GLIDE i LEGATO
+     * brzmienia (klawisze, MIDI, SEQ) bez zmian */
     float bpm;                               /* tempo (SEQ / zegar MIDI): LFO SYNC */
     int8_t dsemi;                            /* (v0.56) perkusja: OCT (+ TRANSPOSE) = przestrojenie wszystkich dźwięków
                                               * o półtony, układ klawiszy zostaje (decyzja użytkownika 2026-10-29) */
@@ -34,8 +36,21 @@ static struct {
     float dlen;                              /* (v0.92) perkusja, nuta z SEQ: długość nuty w s (0: brzmienie); dłuższa
                                               * niż brzmienie = zanik rozciągnięty do niej */
     uint8_t gid;                             /* (glide 1.7.0) nuta z SEQ ze skokami: jej numer (1..8) dla głosów (0: brak) */
-} ctl = {0.0f, 0.0f, 0.0f, 440.0f, 0, 0, 120.0f, 0};
-#define SLIDE_GLIDE 32                       /* czas glide nuty z SLIDE, gdy brzmienie ma GLIDE 0 */
+    float beat;                              /* (1.8.0, pkt 23) pozycja SEQ w ćwierćnutach od początku wzoru na początku bloku audio
+                                              * (też za zegarem MIDI; -1: stoi / odliczanie): LFO SYNC trzyma się taktu */
+    uint32_t blk;                            /* ... numer bloku audio (ogs_lfo_lock: poprawka raz na blok) */
+} ctl = {0.0f, 0.0f, 0.0f, 440.0f, 120.0f, 0};
+/* (1.8.0, pkt 2B, decyzja użytkownika 2026-11-13: nachodzące nuty tej samej wysokości „gdy któraś ma glide — osobne głosy, nie ucinać”)
+ * głos pamięta gid nuty, która go uruchomiła: note on rusza od nowa tylko głos tej samej nuty z tym samym gid (inny gid = nowy głos),
+ * note off z ctl.gid puszcza wszystkie głosy tej nuty SEQ (każda wysokość: akord), gid 0 (klawisz, MIDI, nuta bez skoków) tylko głosy
+ * gid 0 tej wysokości, GID_ANY (limit nut MULTI) wszystkie tej wysokości. MONO: note off cudzego gid nie puszcza głosu (gra nowsza). */
+#define GID_ANY 0xFFu
+static __attribute__((noinline, unused)) int gid_off(int32_t vn, uint32_t vg, int32_t n)   /* note off: puścić głos (nuta vn, skoki vg)? */
+{
+    return ctl.gid == GID_ANY ? vn == n : ctl.gid ? vg == ctl.gid : vn == n && !vg;
+}
+#define GID_OFF(vn, vg, n) gid_off((vn), (vg), (n))
+#define GID_MONO(vg) (!ctl.gid || ctl.gid == GID_ANY || (vg) == ctl.gid)
 
 /* przeciążenie CPU (app_overload, przerwanie audio): silnik przy następnym renderze płynnie wycisza najstarszy
  * wybrzmiewający głos i zeruje znacznik */
@@ -224,6 +239,35 @@ float ogs_det_wide(float dt, float v0, float s0);   /* jedna kopia (app.c, nie w
 #define det_wide ogs_det_wide
 float ogs_sk_detu(float sp, float dt);         /* sp * dt^2 / 2 do 0,6 (jak dotąd), wyżej det_wide; jedna kopia w app.c */
 #define SK_DETU(sp, dt) ogs_sk_detu(sp, dt)
+
+/* (1.8.0, pkt 19, decyzja użytkownika 2026-11-13: bez klików ataku we wszystkich silnikach) start głosu (nowy, powtórka,
+ * kradzież): VCA idzie S-krzywą 2 ms od poziomu na starcie x0 do obwiedni, x0 + (A - x0) * S(t / 2 ms), nigdy ponad samą
+ * obwiednię (wolny atak bez zmian). Blok m próbek (im = 1 / m): parabola przez początek a0, środek i koniec — pętla DSP:
+ * amp += d; d += dd. *u: postęp 0..1 (+ m / 88,2 próbki), *ra: obwiednia na początku bloku (na wyjściu: na końcu), *amp: cel
+ * obwiedni na koniec bloku, zamieniany na cel S-krzywej; zwraca krok pierwszej próbki, *dd: zmianę kroku. Po starcie
+ * silnik liczy rampę jak dotąd (dd = 0: bit w bit). Jedna kopia w app.c; ogs_onramp3: to samo sześcianem (bloki 64 próbek,
+ * pętla amp += d; d += dd; dd += d3). FM6: rampa liniowa co 16 próbek, krok w stronę celu obwiedni wg S (ogs_dx7.c). */
+#define OGS_ONT 88.2f                            /* 2 ms (44,1 kHz) */
+static inline float ogs_ss(float u) { return u >= 1.0f ? 1.0f : u * u * (3.0f - 2.0f * u); }   /* S-krzywa 0..1 */
+/* (1.8.0, pkt 23, decyzja użytkownika 2026-11-13) LFO SYNC: podział taktu RATE v (16 jak do 1.7.1; ponad 100 ostatni, 1/64T —
+ * jak w efektach), Hz podziału w tempie ctl.bpm; przy grającym SEQ faza dociąga do taktu: ogs_lfo_lock (app.c) zwraca poprawkę Hz
+ * na ten blok audio (raz na blok, *blk), ph: faza LFO teraz, b: ćwierćnut na okres */
+static inline int32_t lfo_div(int32_t v) { return v > 100 ? 15 : v * 15 / 100; }
+float ogs_lfo_beats(int32_t v);
+float ogs_lfo_lock(uint32_t *blk, float *dhz, float ph, float b);
+
+/* (1.8.0) testy w symulatorze: brzmienie silników sprzed 1.8.0 do porównań bit w bit ze starą wersją (eksport ogs_old180
+ * w app.c; na FM1 tego nie ma: T180 = 0). Bity: 1 = bez S-krzywej startu, 2 = DC jak dotąd (pkt 19), 4 = LFO jak dotąd (pkt 23) */
+#ifndef T180
+#ifdef PLAT_WEB
+extern int ogs_t180;
+#define T180(b) (ogs_t180 & (b))
+#else
+#define T180(b) 0
+#endif
+#endif
+float ogs_onramp(float a0, float x0, float *ra, float *u, float *amp, uint32_t m, float im, float *dd);
+float ogs_onramp3(float a0, float x0, float *ra, float *u, float *amp, uint32_t m, float *dd, float *d3);
 
 /* pasek modulacji: suma ilości połączeń do celu d (bez wyłączonych źródeł) */
 static inline int32_t gest_depth(const int16_t *p, int32_t n, int32_t (*row)(int32_t i), int32_t d)

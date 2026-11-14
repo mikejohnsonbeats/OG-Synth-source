@@ -26,6 +26,15 @@
   .row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-top: 8px; }
   .row label { margin: 0; }
   input[type=number] { font: inherit; width: 4em; padding: 4px; border-radius: 8px; }
+  /* (1.8.0) paczka presetów USER */
+  .pkl { max-height: 26rem; overflow-y: auto; margin: 8px 0; border-top: 1px solid #3a3632; }
+  .pkr { display: grid; grid-template-columns: minmax(0, 1fr) 4.5em minmax(0, 9em) auto; gap: 4px 10px; align-items: center;
+         padding: 3px 0; border-bottom: 1px solid #3a3632; }
+  .pkr label { margin: 0; display: flex; gap: 8px; align-items: center; font-family: ui-monospace, monospace; font-size: 14px; }
+  .pke, .pkg { color: var(--dim); font-size: 13px; overflow-wrap: anywhere; }
+  .pkr button { background: transparent; color: var(--acc); border: 1px solid var(--acc); padding: 1px 10px; }
+  .pks { color: var(--dim); margin-top: 8px; }
+  progress { width: 10em; }
 </style>
 </head>
 <body>
@@ -83,10 +92,22 @@
       <button id="edwav">zapisz .wav</button><button id="edsend" disabled>wyślij edytor do FM1</button>
     </div>
   </div>
+  <div class="card" id="pk" hidden>
+    <b>Paczka presetów USER</b>
+    <p style="margin:4px 0 8px">Gotowe brzmienia do wyboru (bez perkusji): ▶ = odsłuch. Zaznacz, które chcesz — „Wgraj zaznaczone”
+      zapisuje każde razem z efektami w pierwszym wolnym miejscu USER (zajętych nie nadpisuje); samo nic się nie wgrywa. Wymaga
+      OG Synth 1.8.0 i trybu SOLO (nie MULTI). Niezapisane zmiany brzmienia na FM1 przepadną. Na FM1: PRESETS albo ALL PRESETS.</p>
+    <div class="row"><button id="pkall">zaznacz wszystkie</button><button id="pknone">odznacz wszystkie</button><span id="pkn"></span></div>
+    <div class="pkl" id="pklist"></div>
+    <div class="row"><button id="pksend" disabled>Wgraj zaznaczone</button><progress id="pkbar" max="1" value="0" hidden></progress></div>
+    <div class="pks" id="pkstat"></div>
+  </div>
   <div id="log"></div>
 </main>
 <script src="wavetable.js"></script>
 <script src="fm1_banks.js"></script>
+<script src="paczka.js"></script>
+<script src="paczka_sysex.js"></script>
 <script type="module">
 const $ = (id) => document.getElementById(id);
 const log = (t) => { $("log").textContent += t + "\n"; };
@@ -140,6 +161,7 @@ function ready() {
   $("fm1send").disabled = !$("out").value || !window.FM1_BANKS;
   $("delbank").disabled = !$("out").value;
   $("edsend").disabled = !$("out").value;
+  if (PK) $("pksend").disabled = !$("out").value || !pkSel().length || pkBusy;
 }
 function fill() {
   const cur = $("out").value;
@@ -164,6 +186,7 @@ function listen() {
       if (d[0] !== 0xF0 || d[1] !== 0x7D) return;
       if (d[5] === 0x21 && ackWait) ackWait();
       if (d[5] === 0x24 && bankWait) bankWait(d[6], d[7]);
+      if (pkWait && d[2] === 0x4F && d[3] === 0x47 && d[4] === 0x53) pkWait(d);   // paczka presetów: 24 26 nr / 25 / 11
     };
 }
 function hasInput() {
@@ -385,6 +408,96 @@ $("fm1send").addEventListener("click", async () => {
   log("Brzmienia FM1 wgrane (FM6 > PRESETS: sekcja IMPORTED PIANO … FX).");
   ready();
 });
+
+/* (1.8.0) paczka presetów USER: dane paczka.js (tools/paczka/eksport.mjs), ramki i pętla wgrywania paczka_sysex.js (ta sama,
+   którą sprawdza tools/v180_pack_test.mjs: SysEx 26 kawałki + 27 zapis, całe brzmienie z efektami i dodatkami). Sekcja widoczna,
+   gdy paczka_sysex.js przyjmuje całe brzmienie (ogsPaczka.PELNE) albo z ?paczka w adresie. Bez znaczników sekcji albo bez plików
+   paczki: nic się nie dzieje. */
+const OPIS = "d";                                              // opis presetu (dymek wiersza); strona angielska: "en"
+const PK = window.OGS_PACZKA && window.ogsPaczka && $("pk") ? { all: window.OGS_PACZKA.presety, P: window.ogsPaczka } : null;
+let pkWait = null, pkBusy = false;
+function pkSel() { return PK ? [...$("pklist").querySelectorAll("input:checked")].map((c) => PK.all[+c.dataset.i]) : []; }
+function pkCount() { $("pkn").textContent = `Zaznaczone: ${pkSel().length} z ${PK.all.length}`; ready(); }
+async function pkSend() {
+  const list = pkSel(), out = access && access.outputs.get($("out").value), bar = $("pkbar"), st = $("pkstat");
+  if (!list.length || !out) return;
+  if (!hasInput()) { log("Brak wejścia MIDI z FM1 (potwierdzenia) — podłącz FM1 i wybierz go jako wyjście."); return; }
+  pkBusy = true;
+  ready();
+  bar.max = list.length; bar.value = 0; bar.hidden = false;
+  let retries = 0;
+  const io = {
+    send: (m) => out.send(m),
+    wait: (a, ms) => new Promise((res) => {                    // odpowiedź FM1, której bajty od 5. zaczynają się od a
+      const t = setTimeout(() => { pkWait = null; res(null); }, ms);
+      pkWait = (d) => { if (a.every((v, i) => d[5 + i] === v)) { clearTimeout(t); pkWait = null; res(d); } };
+    }),
+    pause,
+  };
+  const r = await PK.P.wgraj(list, io, {
+    start: (pr, i) => { st.textContent = `Wgrywam ${i + 1} / ${list.length}: ${pr.n}…`; },
+    ok: (pr, nr, i) => {
+      bar.value = i;
+      log(`${pr.n} -> USER ${nr + 1}`);
+      const c = $("pklist").querySelector(`input[data-i="${PK.all.indexOf(pr)}"]`);
+      if (c) c.checked = false;                                // wgrany: odznaczony (ponowne „Wgraj” = reszta)
+    },
+    retry: () => { retries++; },
+  });
+  const ok = r.wynik.length, p = r.pr;
+  const msg = r.stop === "wersja"
+    ? "Ten FM1 ma starszy OG Synth: paczkę presetów przyjmuje dopiero OG Synth 1.8.0. Zaktualizuj firmware i wgraj jeszcze raz. Nic nie zapisano."
+    : r.stop === "cisza" ? `FM1 nie odpowiada przy ${p.n}: sprawdź kabel (i czy na FM1 jest OG Synth 1.8.0), potem wgraj resztę jeszcze raz (wgrane są odznaczone).`
+    : r.stop === "multi" ? `FM1 jest w trybie MULTI: wyjdź z MULTI (SOLO) i wgraj resztę jeszcze raz (wgrane są odznaczone).`
+    : r.stop === "pelne" ? `USER pełne (128): ${p.n} i dalsze niewgrane. Miejsce zwolnisz na FM1: ALL PRESETS, SEL trzymany na presecie USER = DELETE.`
+    : r.stop === "suma" ? `${p.n}: dane dochodzą do FM1 uszkodzone (3 razy zła suma) — sprawdź kabel albo inny port USB i wgraj resztę jeszcze raz.`
+    : r.stop === "dane" ? `${p.n}: FM1 nie przyjął danych presetu (ta wersja OG Synth ich nie zna?). Wgrane: ${ok}.`
+    : r.stop === "zapis" ? `${p.n}: zapis do pamięci FM1 się nie udał. Wyłącz i włącz FM1 i wgraj resztę jeszcze raz.`
+    : r.stop === "braki" ? `${p.n}: preset nie pasuje do formatu paczki (plik paczka.js?). Nic nie wysłano.`
+    : `Gotowe: ${ok} z ${list.length} presetów w USER (FM1: PRESETS albo ALL PRESETS).`;
+  st.textContent = msg + (retries ? ` Ponowione kroki: ${retries}.` : "");
+  if (r.stop !== "braki" && r.stop !== "wersja") log(`Paczka: wgrane ${ok} z ${list.length}.`);
+  log(msg);
+  bar.hidden = true;
+  pkBusy = false;
+  pkCount();
+}
+if (PK) {
+  $("pk").hidden = !(PK.P.PELNE || /[?&]paczka\b/.test(location.search));
+  const au = new Audio();
+  let playing = null;
+  const stop = () => { au.pause(); if (playing) playing.textContent = "▶"; playing = null; };
+  au.addEventListener("ended", stop);
+  au.addEventListener("error", () => { if (playing) { $("pkstat").textContent = `Brak pliku odsłuchu: ${decodeURIComponent(au.src.split("/").pop())}`; stop(); } });
+  PK.all.forEach((pr, i) => {
+    const row = document.createElement("div"), lab = document.createElement("label"), cb = document.createElement("input");
+    const e = document.createElement("span"), g = document.createElement("span"), b = document.createElement("button");
+    row.className = "pkr";
+    if (pr[OPIS]) row.title = pr[OPIS];
+    cb.type = "checkbox";
+    cb.dataset.i = String(i);
+    lab.append(cb, pr.n);
+    e.className = "pke"; e.textContent = pr.e;
+    g.className = "pkg"; g.textContent = `${pr.cat} · ${pr.g}`;
+    b.type = "button"; b.textContent = "▶"; b.setAttribute("aria-label", `${pr.n}: odsłuch`);
+    b.addEventListener("click", () => {
+      const again = playing === b;
+      stop();
+      if (again) return;
+      au.src = "paczka/" + pr.mp3;
+      playing = b;
+      b.textContent = "■";
+      au.play().catch(() => {});
+    });
+    row.append(lab, e, g, b);
+    $("pklist").append(row);
+  });
+  $("pklist").addEventListener("change", pkCount);
+  $("pkall").addEventListener("click", () => { $("pklist").querySelectorAll("input").forEach((c) => { c.checked = true; }); pkCount(); });
+  $("pknone").addEventListener("click", () => { $("pklist").querySelectorAll("input").forEach((c) => { c.checked = false; }); pkCount(); });
+  $("pksend").addEventListener("click", pkSend);
+  pkCount();
+}
 
 try {
   access = await navigator.requestMIDIAccess({ sysex: true });
