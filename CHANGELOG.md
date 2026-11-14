@@ -1,5 +1,10 @@
 # Changelog
 
+## v1.8.1 — 2026-11-14
+Źródła MPL OG Synth 1.8.1 „Song start”: SONG ze startem z DAW od pierwszej pozycji (logika startu w pliku zamkniętym ogs_seq.c),
+w app.c: SEL ON w trakcie grania = przed pierwszą pozycją (nagłówek NEXT S1, żadna pozycja nie świeci jako grająca); app.h: wersja;
+app/docs/MANUAL.md: SONG (start z DAW, CONTINUE, NEXT S1).
+
 ## v1.8.0 — 2026-11-14
 Źródła MPL OG Synth 1.8.0 „Song”: SONG i kolejka wzoru (strona SONG, zmiana dokładnie na końcu obiegu — UI w app.c, przygotowanie
 i zamiana w plikach zamkniętych ogs_auto.c / ogs_seq.c), MULTI SEL + K1-K4 = VOL T1-T4 i KEYS LAYER, OCTAVER VOICE (oktawy na
