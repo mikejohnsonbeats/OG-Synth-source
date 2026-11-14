@@ -51,3 +51,5 @@ The sound engines, effects and sequencer are separate files under a proprietary 
 They are combined with the files here as a Larger Work (MPL-2.0 section 3.3), so this repository alone does not build.
 
 M-VAVE and FM-1 are trademarks of their respective owners. OG Synth is not affiliated with M-VAVE.
+
+You can also try OG Synth Source in the browser, no flashing needed, in the free community [FM-1 Emulator](https://fm1-emulator.atst.tools/).
