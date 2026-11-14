@@ -9050,7 +9050,8 @@ static void sq_sel_short(void)                   /* SEL krótko: NOTES = GLIDE, 
         sqg.sflg ^= 1u;
         sqg_changed();
         sg.pos = (uint8_t)(sg_n() ? sg_n() - 1u : 0u);
-        sg.rep = 1;
+        sg.rep = 0;                              /* (1.8.1) 0 = przed pierwszą pozycją (nagłówek NEXT S1, CONTINUE z MIDI od pierwszej;
+                                                  * sg_pass / sg_frame jak przy 1; było 1: nagłówek S3/3 do końca obiegu) */
         sg.stg = sg.cue = 0;
         app_say("SONG", !sg_on() ? "OFF" : sg_n() ? "ON" : "ON   K1: PATTERN");
         return;
@@ -14327,7 +14328,10 @@ OGS_UI static void sq_state(char *t)                    /* PLAY / REC / STOP i w
     if (sqg.pat < 9)
         text_cat(t, "0");
     text_cat(t, n);
-    if (sg_on() && sg_n()) {                     /* (1.8.0, P76) SONG: pozycja / pozycji */
+    if (sg_on() && sg_n() && sq.play && !sg.rep) {   /* (1.8.1) SONG ON w trakcie grania: do końca obiegu gra bieżący wzór, potem pozycja 1
+                                                  * (było: S3/3 — pozycja przed pierwszą) */
+        text_cat(t, "  NEXT S1");
+    } else if (sg_on() && sg_n()) {              /* (1.8.0, P76) SONG: pozycja / pozycji */
         text_cat(t, "  S");
         int_text(sq.play ? sg.pos + 1 : 1, n, 0);
         text_cat(t, n);
@@ -15089,7 +15093,7 @@ OGS_UI static void draw_song(void)
         }
         if (cur)
             cv_rect(x, y, 55, 20, C_HI);
-        cv_text(x + 4, y + 5, &FONT_XS, e, cur ? C_BLACK : s == 0xFFu ? C_DIM : sq.play && on && i == (int32_t)sg.pos ? C_HI : C_WHITE);
+        cv_text(x + 4, y + 5, &FONT_XS, e, cur ? C_BLACK : s == 0xFFu ? C_DIM : sq.play && on && sg.rep && i == (int32_t)sg.pos ? C_HI : C_WHITE);   /* (1.8.1) przed pierwszą pozycją: żadna nie gra */
         if (s != 0xFFu && sg_scn((uint32_t)i)) {
             e[0] = 'S';
             e[1] = (char)('0' + sg_scn((uint32_t)i));

@@ -192,8 +192,10 @@ Every engine has a **VINTAGE** page (deviations like an old unit) and a **CHORD*
 - **SONG** (SEQ settings, the page right after PATTERN) chains patterns into a whole song: 16 positions, each with a **pattern** (K1, P01-P16;
   left of P01 = END, the end of the song) and how many times it plays (**K2**, x1-x16). In MULTI a position can also load the
   sounds of a **scene** (**K3**: - = keep the sounds, S1-S8; the pattern stays the position's). SELECT = position (left of the
-  first: PATTERN, right past the last: FEEL), **SEL = SONG ON / OFF** (while playing: from the first position after this pass). With SONG ON, PLAY starts at the first
-  position and after the last one the song starts again; the header shows S2/5. The next pattern starts exactly at the end of the
+  first: PATTERN, right past the last: FEEL), **SEL = SONG ON / OFF** (while playing: from the first position after this pass; the header says NEXT S1 until then). With SONG ON,
+  PLAY starts at the first position and after the last one the song starts again; the header shows S2/5. Started from a DAW (MIDI
+  clock, CLOCK IN), Start also plays from the first position and Continue goes on from the position where it stopped; when the first
+  position has another pattern than the one it stopped on, its very first note can come up to ~20 ms late. The next pattern starts exactly at the end of the
   pass, without a gap (a pattern changed while it played is saved first, with a short gap; a position with a scene fades the
   sound for a moment while its sounds load). While SONG
   plays, a LOOP waits (every pass is the whole pattern). Changing the pattern by hand while playing turns SONG off.
