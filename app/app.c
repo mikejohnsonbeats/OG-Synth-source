@@ -5590,7 +5590,8 @@ static struct {
     uint8_t mv_on;                       /* (1.8.0) NOTES: tryb MOVE (karta > MOVE): SELECT przesuwa nutę / zaznaczenie o GRID */
     uint32_t rec_at;
     uint32_t play_at;
-    uint8_t sq_pitch;                    /* wysokość nowej nuty z K2 (ostatnio wpisana / zmieniona) */
+    uint32_t play_T;                     /* (1.8.2) PLAY w NOTES: tick zegara SEQ przy naciśnięciu (zegar MIDI: start od tej chwili) */
+    uint8_t sq_pitch;                   /* wysokość nowej nuty z K2 (ostatnio wpisana / zmieniona) */
     uint8_t sqn_row;                     /* karta nuty: wiersz */
     uint8_t st_on;                       /* klawisze wpisują (pusty krok albo REC) do puszczenia wszystkich */
     uint8_t sq_zv, sq_zh;                /* NOTES: zoom w pionie (SEL + K1: ile rzędów), w poziomie (SEL + K2: takty) */
@@ -12090,10 +12091,12 @@ OGS_UI static void input(void)
             ui.arp_done = 0;
             ui.arp_at = plat_ms();
             break;
-        case B_PLAY:                         /* NOTES (zatrzymany): krótko = od kursora, trzymany = od początku */
-            if (!sq.play && ((ui.page == V_SEQ && sq_roll()) || ui.page == V_SQN)) {
+        case B_PLAY:                         /* NOTES (zatrzymany): krótko = od kursora, trzymany = od początku; (1.8.2) kursor na
+                                              * początku: od razu, przy naciśnięciu (oba gesty dają to samo; było: przy puszczeniu) */
+            if (!sq.play && ui.sq_cur && ((ui.page == V_SEQ && sq_roll()) || ui.page == V_SQN)) {
                 ui.play_hold = 1;
                 ui.play_at = plat_ms();
+                ui.play_T = sq.T;
             } else {
                 sq_play_key();
             }
@@ -16013,6 +16016,8 @@ OGS_UI void app_frame(void)
         if (up || now - ui.play_at >= 400u) {
             ui.play_hold = 0;
             sq.from = up ? ui.sq_cur : 0u;
+            sq.late = (uint16_t)(sq.ext ? sq.T - ui.play_T : 0u);   /* (1.8.2) zegar MIDI: wzór liczony od naciśnięcia (było: od
+                                              * puszczenia / 0,4 s — ok. 150 ms za DAW); nuty z tej chwili grają (chase), odliczanie krótsze */
             sq_play_key();
             if (!up)
                 app_say("PLAY", "FROM START");
