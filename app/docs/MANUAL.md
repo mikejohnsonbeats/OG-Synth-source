@@ -76,7 +76,7 @@ PRESETS** = the next engine or sound with the current effects (chapter 5).
   GLIDE MODE ALWAYS / LEGATO / FOLLOW. FILTER shortcut: SEL + GLOBAL (VOICE > UNISON > FILTER > CONTROL > VINTAGE).
   **BRIGHT** (ALGO page K4, the level of all modulators) -100..+100: -50..+50 sounds as before, above +50 much brighter.
 - **PHASE**: Casio CZ: phase modulation, 8-segment envelopes, CZ sound import.
-- **WAVE**: Serum-style wavetable: 2 oscillators, warps, unison, 2 filters, 4 envelopes with curves and HOLD, 4 LFOs,
+- **WAVE**: modern wavetable: 2 oscillators, warps, unison, 2 filters, 4 envelopes with curves and HOLD, 4 LFOs,
   DRAW, 16-slot matrix.
 - **8BIT**: glitch / 8-bit: BITS, GLITCH.
 - **PHYS**: physical modelling: PLUCK / STRIKE / BOW excitation, STRING resonator or BAR / BELL / DRUM / TUBE (modes);
