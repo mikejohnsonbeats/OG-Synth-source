@@ -48,60 +48,98 @@ index 79fa057..8a37cf3 100644
              rc = RS_E_FETCH;
              goto out;
 diff --git a/device/gfx.c b/device/gfx.c
-index 4d4f45c..b83da6c 100644
+index 4d4f45c..e3d60c0 100644
 --- a/device/gfx.c
 +++ b/device/gfx.c
-@@ -9,9 +9,10 @@ typedef struct {               /* proportional, see tools/gen_font.py */
+@@ -9,9 +9,12 @@ typedef struct {               /* proportional, see tools/gen_font.py */
      uint8_t pad;               /* bitmap starts this many pixels left of the pen */
      uint8_t first, last;
      const uint8_t *adv;        /* advance per glyph */
 -    const uint8_t *bw;         /* bitmap width per glyph (starts FONT_PAD left of the pen) */
+-    const uint16_t *off;       /* byte offset of each glyph */
+-    const uint8_t *data;
 +    const uint8_t *bw;         /* cell width per glyph (starts FONT_PAD left of the pen) */
-     const uint16_t *off;       /* byte offset of each glyph */
-     const uint8_t *data;
++    const uint16_t *off;       /* bit offset of each glyph in data */
++    const uint8_t *data;       /* the coded inked boxes (font_box) */
 +    const uint8_t *box;        /* inked box per glyph in its cell: x0, y0, w, h (only this is stored) */
++    const uint8_t *sym;        /* (OGS 2.0) the code's symbols in canonical order */
++    uint8_t nl[16];            /* how many codes of each length 1..15 */
  } felucca_font_t;
  #include "felucca_font.h"
  
-@@ -149,6 +150,19 @@ static uint32_t glyph(const felucca_font_t *f, uint32_t ch)
+@@ -149,22 +152,63 @@ static uint32_t glyph(const felucca_font_t *f, uint32_t ch)
      return ch - f->first;
  }
  
-+/* coverage 0..15 of pixel (gx, gy) in glyph gi's cell (0 outside its inked box) */
-+static inline uint32_t font_a(const felucca_font_t *f, uint32_t gi, int32_t gx, int32_t gy)
++/* (OGS 2.0) glyph gi's inked box decoded into px (FONT_BOX_MAX bytes, the caller's: no RAM of its own), coverage
++ * 0..15 per pixel row by row (box w x h). The coding (tools/gen_font.py, lossless): a canonical Huffman code (nl,
++ * sym; bits MSB first from bit off[gi]) of symbols s, s < 96 a run of (s & 31) + 1 pixels, s >> 5 = 0: coverage 0,
++ * 1: coverage 15, 2: each a copy of the pixel a box row above; s >= 96 one pixel of coverage s - 96. */
++static void font_box(const felucca_font_t *f, uint32_t gi, uint8_t *px)
 +{
 +    const uint8_t *bx = f->box + 4u * gi;
-+    uint32_t a;
++    uint32_t at = f->off[gi], i = 0, w = bx[2], n = w * bx[3];
++    while (i < n) {
++        uint32_t code = 0, first = 0, idx = 0, len, s = 96u, k, r;
++        for (len = 1; len < 16u; len++) {          /* one bit at a time, as puff */
++            code |= (uint32_t)(f->data[at >> 3] >> (7u - (at & 7u))) & 1u;
++            at++;
++            if (code - first < f->nl[len]) {
++                s = f->sym[idx + code - first];
++                break;
++            }
++            idx += f->nl[len];
++            first = (first + f->nl[len]) << 1;
++            code <<= 1;
++        }
++        k = s >> 5;
++        if (k >= 3u) {
++            px[i++] = (uint8_t)(s - 96u);
++            continue;
++        }
++        for (r = (s & 31u) + 1u; r && i < n; r--, i++)
++            px[i] = k == 2u ? px[i - w] : (uint8_t)(k * 15u);
++    }
++}
++
++/* coverage 0..15 of pixel (gx, gy) in glyph gi's cell, px = its box from font_box (0 outside the box) */
++static inline uint32_t font_a(const felucca_font_t *f, uint32_t gi, const uint8_t *px, int32_t gx, int32_t gy)
++{
++    const uint8_t *bx = f->box + 4u * gi;
 +    gx -= bx[0];
 +    gy -= bx[1];
 +    if ((uint32_t)gx >= bx[2] || (uint32_t)gy >= bx[3])
 +        return 0;
-+    a = f->data[f->off[gi] + (uint32_t)gy * ((bx[2] + 1u) / 2u) + (uint32_t)gx / 2u];
-+    return (gx & 1) ? (a & 15u) : (a >> 4);
++    return px[(uint32_t)gy * bx[2] + (uint32_t)gx];
 +}
 +
  /* text in colour c, each pixel's coverage blended over what is already on the canvas (an
   * anti-aliased face on a coloured box gets no dark fringe); returns the end x */
  static int32_t cv_text(int32_t x, int32_t y, const felucca_font_t *f, const char *s, uint16_t c)
-@@ -156,14 +170,14 @@ static int32_t cv_text(int32_t x, int32_t y, const felucca_font_t *f, const char
+ {
      uint32_t r = c >> 11, g = (c >> 5) & 63u, b = c & 31u;
++    uint8_t gp[FONT_BOX_MAX];                        /* (OGS 2.0) a glyph's box, decoded */
      for (; *s; s++) {
-         uint32_t gi = glyph(f, (uint8_t)*s), gx, gy, w, bpr;
+-        uint32_t gi = glyph(f, (uint8_t)*s), gx, gy, w, bpr;
 -        const uint8_t *gd;
 -        w = f->bw[gi];
-+        const uint8_t *gd, *bx = f->box + 4u * gi;   /* only the inked box: the rest of the cell is 0 */
-+        w = bx[2];
-         bpr = (w + 1u) / 2u;
-         gd = f->data + f->off[gi];
+-        bpr = (w + 1u) / 2u;
+-        gd = f->data + f->off[gi];
 -        for (gy = 0; gy < f->h; gy++)
++        uint32_t gi = glyph(f, (uint8_t)*s), gx, gy, w;
++        const uint8_t *gd = gp, *bx = f->box + 4u * gi;   /* only the inked box: the rest of the cell is 0 */
++        w = bx[2];
++        font_box(f, gi, gp);
 +        for (gy = 0; gy < bx[3]; gy++)
              for (gx = 0; gx < w; gx++) {
-                 uint32_t a = gd[gy * bpr + gx / 2u];
+-                uint32_t a = gd[gy * bpr + gx / 2u];
 -                int32_t px = x - f->pad + (int32_t)gx, py = y + (int32_t)gy + cv_oy;
+-                a = (gx & 1u) ? (a & 15u) : (a >> 4);
++                uint32_t a = *gd++;
 +                int32_t px = x - f->pad + (int32_t)(bx[0] + gx), py = y + (int32_t)(bx[1] + gy) + cv_oy;
-                 a = (gx & 1u) ? (a & 15u) : (a >> 4);
                  if (!a || (uint32_t)px >= cv_w || py < cv_y0 || py >= cv_y1)
                      continue;
+                 if (a == 15u) {
 diff --git a/device/lcd.c b/device/lcd.c
 index b82c594..24c92f6 100644
 --- a/device/lcd.c
@@ -623,10 +661,10 @@ index eb69903..f21dc2a 100755
  # seconds; the tests shorten them
  DELAY = {"open": 0.3, "start": 2.0, "reply": 0.01, "loader": 3.0, "reboot": 3.0, "retry": 1.0,
 diff --git a/tools/gen_font.py b/tools/gen_font.py
-index 71a57cd..10a767a 100755
+index 71a57cd..c4d7b4f 100755
 --- a/tools/gen_font.py
 +++ b/tools/gen_font.py
-@@ -6,10 +6,12 @@
+@@ -6,12 +6,20 @@
    T / XS / S / B / M / L: Terminus 12 (T: digits and capitals), 12, 16, 16 bold, 24 bold, 32 bold (BDF, SIL OFL 1.1); see SIZES. TTF fonts also work through render()
  (anti-aliased, tabular figures via the OpenType `tnum` feature).
  
@@ -637,13 +675,21 @@ index 71a57cd..10a767a 100755
 +Glyph format: per glyph an advance width, a cell width and an offset; the
 +cell starts FONT_PAD pixels left of the pen position (room for side
 +bearings) and is h rows high. Only the inked box of the cell is stored
-+(box: x0, y0, w, h in the cell; nothing outside it is lit): its rows top to
-+bottom, (w + 1) / 2 bytes each, 2 pixels per byte (high nibble first),
-+alpha 0..15. font_a() in device/gfx.c reads a cell pixel.
++(box: x0, y0, w, h in the cell; nothing outside it is lit): its pixels row by
++row, alpha 0..15, coded (OGS 2.0, lossless: the same pixels) as symbols s,
++s < 96: a run of (s & 31) + 1 pixels, s >> 5 = 0: alpha 0, 1: alpha 15,
++2: each pixel a copy of the one a box row above; s >= 96: one pixel of
++alpha s - 96. The symbols in a canonical Huffman code per font (nl: codes
++of length 1..15, sym: symbols in canonical order), bits MSB first, each
++glyph from bit off. font_box() in device/gfx.c decodes a glyph's box.
  """
++import heapq
  import sys
++from collections import Counter
  from pathlib import Path
-@@ -30,10 +32,11 @@ FONTSETS = {
+ 
+ from PIL import Image, ImageDraw, ImageFont
+@@ -30,10 +38,11 @@ FONTSETS = {
                   ("B", "ter-u16b.bdf", 16, 1, True, 32, 126),
                   ("M", "ter-u24b.bdf", 24, 1, True, 32, 95),
                   ("L", "ter-u32b.bdf", 32, 1, True, 32, 95)],
@@ -658,7 +704,7 @@ index 71a57cd..10a767a 100755
                 ("M", "BarlowSemiCondensed-SemiBold.ttf", 23, 1, False, 32, 95),
                 ("L", "BarlowSemiCondensed-Bold.ttf", 31, 1, False, 32, 95)],    # capitals and digits, as the others
                                                                                    # (the splash, the panel: 14 KB less)
-@@ -154,7 +157,8 @@ def render(ttf, px, scale, pixel, first, last):
+@@ -154,7 +163,8 @@ def render(ttf, px, scale, pixel, first, last):
          names = [a["name"] if isinstance(a["name"], str) else a["name"].decode() for a in font.get_variation_axes()]
          font.set_variation_by_axes([float(axes.get(n.lower()[:4], axes.get(n, 0)) or a["default"])
                                      for n, a in zip(names, font.get_variation_axes())])
@@ -668,44 +714,153 @@ index 71a57cd..10a767a 100755
      asc, desc = font.getmetrics()
      top = max(0, font.getbbox("A8|(", features=feats)[1] - 1)
      h = asc + desc - top
-@@ -176,14 +180,21 @@ def main(out):
+@@ -171,19 +181,121 @@ def render(ttf, px, scale, pixel, first, last):
+     return h * scale, glyphs
+ 
+ 
++RUN = 32                                               # longest run in one symbol
++MAXLEN = 15                                            # longest code (font_box reads up to 15 bits)
++
++
++def symbols(px, w):
++    """a box's pixels (row by row, w wide) as symbols, greedy: the longer of a run of 0 / 15 and a run of copies
++    of the row above; any other alpha one pixel"""
++    out, i = [], 0
++    while i < len(px):
++        v, n, m = px[i], 1, 0
++        if v in (0, 15):
++            while i + n < len(px) and px[i + n] == v and n < RUN:
++                n += 1
++        if i >= w:
++            while i + m < len(px) and px[i + m] == px[i + m - w] and m < RUN:
++                m += 1
++        if m > n:
++            out.append(64 + m - 1)
++            i += m
++        elif v in (0, 15):
++            out.append((32 if v else 0) + n - 1)
++            i += n
++        else:
++            out.append(96 + v)
++            i += 1
++    return out
++
++
++def code_lengths(count):
++    """Huffman code lengths, the longest <= MAXLEN (rare symbols made less rare until it fits)"""
++    c = dict(count)
++    while True:
++        if len(c) == 1:
++            return {next(iter(c)): 1}
++        h = [(v, i, [k]) for i, (k, v) in enumerate(sorted(c.items()))]
++        heapq.heapify(h)
++        L, i = {k: 0 for k in c}, len(h)
++        while len(h) > 1:
++            a, b = heapq.heappop(h), heapq.heappop(h)
++            for k in a[2] + b[2]:
++                L[k] += 1
++            heapq.heappush(h, (a[0] + b[0], i, a[2] + b[2]))
++            i += 1
++        if max(L.values()) <= MAXLEN:
++            return L
++        c = {k: (v + 1) // 2 for k, v in c.items()}
++
++
++def decode_box(nl, sym, data, at, w, bh):
++    """as font_box() in device/gfx.c (the check that the coding is lossless)"""
++    px, n = [], w * bh
++    while len(px) < n:
++        code = first = idx = 0
++        s = 96
++        for ln in range(1, MAXLEN + 1):
++            code |= (data[at >> 3] >> (7 - (at & 7))) & 1
++            at += 1
++            if 0 <= code - first < nl[ln]:
++                s = sym[idx + code - first]
++                break
++            idx += nl[ln]
++            first = (first + nl[ln]) << 1
++            code <<= 1
++        if s >= 96:
++            px.append(s - 96)
++            continue
++        for _ in range((s & 31) + 1):
++            if len(px) < n:
++                px.append(px[len(px) - w] if s >> 5 == 2 else 15 * (s >> 5))
++    return px
++
++
+ def main(out):
+     lines = [f"/* generated by tools/gen_font.py: font set {FONTSET} */",
               "#pragma once", "#include <stdint.h>", f"#define FONT_PAD {PAD}  /* x scale for L, see below */", ""]
++    raw = packed = boxmax = 0
      for name, ttf, px, scale, pixel, first, last in SIZES:
          h, glyphs = render(ttf, px, scale, pixel, first, last)
 -        data, offs = [], []
-+        data, offs, box = [], [], []
++        boxes, box = [], []
          for adv, bw, g in glyphs:
-             offs.append(len(data))
+-            offs.append(len(data))
 -            for y in range(h):
 -                row = g[y * bw:(y + 1) * bw] + [0]
 -                for x in range(0, bw, 2):
+-                    data.append((row[x] << 4) | row[x + 1])
+-        assert len(data) < 65536
 +            ys = [y for y in range(h) if any(g[y * bw:(y + 1) * bw])]
 +            xs = [x for x in range(bw) if any(g[y * bw + x] for y in range(h))]
-+            if not ys:                                 # nothing lit (space): an empty box, no bytes
++            if not ys:                                 # nothing lit (space): an empty box, no bits
 +                box += [0, 0, 0, 0]
++                boxes.append([])
 +                continue
 +            x0, y0, w, bh = xs[0], ys[0], xs[-1] - xs[0] + 1, ys[-1] - ys[0] + 1
 +            box += [x0, y0, w, bh]
-+            for y in range(y0, y0 + bh):
-+                row = g[y * bw + x0:y * bw + x0 + w] + [0]
-+                for x in range(0, w, 2):
-                     data.append((row[x] << 4) | row[x + 1])
--        assert len(data) < 65536
-+        assert len(data) < 65536 and max(box) < 256
++            boxes.append([v for y in range(y0, y0 + bh) for v in g[y * bw + x0:y * bw + x0 + w]])
++            raw += bh * ((w + 1) // 2)
++            boxmax = max(boxmax, w * bh)
++        syms = [symbols(p, box[4 * i + 2]) for i, p in enumerate(boxes)]
++        L = code_lengths(Counter(s for ss in syms for s in ss))
++        sym = sorted(L, key=lambda k: (L[k], k))
++        nl = [0] * (MAXLEN + 1)
++        for k in sym:
++            nl[L[k]] += 1
++        code, codes, prev = 0, {}, L[sym[0]]
++        for k in sym:                                  # canonical: consecutive codes, shifted at each longer length
++            code <<= L[k] - prev
++            prev = L[k]
++            codes[k] = (code, L[k])
++            code += 1
++        bits, offs = [], []
++        for ss in syms:
++            offs.append(len(bits))
++            for s in ss:
++                c, n = codes[s]
++                bits += [(c >> (n - 1 - j)) & 1 for j in range(n)]
++        bits += [0] * (-len(bits) % 8)
++        data = [sum(bits[i + j] << (7 - j) for j in range(8)) for i in range(0, len(bits), 8)]
++        for i, p in enumerate(boxes):
++            assert decode_box(nl, sym, data, offs[i], box[4 * i + 2], box[4 * i + 3]) == p, f"font {name}: glyph {i}"
++        assert len(bits) < 65536 and max(box) < 256
++        packed += len(data) + len(sym)
          lines.append(f"static const uint8_t FONT_{name}_DATA[{len(data)}] = {{")
          for i in range(0, len(data), 24):
              lines.append("    " + ", ".join(f"0x{b:02x}" for b in data[i:i + 24]) + ",")
-@@ -193,8 +204,9 @@ def main(out):
+@@ -193,11 +305,15 @@ def main(out):
                       ", ".join(str(a) for a, _, _ in glyphs) + "};")
          lines.append(f"static const uint8_t FONT_{name}_BW[{len(glyphs)}] = {{" +
                       ", ".join(str(b) for _, b, _ in glyphs) + "};")
 +        lines.append(f"static const uint8_t FONT_{name}_BOX[{len(box)}] = {{" + ", ".join(map(str, box)) + "};")
++        lines.append(f"static const uint8_t FONT_{name}_SYM[{len(sym)}] = {{" + ", ".join(map(str, sym)) + "};")
          lines.append(f"static const felucca_font_t FONT_{name} = {{ {h}, {PAD * scale}, {first}, {last}, "
 -                     f"FONT_{name}_ADV, FONT_{name}_BW, FONT_{name}_OFF, FONT_{name}_DATA }};")
-+                     f"FONT_{name}_ADV, FONT_{name}_BW, FONT_{name}_OFF, FONT_{name}_DATA, FONT_{name}_BOX }};")
++                     f"FONT_{name}_ADV, FONT_{name}_BW, FONT_{name}_OFF, FONT_{name}_DATA, FONT_{name}_BOX, "
++                     f"FONT_{name}_SYM, {{{', '.join(map(str, nl))}}} }};")
          lines.append("")
          print(f"font {name}: {ttf} {px}px h {h}, digit adv {glyphs[ord('0') - first][0]}, {len(data)} B")
-     print(f"font set {FONTSET}: {sum(len(l) for l in lines if l.startswith('    0x')) // 6} B (approx)")
+-    print(f"font set {FONTSET}: {sum(len(l) for l in lines if l.startswith('    0x')) // 6} B (approx)")
++    lines.insert(4, f"#define FONT_BOX_MAX {boxmax}u  /* the largest inked box, pixels (font_box) */")
++    print(f"font set {FONTSET}: glyphs {raw} B -> coded {packed} B")
+     Path(out).write_text("\n".join(lines))
+ 
+ 
 diff --git a/tools/make_site.py b/tools/make_site.py
 index a0317e1..49a97d4 100755
 --- a/tools/make_site.py

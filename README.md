@@ -36,7 +36,7 @@ ever down: the firmware package, an offline copy of the install page (runs on yo
   it writes the stock firmware, so the stock firmware starts clean. DX7 banks and WAVE tables sent from the Manager aren't in
   the backup: keep their files.
 - Updating from an older OG Synth keeps your sounds and settings.
-- Identity (what the FM-1 answers to installers): `FM-1_1313` and the version, 1.6.3 = `FM-1_1313010603`
+- Identity (what the FM-1 answers to installers): `FM-1_1313` and the version, 2.0.0 = `FM-1_1313020000`
   (`FM-1_11` and the version up to 1.6.2).
 
 ## What is here
@@ -45,7 +45,10 @@ ever down: the firmware package, an offline copy of the install page (runs on yo
 - `patches/`: changes to [fm1-base](https://github.com/charlesvestal/fm1-base) and
   [felucca-bsp](https://github.com/hugelton/felucca-bsp) (MPL-2.0), applied with `git apply` before the build
 - `app/ogs_fm1_bank.h`, `app/web/fm1/`: the FM-1 factory bank by M-VAVE, Apache-2.0 (`app/LICENSE-FM1-BANK.txt`)
-- Drum models in the 88 and 99 engines are based on Plaits by Emilie Gillet (Mutable Instruments), MIT (`app/LICENSE-PLAITS.txt`)
+- The kick and snare models in 88 and the tambourine in 99 are based on Plaits by Emilie Gillet (Mutable Instruments), MIT
+  (`app/LICENSE-PLAITS.txt`)
+- `app/assets/fonts/`: Knewave (Tyler Finck) and Sedgwick Ave Display (The Sedgwick Ave Project Authors), the name fonts on the
+  FM-1's screen, SIL Open Font License 1.1 (their `-OFL.txt` files)
 
 ## What is not here
 The sound engines, effects, sequencer and the rest of the application (the `ogs_app_*.c` files `app.c` includes:

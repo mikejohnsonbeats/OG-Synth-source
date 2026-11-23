@@ -1,5 +1,16 @@
 # Changelog
 
+## v2.0.0 — 2026-11-23
+Źródła MPL OG Synth 2.0.0 „Master” (wszystko od 1.8.2): efekty na ścieżkach MULTI, sekcja MASTER (4 efekty na miks, WET, ROUTING,
+DRUMS; sceny w nowym obiekcie OBJ_MSTR — app.h, kopia zapasowa 22 obiekty), 16 bit blado pomarańczowo, ochrona przed przeciążeniem;
+nowe silniki LN i SAMPLE (z nagrywaniem REC / STORE), 18 silników, materiały perkusji i RES ENV / RES LFO, CHOKE / PAN / LEVEL, POGO,
+GLO > MIDI > DRUM SELECT, GLO > AUDIO > LIMIT i FX SEND, kolor PINK, czcionki nazw ENGINE / PRESET FONT — UI w app.c, app.h,
+ogs_engine.h, ogs_lists.h (dźwięk, efekty i sekwencer w plikach zamkniętych). Manager: sample (.wav) do SAMPLE (nowy app/web/sample.js),
+import presetów .fxp do WAVE (app/web/fxp.js), edytor presetów (app/web/editor.js), manager.html. Czcionki Knewave i Sedgwick Ave
+Display z licencjami SIL OFL 1.1 (app/assets/fonts/). Łatka fm1-base: czcionki nazw (gen_font.py, gfx.c, lcd.c). LICENSE-PLAITS: od 2.0
+z Plaits tylko stopa i werbel 88 oraz tamburyn 99. app/docs/MANUAL.md: krótka instrukcja 2.0 (zmiana dokumentacji po tagu
+v2.0.0 OG-Synth — kod bez zmian). Komentarze bez nazwy zewnętrznej wtyczki (619fc20).
+
 ## v1.8.2 — 2026-11-15
 Źródła MPL OG Synth 1.8.2 „Count in”: pod zegarem MIDI odliczanie REC i metronom bez gubienia klików, REC + COUNT IN od kursora =
 pełne odliczanie, potem od kursora (logika w pliku zamkniętym ogs_seq.c); w app.c: PLAY w NOTES — kursor na początku = start przy

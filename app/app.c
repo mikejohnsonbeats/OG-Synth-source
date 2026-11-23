@@ -6,9 +6,9 @@ typedef struct {
     int8_t octave;                       /* -3 .. +3 (v0.21; do v0.20: -2 .. +2) */
     uint8_t eng;                         /* bieżący silnik */
     uint8_t rsv[2];
-    uint16_t preset[NENG_MAX];           /* ostatnio wczytany preset każdego silnika (nazwa na ekranie) */
-    uint8_t edited[NENG_MAX];            /* brzmienie zmienione względem presetu */
-    uint16_t np[NENG_MAX];               /* ile parametrów zapisano (silnik urósł: reszta domyślna) */
+    uint16_t preset[NENG_S];             /* ostatnio wczytany preset każdego silnika (nazwa na ekranie) */
+    uint8_t edited[NENG_S];              /* brzmienie zmienione względem presetu */
+    uint16_t np[NENG_S];                 /* ile parametrów zapisano (silnik urósł: reszta domyślna) */
     int16_t p[SET_P];
     int16_t pw[WX_N];                    /* v0.19: WAVE ponad swoje 128 miejsc (parametry 128..) */
     int16_t px[SET_PX];                  /* v0.22: silniki od VCO (ENG_POFF >= SET_P) */
@@ -25,6 +25,7 @@ void app_render(int32_t *lr, uint32_t n, uint32_t master_q12)
     uint32_t i, done = 0, w = scope_w;
     int sc = scope_on && !mt_void, eq = glob.g[G_SPKEQ], fading, want;
     float pk = 0.0f;
+    const uint32_t bt0 = plat_ticks24();     /* (2.0.0) czas bloku: ogs_blk_t (koniec funkcji) */
     if (mt_seen != mt_ver || mt_xs < 0.0f || mx_hold) {   /* (v0.64) MULTI: zmiana trybu / ścieżek po przygaszeniu wyjścia;
                                                            * (v1.4.0) mx_hold: cicho, aż UI zapisze bliźniaki */
         if (((!mt_on && eng_play >= NENG) || mt_xg <= 0.0f) && !mx_hold) {   /* (start: od razu) */
@@ -34,6 +35,12 @@ void app_render(int32_t *lr, uint32_t n, uint32_t master_q12)
         } else {
             mt_xs = -1.0f;
         }
+    }
+    if (rsm_apply()) {                        /* (2.0) SAMPLE REC: pamięć nagrania z puli efektów / z powrotem — pula od nowa */
+        if (mt_on)
+            mt_ver++;
+        else
+            ogs_fx_arena_give();
     }
     i = set.eng;                             /* zmiana silnika: nowy do wspólnego RAM, zanim cokolwiek zagra */
     if (i >= NENG)                           /* (ustawienia w trakcie wczytywania) */
@@ -93,18 +100,29 @@ void app_render(int32_t *lr, uint32_t n, uint32_t master_q12)
                 for (i = 0; i < c; i++)
                     scope[w++ & (SC_LEN - 1u)] = (int16_t)(fm_clampf((bl[i] + br[i]) * 0.5f, -1.0f, 1.0f) * 32767.0f);
             mt_mix(bl, br, c);
+            ogs_fx_late = glob.mst.pp & (MS_PP_REV | MS_PP_DL);   /* (2.0) PRZED: mokre REVERB / DELAY dochodzi za MASTER */
             mt_sends(bl, br, c);             /* (v0.76) wspólne REVERB / DELAY (efekty presetów ścieżek) */
-            ogs_pf_render(bl, br, c);        /* (v0.74) PERFORM: tylko w MULTI, na całym miksie (pamięć za ścieżkami) */
-            ogs_fx_master(mt_mst >= 0 ? (uint32_t)mt_mst : (uint32_t)glob.g[G_MTMST], mc_p, bl, br, c);   /* (v0.77) master */
+            mt_master(bl, br, c);            /* (2.0) MASTER: suma -> wysyłki PO -> [sloty bez perkusji -> + perkusja] -> PERFORM PO ->
+                                              * MASTER -> wysyłki PRZED -> PERFORM PRZED */
+            ogs_fx_sends_late(bl, br, c);
+            if (mt_pfpre)
+                ogs_pf_render(bl, br, c);
+            if (ogs_pf_pb < 0 && !ogs_pf_st) /* PERFORM zmienia drogę, gdy nic nie gra (bez skoku w dźwięku) */
+                mt_pfpre = (uint8_t)(glob.mst.pp >> 2 & 1u);
+            ogs_fx_master(mt_mst >= 0 ? (uint32_t)mt_mst : (uint32_t)glob.g[G_MTMST], bl, br, c);   /* (v0.77) master; (2.0)
+                                              * LIMIT z GLO zostaje na końcu, COMP przeszedł do MASTER */
             if (mt_ft >= 0)
-                ogs_fx_track_meter((uint32_t)mt_ft);   /* (v0.83) GR meter strony FX: wybrana ścieżka */
+                ogs_fx_track_meter(fx_mview ? MT_M : (uint32_t)mt_ft);   /* (v0.83) GR meter strony FX: wybrana ścieżka; (2.0) MASTER */
         } else {
             ogs_fx_render(fx_play(), fx_xplay(), bl, br, c);   /* efekty globalne za silnikiem; (v0.74) bez PERFORM */
         }
         if (OUT_NEW)                         /* (1.7.1, użytkownik 2026-11-10: „chcę mieć jak najczystsze brzmienie naszych silników”)
                                               * wszystkie silniki, SOLO i MULTI (za MASTER): limiter -2 dB z wyprzedzeniem, za nim
                                               * wyjście liniowe (było: tanh od v0.1.0 — głośne akordy „harczały”, FM6 najbardziej) */
-            ogs_fx_limit(bl, br, c);
+            ogs_fx_limit(bl, br, c, lim_th());   /* (2.0) próg z GLO */
+        if (rsm.st == RSM_ARM || rsm.st == RSM_REC)   /* (2.0) SAMPLE REC: to, co gra (przed metronomem i SPEAKER EQ); SOLO: nie
+                                              * SAMPLE grający nagranie (nagrałby siebie) */
+            rsm_take(bl, br, c, !mt_on || mt_seen == mt_ver, mt_on || eng_play != ENG_SMP || SMP[SMP_SLOT] != SA_REC);
         sq_click_mix(bl, br, c);             /* metronom za efektami */
         if (eq || eq_g > 0.0f) {             /* SPEAKER EQ włącza się / wyłącza przenikaniem (bez trzasku) */
             if (eq_g <= 0.0f) {              /* od nowa: stan filtra z bieżącego dźwięku */
@@ -157,6 +175,13 @@ void app_render(int32_t *lr, uint32_t n, uint32_t master_q12)
     }
     scope_w = w;
     out_lvl = pk;
+#ifdef PLAT_WEB
+    ogs_blk_t = plat_ticks24() - bt0;        /* (2.0.0) czas tego bloku dla silników (FM1 i symulator: n = APP_BLOCK) */
+    if (!ogs_blk_t)
+        ogs_blk_t = web_bpct * OGS_TPCT;     /* testy: udawany czas bloku (ogs_bpct), gdy zegar stoi */
+#else
+    ogs_blk_t = plat_ticks24() - bt0;        /* (2.0.0) czas tego bloku dla silników (FM1: n = APP_BLOCK zawsze) */
+#endif
 }
 #include "ogs_app_03.c"
 static void text_cat(char *d, const char *s)
@@ -211,6 +236,7 @@ static struct {
     uint8_t reset_opt, reset_sure;       /* FACTORY RESET: co (ustawienia / presety / wszystko), drugie potwierdzenie */
     uint8_t note;                        /* okno V_NOTE: SY_BACKUP albo SY_CALIB */
     uint8_t fx_slot, fx_win;             /* FX: bieżący slot 0..7, pierwszy z czterech widocznych w łańcuchu */
+    uint8_t fx_m;                        /* (2.0) MULTI: strona MASTER (sloty glob.mst; HOME: z powrotem na stronę FX) */
     uint8_t fx_more;                     /* FX: strona gałek efektu (0, MORE, dalej kolejne; FX przełącza) */
     uint8_t pf_hold, pf_used, pf_latch, pf_last;   /* (v0.47) PERFORM: FX trzymany, klawisz użyty (puszczenie FX bez
                                                     * strony FX), LATCH, ostatni klawisz (nazwa na ekranie) */
@@ -1015,7 +1041,7 @@ OGS_UI static void input(void)
             if (mt_ui())                         /* (v0.85) MASTER FX, gdy ktoś wysyła */
                 fxon |= mt_swant;
             fxon = fxon && ui.page != V_FX ? 1u << B_FX : 0u;
-            if (ui.page == V_SEQ || ui.page == V_SQT || ui.page == V_SQN ? sqp_dirty || sqg_dirty : set.edited[set.eng])
+            if (ui.page == V_SEQ || ui.page == V_SQT || ui.page == V_SQN ? sqp_dirty || sqg_dirty : EDT(set.eng))
                 fxon |= 1u << B_SAVE;            /* brzmienie zmienione: SAVE delikatnie (do wciśnięcia); (1.8.0) na stronach SEQ:
                                                   * wzór niezapisany (SAVE zapisuje wzór) */
             fxon |= secmid;
@@ -1068,6 +1094,11 @@ OGS_UI void app_frame(void)
     uint32_t now, pct;
     int32_t note;
     input();
+    if (rsm.fresh && set.eng == ENG_SMP) {   /* (2.0) nowe nagranie: SAMPLE gra je (K1 = REC) — też po powrocie z innego silnika */
+        rsm.fresh = 0;
+        set_param(SMP_SLOT, SA_REC);
+        EDT(set.eng) = (uint8_t)snap_differs(set.eng);
+    }
     ap_frame();                              /* (1.6.0) AUTO: koniec dotyku gałki, SAVE po zmianach z linii */
     if (mx_lv && mt_xg <= 0.0f) {            /* (v1.4.0) do SOLO: wyjście cicho, bliźniaki do flasha, potem pula dla łańcucha */
         mx_store();
@@ -1078,6 +1109,8 @@ OGS_UI void app_frame(void)
     mx_sync();                               /* (v1.4.0) bliźniaki: przed brzmieniami sceny */
     sg_frame();                              /* (1.8.0, P75 / P76) SONG / kolejka wzoru (ogs_auto.c) */
     mt_scene_presets();                      /* (v0.73) scena MULTI: brzmienia po przygaszeniu */
+    if (set.eng == ENG_WT)                   /* (2.0, Shrub A) L2-L4 DRAW pojawiły się / zniknęły */
+        wt_pages_fix();
     {                                        /* (v0.88) perkusja: inny dźwięk (też MIDI): numer, gałki i wykres strony od razu */
         static int32_t lane = -1;
         const int32_t d = drum_page_lane();
@@ -1131,7 +1164,7 @@ OGS_UI void app_frame(void)
         static uint32_t dk_seen;
         if (dk_done != dk_seen) {            /* przełącznik wszedł przy zerze: gwiazdka SAVE od nowa */
             dk_seen = dk_done;
-            set.edited[set.eng] = (uint8_t)snap_differs(set.eng);
+            EDT(set.eng) = (uint8_t)snap_differs(set.eng);
             ui.redraw = 1;
         }
     }
@@ -1325,7 +1358,7 @@ OGS_UI void app_frame(void)
         }
     }
     (void)out_quiet();                       /* co klatkę: kiedy ostatnio coś grało */
-    if (ui.page == V_FX && fx_cur()->type == FX_EQ && fx_on(fx_cur()) && !fxc.x[set.eng][FX_X_EQ + EQX_AN]) {   /* (v0.92) widmo EQ: 10 / s */
+    if (ui.page == V_FX && fx_cur()->type == FX_EQ && fx_on(fx_cur()) && !fx_xb(fx_cur())[FX_X_EQ + EQX_AN]) {   /* (v0.92) widmo EQ: 10 / s */
         static uint32_t eq_at;
         if (now - eq_at >= 100u) {
             eq_at = now;
@@ -1344,7 +1377,7 @@ OGS_UI void app_frame(void)
     {                                        /* wykres na żywo (FILTER WAVE / PHASE): 10 / s, gdy gra, i raz po */
         static uint32_t live_at;
         static uint8_t was_live;
-        int live = ui.page >= 0 && ui.page < E->npages && E->graph_live && E->graph_live(ui.page)
+        int live = ui.page >= 0 && ui.page < E->npages && (E == &ENG[ENG_WT] ? wt_graph_live(ui.page) : E == &ENG[ENG_PD] && pd_graph_live(ui.page))
                    && glob.g[G_VPAGES] && eng_sounding();
         if ((live && now - live_at >= 100u) || (!live && was_live)) {
             live_at = now;
@@ -1372,6 +1405,16 @@ OGS_UI void app_frame(void)
     }
     if (plat_cpu_pct() > cpu_peak)
         cpu_peak = plat_cpu_pct();
+#if OGS_BENCH || OGS_FRAMES
+    {                                        /* (2.0) pomiar (SysEx 0x10): najdłuższa przerwa między klatkami (płynność ekranu po
+                                              * kompresji czcionek), 0,1 ms; build pomiarowy (tools/ui_klatki_hw.py) */
+        static uint32_t at;
+        const uint32_t t = plat_ticks24(), d = (t - at) / (PLAT_TICKS_PER_US * 100u);
+        if (at && d > ui_fmax)
+            ui_fmax = (uint16_t)(d > 16383u ? 16383u : d);
+        at = t;
+    }
+#endif
     note = eng_held_note();
     {                                        /* bateria / USB: stopka sama (bez czekania na dotyk) */
         static int last_bat = -2;
@@ -1421,8 +1464,18 @@ OGS_UI void app_frame(void)
         mt_gdirty = 0;                       /* (v0.64) MULTI: ścieżki, głośności, MUTE — jak brzmienia, w ciszy */
         glob_commit();
     }
+    {   /* (2.0.0) silnik / preset / tryb zmienione spoza panelu (SysEx, Manager, Program Change): pełne przerysowanie. Wcześniej
+         * co 40 ms rysował się tylko pas oscyloskopu z tłem NOWEGO silnika, a nagłówek, nazwa presetu i stopka zostawały po starym
+         * (zdjęcie użytkownika 2026-11-19: ALPHA / RAVE STAB, pod spodem „DRUMS” i uderzenia MORPH) */
+        static uint32_t drawn_sig = 0xFFFFFFFFu;
+        const uint32_t now_sig = (uint32_t)set.eng | (uint32_t)CUR << 8 | (uint32_t)mt_ui() << 24;
+        if (now_sig != drawn_sig) {
+            drawn_sig = now_sig;
+            ui.redraw = 1;
+        }
+    }
     scope_on = (ui.page == V_HOME && glob.g[G_VHOME] && !ui.mode_until)   /* (v0.92) też widmo EQ */
-            || (ui.page == V_FX && fx_cur()->type == FX_EQ && !fxc.x[set.eng][FX_X_EQ + EQX_AN]);
+            || (ui.page == V_FX && fx_cur()->type == FX_EQ && !fx_xb(fx_cur())[FX_X_EQ + EQX_AN]);
     if (scope_on && ui.page == V_HOME && !ui.redraw && now - ui.scope_at >= 40u) {   /* oscyloskop: 25 klatek/s, tylko gdy gra;
                                                          * (v1.1.0) tylko HOME: przy EQ bufor dla widma, bez rysowania na FX */
         if (eng_sounding())

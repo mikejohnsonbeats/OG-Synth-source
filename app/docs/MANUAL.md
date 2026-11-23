@@ -1,10 +1,10 @@
 # Manual (draft)
 
-OG Synth by Mike Johnson Beats is a custom firmware for the M-VAVE FM-1, built for sound design: 16 sound engines, an
-effects chain, a sequencer with arpeggiator and MULTI mode (4 tracks at once). Every engine has full parameter pages,
-factory presets, 128 USER slots and on-screen graphs.
+OG Synth by Mike Johnson Beats is a custom firmware for the M-VAVE FM-1, built for sound design: 18 sound engines, an
+effects chain, a sequencer with arpeggiator and MULTI mode (4 tracks at once, with a MASTER chain over the whole mix). Every
+engine has full parameter pages, its own INIT sound, factory presets (all but SAMPLE), 128 USER slots and on-screen graphs.
 
-> This is a draft. Page layouts of newer features are proposals and may still change.
+> This is the short version, for OG Synth 2.0. The full manual: https://ogsynth.cc/manual
 
 ---
 
@@ -17,7 +17,7 @@ factory presets, 128 USER slots and on-screen graphs.
 5. Presets and saving
 6. Effects and PERFORM
 7. Sequencer, arpeggiator, RACK
-8. MULTI: 4 tracks
+8. MULTI: 4 tracks and MASTER
 9. GLO settings
 10. Troubleshooting
 
@@ -26,8 +26,9 @@ factory presets, 128 USER slots and on-screen graphs.
 ## 1. Installation and backup
 
 - **Back up first**: the *Backup* page saves the FM-1's presets and settings to your computer (and restores them).
-- **Install**: open the *Install* page in Chrome or Edge with the FM-1 connected over USB. The page reloads itself when
-  the FM-1 switches to update mode. Keep it open until it shows the end.
+- **Install**: open the *Install* page in Chrome, Edge or Opera with the FM-1 connected over USB. The page reloads itself
+  when the FM-1 switches to update mode. Keep it open until it shows the end. Updating from an older OG Synth keeps your
+  sounds and settings.
 - **Back to the M-VAVE firmware**: same page, section *Back to the stock firmware* (a .fwsc file from disk).
 - **No FM-1**: the browser emulator runs the same code, with sound.
 
@@ -35,19 +36,22 @@ factory presets, 128 USER slots and on-screen graphs.
 
 | Button / knob | What it does |
 |---|---|
-| **HOME** | main screen (oscilloscope, preset name); **HOME on HOME = ENGINE window** (choose an engine); **HOME held = switch SOLO / MULTI** |
+| **HOME** | main screen (oscilloscope, preset name); **HOME on HOME = ENGINE window** (choose an engine; in MULTI: the scenes); **HOME held = switch SOLO / MULTI** |
 | **EDIT / ENV / LFO** | engine page sections; short press = last page of the section, held = first page; the same button on its own section = **MORE** (rarer parameters, "+" next to the page name). **Held + K1-K4**: EDIT = the engine's quick page (usually FILTER), ENV = AMP ENV, LFO = LFO 1; back after 2 s |
 | **SELECT** | pages within a section; in windows and lists: choose |
 | **K1-K4** | the 4 parameters of a page; from HOME they jump straight to the engine's quick page (usually FILTER) and return after 2 s; in MULTI, on HOME: the track mixer (chapter 8) |
-| **SEL** | short = the page's switch (described in the header), confirms in windows; **held + black key** = page shortcuts (OP1-OP6, PITCH, GLOBAL = VOICE, MONO / POLY) |
+| **SEL** | short = the page's switch (described in the header), confirms in windows; **held + black key** = page shortcuts (OP1-OP6, PITCH, GLOBAL = VOICE, MONO / POLY; on drum engines OP4 = RES ENV / RES LFO) |
 | **ALGO** | the parameters assigned in GLO > ALGO KNOB (up to 8; by default the engine's most important one); in the ENGINE window it jumps between engine groups |
 | **PRESETS** | the engine's presets, each with its own effects; **SEL held + PRESETS** = the next sound with the current effects; **HOME held + PRESETS = ALL PRESETS** (all engines) |
 | **SAVE** | lit when the sound has changed; saves as a new USER preset or overwrites; **on SEQ pages: the pattern** (chapter 7) |
-| **FX** | effects chain (right on press); in MULTI, FX held = PERFORM (chapter 6) |
+| **FX** | effects chain (right on press); in MULTI it starts with MASTER and the reverb / delay sends, and FX held = PERFORM (chapter 6) |
 | **GLO** | global settings; a second GLO returns to where you came from |
 | **OCT- / OCT+** | octave -3..+3 |
 
-- Hints appear at the bottom of the screen (GLO > SYSTEM > HINTS). Holding SEL shows what the keys do.
+- Hints appear at the bottom of the screen (GLO > SYSTEM > HINTS). With HINTS off the pages use that space (in MULTI the
+  mixer row moves down into it, on the ARP page the steps sit in the middle). Holding SEL shows what the keys do.
+- Engine names are written in Knewave (brush), preset names in Sedgwick (tag); Barlow, the look before 2.0, is in
+  GLO > DISPLAY (chapter 9).
 - On-screen scale: 0-100 (0 = off), counts start at 1.
 - SAVE glows softly when the sound differs from the saved one; settings save themselves during silence.
 - **Autosave on every working page**: also FX, SEQ, ARP, PERFORM, MOD, the note card and TOOLS (up to 1.7.1 powering off there lost
@@ -56,42 +60,75 @@ factory presets, 128 USER slots and on-screen graphs.
 
 ## 3. Engines
 
-ENGINE window (HOME on HOME): SELECT steps through, ALGO jumps by group, PRESETS = sounds of that engine, SEL confirms
-(when released), HOME goes back. Each engine comes back with its own sound and its own effects. **SEL held + SELECT / ALGO /
-PRESETS** = the next engine or sound with the current effects (chapter 5).
+ENGINE window (HOME on HOME): SELECT steps through, ALGO jumps by group (VA, DIGI, DRUM), PRESETS = sounds of that engine, SEL
+confirms (when released), HOME goes back. Each engine comes back with its own sound and its own effects. **SEL held + SELECT /
+ALGO / PRESETS** = the next engine or sound with the current effects (chapter 5).
 
 **VA (analog)**
-- **MINI**: Minimoog / Poly D: 4 oscillators, mixer with FEEDBACK, 24 dB ladder, DRIVE, chorus, MONO / PARA. DRIVE: DISTORT 0-10 fades
-  the drive in smoothly, from 10 up as before. MOD page: LFO RATE in Hz; press LFO on the MOD page (MORE), then K2 = **LFO MODE**
-  FREE (default) / RETRIG (the wave restarts with a new phrase, like the envelopes) / SYNC (tempo).
-- **SVF**: Oberheim SEM: SVF filter LP > NOTCH > HP or BP, POLY MOD as in VCO.
-- **VCO**: Prophet-5: POLY MOD, SYNC, REV 2 / REV 3 filter.
-- **DCO**: Juno-60 / 106: SUB, HPF, built-in chorus.
-- **ALPHA**: Alpha Juno: saws with PWM, 4-segment envelope, HOOVER.
-- **LPG**: West Coast: complex oscillator (FM / AM), wavefolder, low pass gate, ENV 1 / ENV 2, LOOP.
+- **MINI**: 4 oscillators, mixer with FEEDBACK, 24 dB ladder filter (LADDER 24), DRIVE, chorus, MONO / PARA (in PARA all four
+  oscillators play: turn up OSC 4's level too). DRIVE: DISTORT 0-10 fades the drive in smoothly. TUNE page at the end of EDIT
+  (DETUNE, tuning of oscillators 2-4), RETRIG in the MORE of VOICE (EVERY KEY / NEW NOTE). MOD page: LFO RATE in Hz; press LFO on
+  the MOD page (MORE), then K2 = **LFO MODE** FREE (default) / RETRIG (the wave restarts with a new phrase, like the envelopes) /
+  SYNC (tempo).
+- **SVF**: a soft 12 dB filter that sweeps LP > NOTCH > HP (or BP), POLY MOD as in VCO.
+- **VCO**: 2 oscillators, POLY MOD, SYNC, a sharp 24 dB filter (REV 2 / REV 3).
+- **DCO**: one steady oscillator with SUB and noise, HPF, two models with their own feel, chorus built in.
+- **ALPHA**: saws with PWM, 4-segment envelope, pitch envelope, HOOVER.
+- **LPG**: West Coast style: complex oscillator (FM / AM), wavefolder, low pass gate, ENV 1 / ENV 2, LOOP.
 
 **DIGI (digital)**
-- **FM6**: 6 operators like the DX7 (32 algorithms, .syx bank import), UNISON, FILTER (switch, off by default), LFO 2 page SEL =
-  **LFO MODE** FREE / RETRIG (the old KEY SYNC OFF / ON, same sound) / SYNC (tempo); LFO RATE in Hz,
+- **FM6**: 6 operators (32 algorithms, classic six-operator .syx banks such as the DX7's), UNISON, FILTER (switch, off by
+  default), LFO 2 page SEL = **LFO MODE** FREE / RETRIG (the old KEY SYNC OFF / ON, same sound) / SYNC (tempo); LFO RATE in Hz,
   GLIDE MODE ALWAYS / LEGATO / FOLLOW. FILTER shortcut: SEL + GLOBAL (VOICE > UNISON > FILTER > CONTROL > VINTAGE).
   **BRIGHT** (ALGO page K4, the level of all modulators) -100..+100: -50..+50 sounds as before, above +50 much brighter.
-- **PHASE**: Casio CZ: phase modulation, 8-segment envelopes, CZ sound import.
-- **WAVE**: modern wavetable: 2 oscillators, warps, unison, 2 filters, 4 envelopes with curves and HOLD, 4 LFOs,
-  DRAW, 16-slot matrix.
-- **8BIT**: glitch / 8-bit: BITS, GLITCH.
+  **AMP ENV** (first ENV page): one envelope for the whole sound, -100..100, moves all carrier envelopes at once.
+- **PHASE**: phase distortion, 8-segment envelopes, CZ sound import (.syx).
+- **WAVE**: modern wavetable: 2 oscillators, each with a WARP (30 modes) and a WARP 2 (21 modes): SYNC WIN, ASYM +, ASYM -, FLIP,
+  QUANTIZE and REMAP in both, FM / RING / AM from the SUB or the NOISE in WARP. Sub, noise, unison, 2 filters, 4 envelopes with
+  curves and HOLD, 4 LFOs, DRAW (LFO 2-4 can each have their own: OWN DRAW), 16-slot matrix (chapter 4). When the processor is
+  really full, a big unison sound with heavy POSITION or WARP modulation thins its unison a little instead of crackling.
+- **8BIT**: chip waves, bit tricks and bytebeat: BITS, GLITCH.
 - **PHYS**: physical modelling: PLUCK / STRIKE / BOW excitation, STRING resonator or BAR / BELL / DRUM / TUBE (modes);
   POSITION = where the string is plucked, DECAY / DAMP / STIFF = string or material.
 - **FORMANT**: voice and choir: VOICE / SAW / PULSE source + BREATH, 5 formants on every note, singers BASS / TENOR / ALTO / SOPRANO,
   VOWEL A > E > I > O > U (also on ALGO), SHIFT, CHOIR page (SPREAD, JITTER, VIBRATO), ENV 2 > VOWEL for talking basses.
+- **SAMPLE** (2.0): a sound as an oscillator, played chromatically from its root note. K1 on the SAMPLE page = the source:
+  **USER 1-3** (a .wav sent with the Manager, chapter 5) or **REC** (what the FM-1 itself just played). No factory presets: the
+  sound is yours, and so are its presets.
+  - Pages: SAMPLE (K2 START, K3 TUNE, K4 FINE; KEYBOARD under SEL: OFF plays every key at the sample's own pitch), LOOP (OFF /
+    FORWARD / PING-PONG, LOOP START, LOOP END, XFADE; REVERSE under SEL), VOICE (MODE, UNISON, DETUNE, GLIDE; LEGATO under SEL),
+    FILTER (LP / BP / HP under SEL), FILTER ENV, AMP ENV, LFO, LFO > (PITCH, FILTER, AMP, PAN), VINTAGE, REC, STORE.
+  - **Recording**: REC page (SEL + OP3), SEL = **ARMED: PLAY** (an older recording plays until the new one starts). Then play: in
+    SOLO switch to any other engine (its effects are recorded too), in MULTI play the whole mix. The recording starts with the
+    first sound and stops when it's full, or with SEL on the REC page; it's taken after the output limiter, without the metronome.
+    RATE (K1 on REC) = 44.1 / 22 / 11 kHz: about half a second, one or two seconds. A new recording switches SAMPLE to REC; C4
+    plays it as it was.
+  - The recording stays until power-off. **STORE** (after REC): TO SAMPLE = USER 1-3, SEL saves it there for good (named REC);
+    CLEAR throws it away. From arming until CLEAR, the recording borrows memory from the effects.
 
 **DRUM**: white keys = the sounds of the kit
-- **MORPH**: like Microtonic / DRUM-X: each sound has A / B and MORPH.
-- **88**, **99**: TR-808 and TR-909.
-- **DUAL**: like Volca Drum: 8 parts with 2 layers each, resonator.
-- **POGO** (all four, per sound): like POGO in the FL Studio sampler, from the hit the pitch slides down (left) or up (right) at a steady
-  speed, up to 4 octaves; 0 = off. MORPH TONE, DUAL PART, 88 / 99 SOUND: EDIT on the page = MORE, then K4.
+- **88**: the early-eighties analog drum machine; its claps, toms, congas and cowbell are modelled after the original circuits.
+- **99**: its punchier sibling, rebuilt in 2.0 after the original circuits: kick, snare, clap, rim, closed hat and toms, and an
+  open hat, crash and ride that ring like real cymbals.
+- **LN** (2.0): the classic early-eighties digital drum machine, synthesised, no samples inside: kick, snare, claps, rim, hats,
+  cowbell, cabasa, toms, congas, tambourine; kits TIGHT, DEEP, BRIGHT. It plays like 88 and 99 (sixteen sounds on the white keys,
+  the same pages, kits and saves).
+- **MORPH**: each sound moves between two settings, A / B, with MORPH.
+- **DUAL**: 8 parts with 2 layers each, through a resonator.
+- **CHOKE, PAN and LEVEL** of a sound sit on K2, K3, K4 in every drum engine: on MIX and in the MORE of the sound's page.
+- **POGO** (per sound): from the hit the pitch slides down (left) or up (right) at a steady speed, up to 4 octaves; 0 = off. In the
+  MORE of the sound's page (EDIT there): K1 on SOUND in 88, 99 and LN, on PART in DUAL, K4 on TONE in MORPH.
+- **Resonators** (2.0): every drum engine can send its sounds into METAL, WOOD, NATURAL, FABRIC, GLASS, VOLTAGE, PLASTIC or LASER.
+  K1 on MIX = the send of the sound you're on, MATERIAL = K3 in the MORE of MIX, MAT DECAY / MAT TONE = K2 / K3 in the MORE of KIT
+  (MORPH keeps its SPRING as the first choice, DUAL has the materials in WG TYPE after TUBE and STRING). A kit without a send sounds
+  as before. **SEL + OP4** = **RES ENV** (an envelope on the resonator: K1-K4 ATTACK, DECAY, SUSTAIN, RELEASE; a filter on the send
+  under SEL: OFF / LP / BP / HP, its CUTOFF, RESO and ENV AMT in MORE), again = **RES LFO** (RATE, DEPTH, DEST: TONE / CUTOFF /
+  LEVEL of the resonance, SHAPE).
+- The drum pages show the sound you hit on the FM-1's keys (or pick with SEL + key). Sequencer notes, and by default MIDI notes,
+  only play it, so the pages stay put while a pattern or a DAW plays the drums (GLO > MIDI > DRUM SELECT, chapter 9).
 
-Every engine has a **VINTAGE** page (deviations like an old unit) and a **CHORD** page (a chord on one key, SEL = LEARN).
+Every engine has a **VINTAGE** page (the last page of EDIT: deviations like an old unit). Chords on one key live in the
+arpeggiator's settings (chapter 7).
 
 ## 4. Modulation
 
@@ -106,46 +143,65 @@ Every engine has a **VINTAGE** page (deviations like an old unit) and a **CHORD*
   always sounds the same.
 - Every note starts click-free: no DC offset before the VCA and a 2 ms soft start on every new note, retrigger and stolen voice.
   Drums keep their sharp hit; a drum layer with ATTACK > 0 starts (and restarts) without a click.
-- Engines have a modulation matrix (4 or 16 slots); amount 0 = no connection.
+- Engines have a modulation matrix (4 or 16 slots); amount 0 = no connection. The drum engines have no LFOs or envelopes to route
+  (their resonance has its own: RES ENV / RES LFO, chapter 3).
+- **WAVE** has 16 connections (MOD 1-16: SOURCE, DEST, AMOUNT, VIA). In the MORE of a MOD page K2 = the **CURVE** of that
+  connection (-7..7: plus starts slowly, minus jumps in early, 0 = straight) and K1 = CHAOS RATE. Sources include **CHAOS 1 / 2**
+  (X and Y of two chaotic attractors); destinations include AMP TIME and ENV 2-4 TIME, UNI WIDTH, UNI BLEND, DRIVE MIX, DRV TONE,
+  F ENV AMT and F2 PARAL. **OWN DRAW** (SHAPE of LFO 2-4): that LFO draws its own 8 points (pages L2-L4 DRAW after DRAW 5-8,
+  SEL = STEP / CURVE for that drawing).
 
 ## 5. Presets and saving
 
-- Order: INIT, USER presets, factory, FM-1 sounds (in FM6, DX7 banks 1-4), imported DX7 / CZ banks.
+- Order: INIT, USER presets, factory, FM-1 sounds (in FM6, DX7 banks 1-4), imported DX7 / CZ banks. SAMPLE has only INIT and
+  your own presets.
 - **SAVE**: on INIT and on a bank sound always a new USER preset; otherwise an OVERWRITE / NEW window, then the name
   (12 characters: **SELECT = cursor**, **K1 = letter**, OCT- / OCT+ = cursor too, SEL saves, HOME cancels; turning the first letter
-  of a suggested USER nn clears the rest of it, other letters keep the name).
+  of a suggested USER nn clears the rest of it, other letters keep the name). On FM6 the window also has **SEND AS DX7** (the sound
+  goes out over USB as a single DX7 voice).
 - **Browsing** (PRESETS, ALL PRESETS, ENGINE window, MULTI tracks): a sound comes with its own effects (the chain saved with
   it, the built-in chain of a factory preset that has one, otherwise an empty chain). **Hold SEL while you turn** to keep the
   current effects and hear the next sound through them: the preset itself doesn't change, SAVE lights.
 - **ALL PRESETS** (HOME held + PRESETS): all engines, sections USER / FACTORY / IMPORTED. SELECT = section, ALGO = engine,
   SEL = OK (when released); SEL held without turning on a USER preset = DELETE? (SEL = yes, HOME = no).
-- **OG SYNTH MANAGER** (emulator / site): DX7 banks and Casio CZ sounds (.syx) to the FM-1, deleting DX7 banks, USER WAVE
-  tables and the table editor.
+- **OG SYNTH MANAGER** (the Studio page of ogsynth.cc, Chrome, Edge or Opera, over USB): DX7 sounds and banks (.syx) for FM6,
+  CZ sounds (.syx) for PHASE, deleting DX7 banks, WAVE tables (.wav, up to 63 frames) into USER 1-3 and the table editor, **samples
+  (.wav) for SAMPLE** into the same USER 1-3 (a longer sample takes the next slots too: from USER 1 about 1.1 s at 44.1 kHz, down to
+  11 kHz for about 4.4 s; made mono, trimmed and normalised, root note and loop from the file or found for you), **classic .fxp synth
+  presets translated into WAVE** (one or a whole folder, with a list of what was approximated), the **preset editor** (every
+  parameter of every engine: play it in the browser or live on the FM-1, save it as a USER preset or as a file), the FM-1's
+  original 128 sounds back into DX7 banks 1-4, and the preset pack (128 sounds).
 
 ## 6. Effects and PERFORM
 
-- **FX**: 8-slot chain (empty by default): SEL short = ON / OFF, SEL held = effects list, ALGO = quick choice, FX on FX =
-  MORE. Effects include DISTORTION, CHORUS, REVERB (VintageVerb style), DELAY (Valhalla style), COMPRESSOR, EQ, PHASER,
-  FLANGER, MULTIBAND / OTT, AUTO WAH, SUB, VOWEL, COMB, STUTTER.
+- **FX**: 8-slot chain (empty by default), each effect at most once: SELECT = slot, ALGO = quick choice, SEL short = ON / OFF (on
+  an empty slot: the list), SEL held + SELECT = move it, SEL held longer = effects list (picking one already in the chain swaps
+  the two), FX on FX = MORE. 28 effects in seven groups: drive, dynamics, filter, mod, pitch, time and space (DISTORTION,
+  SATURATION, CHORUS, REVERB, DELAY, COMPRESSOR, EQ, PHASER, FLANGER, MULTIBAND / OTT, AUTO WAH, SUB, VOWEL, COMB, STUTTER, GRAIN,
+  SHIMMER, OCTAVER, FREQ SHIFT, LO-FI and more). DELAY and REVERB at MIX 100 play only the effect.
 - **Effect settings come back**: an edited effect you swap for another (ALGO, the list, EMPTY) returns with its settings when
   you pick it again in the same sound. The last 4 edited effects are kept; a preset change or switching off forgets them.
+- **Memory**: the effects share one memory. When it runs out, an effect plays in 16 bits: its name, its slot and a DELAY TIME or
+  STUTTER DIV past full quality turn **pale orange** (FX MEMORY FULL: ORANGE FX = 16-BIT). **Red** = the effect doesn't play,
+  with the reason: NO MEMORY, NO CPU or SOLO ONLY (MULTI, chapter 8).
 - SATURATION TYPE **OG** = the output stage used up to 1.7.0, as an effect: DRIVE 0.0DB + TONE OFF + MIX 127 + LEVEL 0 sounds
   exactly like it (put it last in the chain; switching TYPE to OG sets an untouched DRIVE / TONE to these values). LO-FI MORE: SATURATE, TONE, LEVEL (a new LO-FI starts as loud as the dry sound).
-  EQ: GAIN -24..+24 dB, LOW CUT / HIGH CUT across 20 Hz - 20 kHz (an EQ from older presets switches to these ranges the first time
-  you turn a GAIN or CUT knob, without a jump). Effect LFO RATE goes up to about 100 Hz; FREQ SHIFT has SYNC on MORE K4.
-  CHORUS FEEDBACK no longer runs away by itself (same sound up to 75 %, above that it rings but fades).
+  EQ: 4 bands, GAIN -24..+24 dB, LOW CUT / HIGH CUT across 20 Hz - 20 kHz (an EQ from older presets switches to these ranges the
+  first time you turn a GAIN or CUT knob, without a jump), SEL held + knob = that band's Q. Effect LFO RATE goes up to about
+  100 Hz; FREQ SHIFT has SYNC on MORE K4. CHORUS FEEDBACK no longer runs away by itself (same sound up to 95, above that it rings
+  but fades).
 - **OCTAVER TYPE** (MORE K1): **PEDAL** (as before: follows one note, like a pedal) or **VOICE**: the engine plays the two lowest
   notes again an octave (OCT -1) and two octaves (OCT -2) lower, with the same filters and LFO, no delay. Only free voices are
   used: your notes always come first (6 notes in all at most; none on a MONO sound, fewer with low VOICES or with
-  UNISON). Not on MINI and drum engines.
-- A red effect name = not enough memory in the chain (a message appears on screen).
-- **PERFORM, MULTI only** (FX held + key): live effects on the whole 4-track mix (REPEAT, TAPE, FILTER ..., LATCH). In SOLO,
-  FX works right on press (FX page, second press = MORE).
+  UNISON). Not on MINI, the drum engines or a MULTI track.
+- **PERFORM, MULTI only** (FX held + key): live effects on the whole 4-track mix (repeats, gates, tape stops, rewinds, filter
+  sweeps, LATCH). Without a key K1-K4 = FILTER, CRUSH, THROW, DEPTH; an effect key held + knob = its settings (K1 SYNC, K2 START,
+  K3 LENGTH; SCRATCH: SYNC, RATE 1/32-1/2). OCT+ / OCT- = CURVES (GATE, PUMP, REPEAT, HALF on F3-B3). In SOLO, FX works right on
+  press (FX page, second press = MORE).
 - **PERFORM stays open**: hold FX and release it without touching a key or knob - the keys are now effects without FX (held,
   or on / off with LATCH = SEL). A single short FX click or HOME goes back to the page you came from; latched effects keep
   playing until you switch them off in PERFORM or turn LATCH off. The old way still works: FX held + key (or knob), release FX
-  and PERFORM closes. Hold an effect key + knob = its settings (SYNC, START, LENGTH; SCRATCH: SYNC, RATE 1/32-1/2). A red
-  REWIND LENGTH = not enough memory for full speed (it rewinds slower).
+  and PERFORM closes. A red REWIND LENGTH = not enough memory for full speed (it rewinds slower).
 
 ## 7. Sequencer, arpeggiator, RACK
 
@@ -203,24 +259,33 @@ Every engine has a **VINTAGE** page (deviations like an old unit) and a **CHORD*
   waits for the end of the pass (header NEXT P03); choosing the playing pattern again cancels it. Stopped: it changes at once.
 - Drums: **RACK**, like the Channel Rack in FL Studio (white keys = steps). A step with a note glows on its key; during PLAY the current step lights up too (brightest on a note) and the page follows PLAY.
 - Drums in NOTES: a note shows how long the sound really rings. Shorten it with K3 and that hit is cut short (using the sound's FADE); each note has its own length. Lengthen it back and it follows the sound again. Keys and MIDI always play the whole sound.
-- **ARP**: modes, LATCH (SEL), ARP + CHORD.
-- MULTI: SEQ plays 4 tracks; SEQ held + OP1-OP4 = track T1-T4; notes of the other tracks appear as ghost notes. SEQ held alone = sequencer settings (scenes: HOME on HOME, chapter 8).
+- **ARP** (ARP = on / off; held = settings, in MULTI 0.7 s): five pages, ARP, MORE, CHORD, KEY and STEPS. 19 modes (UP, DOWN,
+  UP-DOWN, AS PLAYED, RANDOM, CHORD, TURING, UP+8, CONVERGE, DIVERGE, PINKY, THUMB, WALK, DOWN-UP, UP&DOWN, DOWN&UP, CON-DIV,
+  PINKY U-D, THUMB U-D); STEPS = REPEATS (each step 1-8 times), OFFSET, RETRIG; LATCH (SEL on MORE); CHORD = a chord on every key
+  (SEL = learn), KEY = scale (ALL / SNAP / LOCK, LIGHTS).
+- MULTI: SEQ plays 4 tracks; in the SEQ pages SEL + OP1-OP4 picks the track you edit; notes of the other tracks appear as ghost
+  notes. **SEQ held + OP1-OP4 = mute / unmute T1-T4** (from any screen). SEQ held alone = sequencer settings (scenes: HOME on HOME,
+  chapter 8).
 - **SAVE on SEQ pages** (NOTES, PATTERN, FEEL, RACK, AUTO, the SEQ settings, TOOLS, the note card) saves the **pattern** at once,
   without a window (while SEQ plays: SAVES AT STOP, it is saved at STOP without a gap in the sound); there the SAVE light shows the
   pattern's state. To save the sound from there: HOME, then SAVE. A red **NOT SAVED** in the SEQ header = the pattern's notes are
   not in memory yet (they save themselves in silence: right after STOP / REC OFF, otherwise about 10 s after your last touch).
 
-## 8. MULTI: 4 tracks
+## 8. MULTI: 4 tracks and MASTER
 
 - To enter: **hold HOME** (hold it again to go back to SOLO). The new mode appears on screen for a moment.
-- Tracks: **T1 DRUMS**, T2, T3, T4. Each engine once; not together: WAVE with FM6, WAVE with MINI. An engine that can't play
-  next to the others appears in red with the reason, and the track keeps its current engine. MIDI: channels 1-4 = T1-T4.
-- **Notes**: drums have no limit. T2-T4 share up to 12 held notes, split any way you like. Heavier engines use the shared
-  budget faster (next to MINI: FM6 about 8 notes, PHASE about 4), and the oldest note is released when it runs out.
-- **HOME is the main screen, it works like the FX page**: SELECT = track (like a slot), **SEL + ALGO = the track's engine** (only engines that can play; ALGO alone = ALGO KNOB as in SOLO, on an empty track the engine), **K1 VOL, K2 PAN,
-  K3 REVERB, K4 DELAY, SEL = MUTE**. REVERB and DELAY start from the MIX of the effect in the track's preset and don't change the preset; a new preset starts from its
-  MIX again. A muted track shows a red **MUTE** in the track bar at the top and in VOL; the selected muted track gets a colored
-  frame instead of the full color (like an effect that is off on the FX page).
+- Tracks: **T1** plays a drum engine (88, 99, LN, MORPH or DUAL) or nothing; T2-T4 play any engine, drums too. An engine plays on
+  two tracks at most, each with its own sound, effects and preset (the second one starts from INIT); WAVE and MINI play on one
+  track only. WAVE doesn't play next to FM6 or MINI. An engine that can't play next to the others appears in red with the reason,
+  and the track keeps its current engine. MIDI: channels 1-4 = T1-T4.
+- **Notes**: drum hits are never cut. T2-T4 share up to 12 held notes, fewer with heavy engines (with nothing else playing: FM6 11,
+  two FM6 9, PHASE 7); MINI, a drum engine on T2-T4 and every playing track effect take a fixed share. Past the limit the oldest
+  note is released, on layered tracks first.
+- **HOME is the main screen, it works like the FX page**: SELECT = track (like a slot), **SEL + ALGO = the track's engine** (only
+  engines that can play; ALGO alone = ALGO KNOB as in SOLO, on an empty track the engine), **K1 VOL, K2 PAN, K3 REVERB send,
+  K4 DELAY send, SEL = MUTE**. The sends stay when you change the track's preset or engine (GLO > AUDIO > FX SEND: KEEP; PRESET
+  takes them from each preset). A muted track shows a red **MUTE** in the track bar at the top and in VOL; the selected muted track
+  gets a colored frame instead of the full color (like an effect that is off on the FX page).
 - **SEL held + K1-K4 = VOL of T1, T2, T3, T4** (a mixer for all four tracks at once, for playing live and recording): while SEL
   is held, the four knob boxes show T1-T4 with their levels (red MUTE on a muted track). It works on the PERFORM screen too. After
   a turn, letting go of SEL does nothing (no MUTE).
@@ -230,45 +295,74 @@ Every engine has a **VINTAGE** page (deviations like an old unit) and a **CHORD*
   **selected** track, plus every track with **KEYS LAYER** on: **hold ARP + OP1-OP4 = KEYS LAYER T1-T4 ON / OFF** (a **+** in
   the track bar; while ARP is held the OP keys of layered tracks light up). Layered synth tracks get the same notes as the
   selected one (octave, TRANSPOSE, chord, ARP, LATCH, pedal); a layered drum track plays the sound under the key. A layer is
-  saved with MULTI and in scenes. Recording with the keys goes to the selected track only. When the note limit is reached,
-  layered tracks give way first.
+  saved with MULTI and in scenes. Recording with the keys goes to the selected track only. Switching the selected track doesn't
+  cut a long note coming from a DAW.
 - **EDIT held + K1-K4 = the engine's quick page** (usually FILTER), like K1-K4 on the SOLO main screen; back after 2 s.
 - **PRESETS** = the selected track's sounds, each with its own effects; **SEL held + PRESETS** keeps the current effects (chapter 5).
-- **Scenes: HOME on HOME = scene list** (MULTI has no ENGINE window: the engine is SEL + ALGO or the list): SELECT = scene, SEL = load, **SAVE = store** (engines, presets, VOL, PAN, MUTE, sends, MASTER FX),
+- **Scenes: HOME on HOME = scene list** (8 scenes; MULTI has no ENGINE window: the engine is SEL + ALGO or the list): SELECT = scene, SEL = load, **SAVE = store** (engines, presets, VOL, PAN, MUTE, sends, MASTER),
   SEL held on a scene = DELETE?, HOME = back. A scene remembers saved presets, so save a changed sound first (message "Tn NOT SAVED").
   A scene also keeps its SEQ pattern: with SEQ > OPTIONS > SCENE = **+ PATTERN** (default) loading it switches to that pattern too
-  (SOUND = sounds only). This now survives a restart (up to 1.7.1 scenes forgot their pattern after power-off).
-- **MASTER FX**: on the FX page, slots 1-2 are always DELAY and REVERB, shared by all tracks (M1 / M2, marked MASTER FX). SEL = ON / OFF, ALGO or SEL held =
-  swap their order (the first feeds the second), K4 = RETURN; they can't be removed. A preset's own REVERB / DELAY knobs play only in SOLO.
-- **Effects per track**: FX opens the selected track's chain after the two master slots. DISTORTION, FILTER, COMPRESSOR and EQ play on that track, in slot
-  order. A red effect doesn't play: SOLO ONLY (other effects) or NO CPU (about 6 effects fit in the whole mix; effects also leave
-  room for fewer notes). At the end of the mix: GLO > AUDIO > MULTI MASTER (OFF / LIMIT / COMP).
+  (SOUND = sounds only).
+- **FX page in MULTI**: first **MASTER**, then the shared **REVERB and DELAY sends** (S1 / S2, in the order they play; swap them to
+  change it), then the selected track's chain.
+- **Effects per track**: every effect except REVERB and DELAY plays on a track, with its own sound. OCTAVER, SUB, COMB and AUTO WAH
+  follow the notes of their own track (SUB stays silent on T1 and drum tracks). A few are lighter on a track (GRAIN grains up to
+  about 90 ms, STUTTER's long DIVs turn pale orange sooner, COMB down to A#0, SHIMMER's octave a touch quieter, no OCTAVER VOICE).
+  Track effects share one processor budget and the memory that's left: one that doesn't fit shows **NO CPU** or **NO MEMORY**, and
+  a muted track frees its share. If the processor still runs out in a dense moment, track effects give way one by one, faded, and
+  come back when it's calm; MASTER keeps playing.
+- **REVERB and DELAY**: one of each for the whole mix, fed by the sends (K3 / K4 on HOME). A preset's own REVERB or DELAY only sets
+  where its send starts (in its chain it says SOLO ONLY). When track effects need memory, a playing DELAY fades out and comes back
+  with a shorter line.
+- **MASTER**: up to four effects over the whole mix (M1-M4, any effect but REVERB and DELAY, any order), before the output limiter;
+  they get processor and memory before the tracks' effects. On the MASTER position K1-K4 set each one's **WET**; SEL opens the slots
+  (they work like a track's chain, FX = the effect's MORE). After the effect's pages FX shows **MASTER ROUTING**: K1 REVERB, K2 DELAY,
+  K3 PERFORM = AFTER (MASTER works on their sound too) or BEFORE MASTER; K4 LIMIT = the output limiter's threshold (= GLO > AUDIO >
+  LIMIT). FX once more: **MASTER DRUMS**: K1-K4 set each slot to ALL or **NO DRUMS** (that slot works on the mix without the drum
+  tracks, and the drums join right after it; NO DRUMS slots always play first). So a SIDECHAIN can duck everything but the drums
+  while a COMPRESSOR after it still glues the whole mix. Scenes keep MASTER. The master compressor from GLO > AUDIO (before 2.0)
+  is now an effect in MASTER, in the first slot, with the same settings.
 
 ## 9. GLO settings
 
-PLAY (tuning, octave, velocity, pressure), MIDI (channel, clock, MIDI OUT, LOCAL, PROG CHANGE), AUDIO (SPEAKER EQ, second
-core, MULTI MASTER), DISPLAY (visuals, color ORANGE / GREEN / PURPLE / CYAN / RED / MONO / TEAL, LEDs), ALGO KNOB, SYSTEM
-(INFO, FACTORY RESET, BACKUP, CALIBRATION, HINTS).
+PLAY (tuning, transpose, velocity, FIXED VEL, TUNE KNOB), MIDI (chapter below), AUDIO, DISPLAY, ALGO KNOB, SYSTEM (INFO, FACTORY
+RESET, BACKUP, CALIBRATION, HINTS, UPDATE MODE).
+
+**AUDIO**: SPEAKER EQ, 2ND CORE, MULTI MASTER (OFF, or LIMIT: one more limiter on the MULTI mix), FX SEND (KEEP / PRESET, chapter 8)
+and **LIMIT** (-12..0 dB, -2 dB by default): the output stays clean, a limiter keeps the loudest moments under this threshold.
+
+**DISPLAY**: visuals, lights, color (ORANGE / GREEN / PURPLE / CYAN / RED / MONO / TEAL / **PINK**: neon pink in SOLO, fuchsia across
+MULTI), **ENGINE FONT** and **PRESET FONT** (KNEWAVE for engines and SEDGWICK for presets by default, or BARLOW, the look before
+2.0, each on its own), SCREEN OFF (1-30 minutes untouched: the screen goes black, the backlight stays on, any key or knob wakes it).
 
 **ALGO KNOB**: up to 8 parameters on ALGO for each engine (ALGO = engine, K1-K4 = KNOB 1-4, SELECT = KNOB 5-8). Each column
 shows where the parameter comes from (page, grey), its name (orange) and its current value as a bar; a parameter can sit in
-one slot only. Kept after power-off and firmware updates; FACTORY RESET clears them.
+one slot only; on a drum engine they can come from different drum sounds. Kept after power-off and firmware updates; FACTORY
+RESET clears them.
 
-**MIDI > GLIDE OUT** (how SEQ glides go out on MIDI OUT): **NOTES** (default) = a new note at the end of each glide; **BEND** = pitch
-bend on the track's channel, exactly the drawn curve, while that note plays alone on the channel (otherwise that glide as NOTES; set
-the receiving synth's pitch bend range to 48 semitones - PLAY sends RPN 0 = 48); **MPE** = in SOLO every SEQ note on its own channel
-2-16 (MPE lower zone, master channel 1) with its own pitch bend, so whole chords glide; in MULTI it works like BEND (tracks keep their
-channels).
+**MIDI**: channel (ALL or 1-16), MIDI OUT, LOCAL, PROG CHANGE, CLOCK IN (AUTO / INTERNAL), CLOCK OUT, GLIDE OUT, T1-T4 CHANNEL,
+OTHER TRACKS, KNOB PICKUP (JUMP / CATCH), **DRUM SELECT** and CONTROLS OUT.
+- **DRUM SELECT** (2.0): which notes pick the sound shown on the drum pages. **KEYS** (default): the FM-1's keys and SEL + key;
+  MIDI notes only play, so the pages don't jump while a DAW plays the drums. **KEYS+MIDI**: a MIDI note picks its sound too, as
+  before 2.0.
+- **GLIDE OUT** (how SEQ glides go out on MIDI OUT): **NOTES** (default) = a new note at the end of each glide; **BEND** = pitch
+  bend on the track's channel, exactly the drawn curve, while that note plays alone on the channel (otherwise that glide as NOTES; set
+  the receiving synth's pitch bend range to 48 semitones - PLAY sends RPN 0 = 48); **MPE** = in SOLO every SEQ note on its own channel
+  2-16 (MPE lower zone, master channel 1) with its own pitch bend, so whole chords glide; in MULTI it works like BEND (tracks keep their
+  channels).
 
 ## 10. Troubleshooting
 
 - **The installer doesn't see the FM-1**: unplug and replug the FM-1, reload the page; the page retries by itself when the
   mode changes.
 - **The FM-1 stayed in update mode** ("Felucca Update"): running *Install* again finishes the write.
-- **The sound breaks up**: too many notes with a heavy effects chain. The FM-1 fades out the oldest voice by itself; use
-  fewer effects or a lighter engine.
+- **The sound breaks up**: too many notes with a heavy effects chain. The FM-1 fades out the oldest voice by itself, and in MULTI
+  the track effects give way one by one until it's calm; use fewer effects or a lighter engine.
+- **An effect is red**: it doesn't play, the reason is in the corner (NO MEMORY, NO CPU, SOLO ONLY). **Pale orange**: it plays
+  in 16 bits because the effect memory is full.
 
 ---
 
 Code: MPL-2.0 (application); engines, effects and sequencer are closed (Mike Johnson Beats). Based on fm1-base and
-felucca-bsp. Drum models in 88 / 99 from Plaits (Mutable Instruments, MIT). M-VAVE and FM-1 are trademarks of their owners.
+felucca-bsp. Kick and snare models in 88 and the tambourine in 99 from Plaits (Mutable Instruments, MIT). Fonts on the screen:
+Barlow, Knewave and Sedgwick Ave Display, SIL OFL 1.1. M-VAVE and FM-1 are trademarks of their owners.
