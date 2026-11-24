@@ -1,5 +1,10 @@
 # Changelog
 
+## v2.0.1 — 2026-11-24
+Źródła MPL OG Synth 2.0.1 „Drum tune”: OCT na silniku perkusji = DRUM TUNE osobno od oktawy klawiatury (w MULTI OCT na ścieżce
+syntezatora nie przestraja już perkusji innych ścieżek) — app.c (DTUNE w ustawieniach rsv[1], octave_step, oct_shown), app.h (numer
+wersji), app/docs/MANUAL.md (OCT / DRUM TUNE). Reszta plików bez zmian.
+
 ## v2.0.0 — 2026-11-23
 Źródła MPL OG Synth 2.0.0 „Master” (wszystko od 1.8.2): efekty na ścieżkach MULTI, sekcja MASTER (4 efekty na miks, WET, ROUTING,
 DRUMS; sceny w nowym obiekcie OBJ_MSTR — app.h, kopia zapasowa 22 obiekty), 16 bit blado pomarańczowo, ochrona przed przeciążeniem;

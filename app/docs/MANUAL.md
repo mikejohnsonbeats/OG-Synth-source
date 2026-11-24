@@ -46,7 +46,7 @@ engine has full parameter pages, its own INIT sound, factory presets (all but SA
 | **SAVE** | lit when the sound has changed; saves as a new USER preset or overwrites; **on SEQ pages: the pattern** (chapter 7) |
 | **FX** | effects chain (right on press); in MULTI it starts with MASTER and the reverb / delay sends, and FX held = PERFORM (chapter 6) |
 | **GLO** | global settings; a second GLO returns to where you came from |
-| **OCT- / OCT+** | octave -3..+3 |
+| **OCT- / OCT+** | octave -3..+3; on a drum engine it is **DRUM TUNE** in semitones (the keys stay where they are), kept apart from the keyboard octave: OCT on a synth never retunes the drums |
 
 - Hints appear at the bottom of the screen (GLO > SYSTEM > HINTS). With HINTS off the pages use that space (in MULTI the
   mixer row moves down into it, on the ARP page the steps sit in the middle). Holding SEL shows what the keys do.
@@ -297,6 +297,8 @@ arpeggiator's settings (chapter 7).
   selected one (octave, TRANSPOSE, chord, ARP, LATCH, pedal); a layered drum track plays the sound under the key. A layer is
   saved with MULTI and in scenes. Recording with the keys goes to the selected track only. Switching the selected track doesn't
   cut a long note coming from a DAW.
+- **OCT** on a synth track moves the keys of the synth tracks; on a drum track it is the drums' DRUM TUNE. The two are kept apart
+  (2.0.1), so changing the octave on T2-T4 never retunes the drums.
 - **EDIT held + K1-K4 = the engine's quick page** (usually FILTER), like K1-K4 on the SOLO main screen; back after 2 s.
 - **PRESETS** = the selected track's sounds, each with its own effects; **SEL held + PRESETS** keeps the current effects (chapter 5).
 - **Scenes: HOME on HOME = scene list** (8 scenes; MULTI has no ENGINE window: the engine is SEL + ALGO or the list): SELECT = scene, SEL = load, **SAVE = store** (engines, presets, VOL, PAN, MUTE, sends, MASTER),

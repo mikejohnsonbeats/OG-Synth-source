@@ -5,7 +5,7 @@ typedef struct {
     uint32_t magic;
     int8_t octave;                       /* -3 .. +3 (v0.21; do v0.20: -2 .. +2) */
     uint8_t eng;                         /* bieżący silnik */
-    uint8_t rsv[2];
+    uint8_t rsv[2];                      /* [0] numeracja presetów (18; od 1.6.0 nieczytana), (2.0.1) 19: [1] = DRUM TUNE (DTUNE) */
     uint16_t preset[NENG_S];             /* ostatnio wczytany preset każdego silnika (nazwa na ekranie) */
     uint8_t edited[NENG_S];              /* brzmienie zmienione względem presetu */
     uint16_t np[NENG_S];                 /* ile parametrów zapisano (silnik urósł: reszta domyślna) */
@@ -365,7 +365,7 @@ OGS_UI static void input(void)
     keys = touch_keys();
     if (mt_ui() && ui.page != V_HOME && ui.page != V_ENGP && ui.page != V_MTL && ui.page != V_SCN)   /* (v0.85) poza głównym ekranem i oknami: kursor na wybranej (strony jej silnika) */
         mt_cur = (uint8_t)glob.g[G_MTFOC];
-    ctl.dsemi = (int8_t)(set.octave + glob.g[G_TRANSP]);   /* (v0.56) perkusja: przestrojenie */
+    ctl.dsemi = (int8_t)(DTUNE + glob.g[G_TRANSP]);   /* (v0.56) perkusja: przestrojenie; (2.0.1) DRUM TUNE, nie oktawa klawiatury */
     if (mt_ui() && glob.g[G_MTFOC] >= 1 && glob.g[G_MTSYN] != glob.g[G_MTFOC]) {   /* (v0.66.2) SEQ w SOLO: ta ścieżka */
         glob.g[G_MTSYN] = glob.g[G_MTFOC];
         mt_gdirty = 1;
@@ -970,7 +970,7 @@ OGS_UI static void input(void)
                     *(MT_LAY(k) ? &lit : &shown) |= 1u << LABEL_KEY[K_OP1 + k];
         int gl = glob.g[G_LIGHTS], kl = glob.g[G_KEYL];
         uint32_t bl = btn
-                    | (set.octave > 0 ? 1u << B_OCTUP : set.octave < 0 ? 1u << B_OCTDN : 0u)   /* oktawa poza 0 */
+                    | (oct_shown() > 0 ? 1u << B_OCTUP : oct_shown() < 0 ? 1u << B_OCTDN : 0u)   /* oktawa poza 0 (perkusja: DRUM TUNE) */
                     | (ui.page == V_HOME || ui.page == V_ALLP || ui.page == V_ENGP ? 1u << B_HOME
                        : ui.page == V_GLO || ui.page == V_INFO || ui.page == V_RESET || ui.page == V_NOTE || ui.page == V_LRN ? 1u << B_GLO
                        : ui.page == V_FX || ui.page == V_FXL || ui.page == V_PERF ? 1u << B_FX
@@ -1514,7 +1514,7 @@ OGS_UI void app_frame(void)
 int app_expect(const char *what, int *got)
 {
     if (!strcmp(what, "octave"))
-        *got = set.octave;
+        *got = oct_shown();
     else if (!strcmp(what, "page"))
         *got = ui.page;
     else if (!strcmp(what, "preset"))
