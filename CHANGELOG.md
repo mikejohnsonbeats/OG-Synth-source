@@ -1,5 +1,13 @@
 # Changelog
 
+## v2.0.2 — 2026-11-24
+Źródła MPL OG Synth 2.0.2 „Full backup”: pełna kopia zapasowa FM1 (strona BACKUP: sekcja OGSD z bankami DX7 / CZ, wzorami SEQ z AUTO,
+tablicami WAVE USER i samplami — nowy app/web/backup_extras.js, SysEx 38-3E w app.c, backup.html), usuwanie banków DX7 / CZ na FM1,
+GLO > DISPLAY: kolory osobno (BACKGROUND / BARS w motywie, TEXT / TILES / HINTS / GRID: OFF / THEME / kolor), oscyloskop (wyzwalanie,
+62 kl./s przy zapasie CPU), GLIDE MODE i jeden układ strony VOICE (UI w app.c), ochrona przed przeciążeniem; app.h (numer wersji,
+kopia zapasowa), ogs_lists.h, manager.html, tests/engines.txt, patches/fm1-base.patch (gfx.c: tło stron i pasków, build.py), MANUAL.md.
+Źródła silników i efektów dalej zamknięte (bez zmian w tym repo).
+
 ## v2.0.1 — 2026-11-24
 Źródła MPL OG Synth 2.0.1 „Drum tune”: OCT na silniku perkusji = DRUM TUNE osobno od oktawy klawiatury (w MULTI OCT na ścieżce
 syntezatora nie przestraja już perkusji innych ścieżek) — app.c (DTUNE w ustawieniach rsv[1], octave_step, oct_shown), app.h (numer

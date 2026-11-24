@@ -36,7 +36,7 @@ ever down: the firmware package, an offline copy of the install page (runs on yo
   it writes the stock firmware, so the stock firmware starts clean. DX7 banks and WAVE tables sent from the Manager aren't in
   the backup: keep their files.
 - Updating from an older OG Synth keeps your sounds and settings.
-- Identity (what the FM-1 answers to installers): `FM-1_1313` and the version, 2.0.1 = `FM-1_1313020001`
+- Identity (what the FM-1 answers to installers): `FM-1_1313` and the version, 2.0.2 = `FM-1_1313020002`
   (`FM-1_11` and the version up to 1.6.2).
 
 ## What is here

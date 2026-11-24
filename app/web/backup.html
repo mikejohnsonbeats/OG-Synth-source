@@ -80,7 +80,7 @@ cable. This page works in Chrome or Edge, and there is nothing to install.</p>
 
 <section class="card" aria-labelledby="bh">
   <h2 id="bh">Back up</h2>
-  <p>This saves everything to a <b>.ogsbak</b> file. That includes presets, start-up sounds and global settings (DX7 banks: keep your .syx files). OG Synth can keep playing. If you have
+  <p>This saves everything to a <b>.ogsbak</b> file. That includes presets, start-up sounds, global settings, DX7 and CZ banks, SEQ patterns, WAVE tables and samples. OG Synth can keep playing. If you have
   changes that aren't saved yet, stop OG Synth first so they go in the file too.</p>
   <div class="row"><button id="backup" class="primary" type="button">Back up</button></div>
 </section>
@@ -102,7 +102,7 @@ cable. This page works in Chrome or Edge, and there is nothing to install.</p>
   <li>A cut cable or a damaged file changes nothing. Even a power cut during the write leaves either what was there or
     the backup, never a mix.</li>
   <li>The browser asks once for permission to use MIDI with SysEx. Allow it, and close other apps that use the FM-1's MIDI first.</li>
-  <li>From a terminal: <code>python tools/fm1_backup.py backup FILE --magic OGS1 --port "OG Synth"</code> in fm1-base.</li>
+  <li>From a terminal: <code>python tools/fm1_backup.py backup FILE --magic OGS1 --port "OG Synth"</code> in fm1-base (presets and settings only: the banks, patterns, tables and samples come with this page).</li>
 </ul>
 </main>
 <script>
@@ -375,7 +375,110 @@ const PB = (() => {
 })();
 // --- backup protocol: end
 
-const EXTRAS = [];
+// SPDX-License-Identifier: MPL-2.0
+// Copyright (C) 2026 Mike Johnson Beats
+// (2.0.2, decyzja użytkownika 2026-11-24: „Wszystko z FM1”) OG Synth: pełna kopia — sekcja OGSD pliku .ogsbak (za kopią obiektów,
+// fm1-base web/backup/index.html EXTRAS; tools/make_backup_page.py wkleja ten plik w miejsce EXTRAS_JS): sektory obszaru danych FM1, których
+// obiekty kopii nie mają (app.c bk_sysex): banki CZ 1-8, linie AUTO, banki DX7 1-8, miejsca USER WAVE / SAMPLE, ustawienia SEQ i wzory
+// 1-16. W pliku: u16 liczba sektorów, potem każdy po kolei: u16 zajęte bajty u (bez końcowych 0xFF), u bajtów. Przywracanie: sektor,
+// który na FM1 już jest taki sam (zajęte bajty i odcisk FNV-1a), zostaje bez zapisu; na końcu FM1 wczytuje wszystko od nowa (3E).
+const EXTRAS = [(() => {
+  const N = 54, SEC = 4096, HDR = [0xF0, 0x7D, 0x4F, 0x47, 0x53];
+  const fnv = (b) => { let h = 0x811C9DC5; for (let i = 0; i < b.length; i++) h = Math.imul(h ^ b[i], 16777619) >>> 0; return h; };
+  const h35 = (m, at) => ((m[at] << 28 | m[at + 1] << 21 | m[at + 2] << 14 | m[at + 3] << 7 | m[at + 4]) >>> 0);
+  const full = (d) => { const f = new Uint8Array(SEC).fill(0xFF); f.set(d); return f; };
+  // one request, its answer (cmd want, the same first byte): the FM-1 now and then loses a SysEx message, so 5 tries
+  async function ask(link, body, want, ms = 800) {
+    for (let t = 0; t < 5 && !link.lost; t++) {
+      link.drain();
+      link.send([...HDR, ...body, 0xF7]);
+      const end = Date.now() + ms;
+      for (let left = ms; left > 0; left = end - Date.now()) {
+        const m = await link.read(left);
+        if (!m) break;
+        if (m.length >= 8 && m[1] === 0x7D && m[2] === 0x4F && m[3] === 0x47 && m[4] === 0x53 && m[5] === want && m[6] === body[1]
+            && (want !== 0x39 || m[7] === body[2])) return m;
+      }
+    }
+    throw new Error(link.lost ? "The FM-1 was disconnected." : "The FM-1 stopped answering. Is it running OG Synth 2.0.2 or newer?");
+  }
+  async function sector(link, s, k) {        // sector s: used bytes, FNV-1a of all 4 KiB, chunk k (128 B)
+    const m = await ask(link, [0x38, s, k], 0x39);
+    return { u: m[8] << 7 | m[9], h: h35(m, 10), d: PB.unpack7(m.slice(15, -1)) };
+  }
+  function parse(b) {                        // the section -> [the sectors' used bytes]
+    const bad = () => { throw new Error("Its OG Synth data (banks, patterns, tables) is damaged."); };
+    if (b.length < 2) bad();
+    const n = b[0] | b[1] << 8, out = [];
+    if (n > N) throw new Error("Its OG Synth data is from a newer OG Synth: update the FM-1 first.");
+    let at = 2;
+    for (let s = 0; s < n; s++) {
+      if (at + 2 > b.length) bad();
+      const u = b[at] | b[at + 1] << 8;
+      at += 2;
+      if (u > SEC || at + u > b.length) bad();
+      out.push(b.subarray(at, at + u));
+      at += u;
+    }
+    if (at !== b.length) bad();
+    return out;
+  }
+  return {
+    tag: "OGSD",
+    what: "the DX7 and CZ banks, SEQ patterns, WAVE tables and samples",
+    async backup(link, onProgress) {
+      const secs = [];
+      for (let s = 0; s < N; s++) {
+        const a = await sector(link, s, 0), d = new Uint8Array(a.u);
+        d.set(a.d.slice(0, a.u));
+        for (let k = 1; k * 128 < a.u; k++) {
+          const c = await sector(link, s, k);
+          if (c.u !== a.u || c.h !== a.h) throw new Error("OG Synth saved something meanwhile. Back up again.");
+          d.set(c.d.slice(0, a.u - k * 128), k * 128);
+        }
+        if (fnv(full(d)) !== a.h) throw new Error("A piece went missing on the way. Back up again.");
+        secs.push(d);
+        onProgress((s + 1) / N);
+      }
+      const out = new Uint8Array(2 + secs.reduce((n, d) => n + 2 + d.length, 0));
+      out[0] = N & 0xFF; out[1] = N >> 8;
+      let at = 2;
+      for (const d of secs) { out[at] = d.length & 0xFF; out[at + 1] = d.length >> 8; out.set(d, at + 2); at += 2 + d.length; }
+      return out;
+    },
+    check(b) {
+      const secs = parse(b), used = (lo, hi) => secs.slice(lo, hi).filter((d) => d.length).length;
+      const slot = (s) => secs[s] && secs[s].length >= 4 ? String.fromCharCode(...secs[s].subarray(0, 4)) : "";
+      const pat = used(38, 54), tab = [13, 21, 29].filter((s) => slot(s) === "OGWT").length, smp = [13, 21, 29].filter((s) => slot(s) === "OGSM").length;
+      const kb = Math.round(secs.reduce((n, d) => n + d.length, 0) / 1024);
+      return `${pat} SEQ pattern${pat === 1 ? "" : "s"}, ${tab} WAVE table${tab === 1 ? "" : "s"}, ${smp} sample${smp === 1 ? "" : "s"}` +
+        ` and the DX7 and CZ banks (${kb} KB)`;
+    },
+    async restore(link, b, onProgress) {
+      const secs = parse(b), reload = () => ask(link, [0x3E, 0], 0x3F, 3000);   // 3E: what the flash holds now, loaded
+      let wrote = 0;
+      try {
+        for (let s = 0; s < secs.length; s++) {
+          const d = secs[s], f = full(d), h = fnv(f), now = await sector(link, s, 0);
+          for (let t = 0; now.u !== d.length || now.h !== h; t++) {   // the whole 4 KiB in 8 pieces, then the write (3 tries)
+            for (let k = 0; k < 8; k++) await ask(link, [0x3A, k, ...PB.pack7(f.subarray(k * 512, k * 512 + 512))], 0x3B);
+            const m = await ask(link, [0x3C, s, h >>> 28 & 0x7F, h >>> 21 & 0x7F, h >>> 14 & 0x7F, h >>> 7 & 0x7F, h & 0x7F], 0x3D, 3000);
+            wrote++;
+            if (m[7] === 2) throw new Error("It is playing: press PLAY on the FM-1 to stop it, then restore again.");
+            if (m[7] === 3) throw new Error("The FM-1 could not write its memory.");
+            if (!m[7]) break;
+            if (t === 2) throw new Error("A piece went missing on the way.");
+          }
+          onProgress((s + 1) / secs.length);
+        }
+      } catch (e) {
+        if (wrote && !link.lost) await reload().catch(() => {});
+        throw e;
+      }
+      if (wrote) await reload();
+    },
+  };
+})()];
 
 // one MIDI in/out pair with a SysEx queue (as fm1ota.js)
 class Link {

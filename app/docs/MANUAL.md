@@ -25,7 +25,8 @@ engine has full parameter pages, its own INIT sound, factory presets (all but SA
 
 ## 1. Installation and backup
 
-- **Back up first**: the *Backup* page saves the FM-1's presets and settings to your computer (and restores them).
+- **Back up first**: the *Backup* page saves everything on the FM-1 to your computer and restores it: presets and settings, and
+  (from 2.0.2) the DX7 and CZ banks, SEQ patterns with their AUTO lanes, WAVE tables and samples, in one .ogsbak file.
 - **Install**: open the *Install* page in Chrome, Edge or Opera with the FM-1 connected over USB. The page reloads itself
   when the FM-1 switches to update mode. Keep it open until it shows the end. Updating from an older OG Synth keeps your
   sounds and settings.
@@ -64,6 +65,11 @@ ENGINE window (HOME on HOME): SELECT steps through, ALGO jumps by group (VA, DIG
 confirms (when released), HOME goes back. Each engine comes back with its own sound and its own effects. **SEL held + SELECT /
 ALGO / PRESETS** = the next engine or sound with the current effects (chapter 5).
 
+Every engine with GLIDE has the same **VOICE** page: K1 MODE, K4 GLIDE, LEGATO under SEL; in its MORE K1 BEND RANGE, K2 WIDTH
+(where the engine has it), K4 **GLIDE MODE**: ALWAYS (glide from the last note every time) or LEGATO (fingered glide, as on a DX7:
+only a key pressed while another is still held glides); FM6 also FOLLOW. VEL > AMP is in the MORE of the AMP ENV page (on WAVE:
+VOICE MORE K3).
+
 **VA (analog)**
 - **MINI**: 4 oscillators, mixer with FEEDBACK, 24 dB ladder filter (LADDER 24), DRIVE, chorus, MONO / PARA (in PARA all four
   oscillators play: turn up OSC 4's level too). DRIVE: DISTORT 0-10 fades the drive in smoothly. TUNE page at the end of EDIT
@@ -79,7 +85,7 @@ ALGO / PRESETS** = the next engine or sound with the current effects (chapter 5)
 **DIGI (digital)**
 - **FM6**: 6 operators (32 algorithms, classic six-operator .syx banks such as the DX7's), UNISON, FILTER (switch, off by
   default), LFO 2 page SEL = **LFO MODE** FREE / RETRIG (the old KEY SYNC OFF / ON, same sound) / SYNC (tempo); LFO RATE in Hz,
-  GLIDE MODE ALWAYS / LEGATO / FOLLOW. FILTER shortcut: SEL + GLOBAL (VOICE > UNISON > FILTER > CONTROL > VINTAGE).
+  GLIDE MODE ALWAYS / LEGATO / FOLLOW (VOICE MORE K4). FILTER shortcut: SEL + GLOBAL (VOICE > UNISON > FILTER > CONTROL > VINTAGE).
   **BRIGHT** (ALGO page K4, the level of all modulators) -100..+100: -50..+50 sounds as before, above +50 much brighter.
   **AMP ENV** (first ENV page): one envelope for the whole sound, -100..100, moves all carrier envelopes at once.
 - **PHASE**: phase distortion, 8-segment envelopes, CZ sound import (.syx).
@@ -163,7 +169,8 @@ arpeggiator's settings (chapter 7).
   it, the built-in chain of a factory preset that has one, otherwise an empty chain). **Hold SEL while you turn** to keep the
   current effects and hear the next sound through them: the preset itself doesn't change, SAVE lights.
 - **ALL PRESETS** (HOME held + PRESETS): all engines, sections USER / FACTORY / IMPORTED. SELECT = section, ALGO = engine,
-  SEL = OK (when released); SEL held without turning on a USER preset = DELETE? (SEL = yes, HOME = no).
+  SEL = OK (when released); SEL held without turning on a USER preset = DELETE? (SEL = yes, HOME = no); on a sound of a DX7 or CZ
+  bank under IMPORTED = DELETE BANK? (the whole bank off the FM-1; factory presets and the FM-1's original sounds stay).
 - **OG SYNTH MANAGER** (the Studio page of ogsynth.cc, Chrome, Edge or Opera, over USB): DX7 sounds and banks (.syx) for FM6,
   CZ sounds (.syx) for PHASE, deleting DX7 banks, WAVE tables (.wav, up to 63 frames) into USER 1-3 and the table editor, **samples
   (.wav) for SAMPLE** into the same USER 1-3 (a longer sample takes the next slots too: from USER 1 about 1.1 s at 44.1 kHz, down to
@@ -335,7 +342,9 @@ and **LIMIT** (-12..0 dB, -2 dB by default): the output stays clean, a limiter k
 
 **DISPLAY**: visuals, lights, color (ORANGE / GREEN / PURPLE / CYAN / RED / MONO / TEAL / **PINK**: neon pink in SOLO, fuchsia across
 MULTI), **ENGINE FONT** and **PRESET FONT** (KNEWAVE for engines and SEDGWICK for presets by default, or BARLOW, the look before
-2.0, each on its own), SCREEN OFF (1-30 minutes untouched: the screen goes black, the backlight stays on, any key or knob wakes it).
+2.0, each on its own), where the color goes (2.0.2): **BACKGROUND** and **BARS** OFF / LOW (checkerboard) / HIGH in the theme
+color, **TEXT**, **TILES**, **HINTS** and **GRID** (the NOTES / AUTO grid) each OFF (gray), THEME or a color of their own (MONO =
+white), SCREEN OFF (1-30 minutes untouched: the screen goes black, the backlight stays on, any key or knob wakes it).
 
 **ALGO KNOB**: up to 8 parameters on ALGO for each engine (ALGO = engine, K1-K4 = KNOB 1-4, SELECT = KNOB 5-8). Each column
 shows where the parameter comes from (page, grey), its name (orange) and its current value as a bar; a parameter can sit in

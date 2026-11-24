@@ -7,7 +7,7 @@
 #include "plat.h"
 
 #define APP_NAME "OG SYNTH"
-#define OGS_VERSION "2.0.1"              /* GLO > SYSTEM > INFO */
+#define OGS_VERSION "2.0.2"              /* GLO > SYSTEM > INFO */
 #define APP_SPLASH_RGB RGB(255, 154, 31)       /* #FF9A1F, pomarańczowy OG Deck */
 #define APP_SPLASH                       /* ekran startowy: logo OG Synth (app_splash, app.c) */
 #define APP_BLOCK 256u                   /* frames per audio block: 5.8 ms at 44.1 kHz */
@@ -47,8 +47,9 @@ void app_say(const char *a, const char *b);   /* a short message on the screen a
 int app_sysex(const uint8_t *p, uint32_t n);
 
 /* OGS: kopia zapasowa przez USB (fm1.toml backup = true; OG Synth Manager > BACKUP, tools/fm1_backup.py --magic OGS1):
- * ustawienia, brzmienia na start, presety USER, nadpisane fabryczne, spis banków DX7 (dane banków DX7 w obszarze danych
- * nie wchodzą: ich .syx zostają na komputerze) */
+ * ustawienia, brzmienia na start, presety USER, nadpisane fabryczne, spis banków DX7; (2.0.2) dane z obszaru danych (banki DX7
+ * i CZ, wzory SEQ z AUTO, tablice USER WAVE i sample) dopisuje do pliku strona BACKUP (sekcja OGSD: app.c bk_sysex,
+ * app/web/backup_extras.js) */
 #define APP_BACKUP_OBJS {OBJ_SETTINGS, OBJ_GLOBAL, OBJ_USER0, OBJ_USER1, OBJ_FACT, OBJ_USER2, OBJ_USER3, OBJ_SYX, OBJ_FXP, OBJ_FXP2, OBJ_FXX, \
                          OBJ_USER4, OBJ_USER5, OBJ_USER6, OBJ_USER7, OBJ_FXH, OBJ_FXH2, OBJ_SET2, OBJ_XTRA, OBJ_MTX, OBJ_MAC, OBJ_MSTR}   /* (2.0)
                                           * + MASTER scen: kopie 22 obiekty */

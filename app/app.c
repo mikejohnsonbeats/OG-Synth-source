@@ -536,6 +536,8 @@ OGS_UI static void input(void)
                 if (ui.allp_del) {
                     if (ui.page == V_SCN)
                         scn_del();
+                    else if (ui.allp_del == 2)   /* (2.0.2) DELETE BANK? */
+                        bank_del();
                     else
                         user_del();
                 } else {
@@ -1073,16 +1075,17 @@ static void speak(void)
 void app_ui_init(void)
 {
     touch_on(1);
-    glob_apply();                            /* krzywe klawiszy po touch_on */
     if (!splash_until) {                     /* pierwszy raz: logo jeszcze chwilę */
         uint32_t now = plat_ms();
         splash_until = now + SPLASH_MIN > SPLASH_MS ? now + SPLASH_MIN : SPLASH_MS;
         splash_on = 1;
         ui.input_at = 0;
+        cv_bgc[0] = 0;                       /* (2.0.2) logo na czarnym jak przy starcie (fm1-base: przed app_init), także z tłem motywu */
         app_splash();
     } else {
         lcd_fill(0, 0, 240, 240, C_BLACK);
     }
+    glob_apply();                            /* krzywe klawiszy po touch_on; (2.0.2) po logo: tło motywu od pierwszej strony */
     ui.redraw = 1;
 }
 #include "ogs_app_11.c"
@@ -1179,9 +1182,10 @@ OGS_UI void app_frame(void)
         }
     }
     if (ui.allp_sel == 1 && now - ui.sel_at >= SEL_EQ_MS     /* (1.8.0, pkt 35) po SEL + gałce (2) nigdy */
-        && (ui.page == V_ALLP ? CUR >= ID_USER && CUR < ID_SYX : ui.page == V_SCN && glob.scn[ui.scn_cur].ok)) {   /* (v1.1.2) też scena */
+        && (ui.page == V_ALLP ? (CUR >= ID_USER && CUR < ID_SYX) || bank_of(CUR) >= 0 : ui.page == V_SCN && glob.scn[ui.scn_cur].ok)) {
+                                             /* (v1.1.2) też scena; (2.0.2) też brzmienie z banku DX7 / CZ: DELETE BANK? */
         ui.allp_sel = 0;                     /* (v1.0.2) ALL PRESETS: SEL trzymany 0,8 s na USER = okno DELETE? */
-        ui.allp_del = 1;
+        ui.allp_del = (uint8_t)(ui.page == V_ALLP && bank_of(CUR) >= 0 ? 2 : 1);
         ui.redraw = 1;
     }
     if (ui.allp_sel && ui.page == V_LRN && !ui.lr_on && now - ui.sel_at >= SEL_EQ_MS) {   /* (v1.3.0) MIDI LEARN: SEL trzymany = wyczyść */
@@ -1360,18 +1364,18 @@ OGS_UI void app_frame(void)
     (void)out_quiet();                       /* co klatkę: kiedy ostatnio coś grało */
     if (ui.page == V_FX && fx_cur()->type == FX_EQ && fx_on(fx_cur()) && !fx_xb(fx_cur())[FX_X_EQ + EQX_AN]) {   /* (v0.92) widmo EQ: 10 / s */
         static uint32_t eq_at;
-        if (now - eq_at >= 100u) {
+        if (now - eq_at >= (anim_fast() ? 32u : 100u)) {   /* (2.0.2) przy zapasie CPU ~31 / s (było 10 / s) */
             eq_at = now;
-            ui.redraw = 1;
+            anim_kick();
         }
     }
     if (ui.page == V_FX && (fx_cur()->type == FX_COMP || fx_cur()->type == FX_MBAND)) {   /* GR meter: 15 / s */
         static uint32_t gr_at;
-        if (now - gr_at >= 66u && ((fx_cur()->mode && fm_fabsf(ogs_fx_meter[0]) + fm_fabsf(ogs_fx_meter[1]) + fm_fabsf(ogs_fx_meter[2])
+        if (now - gr_at >= (anim_fast() ? 32u : 66u) && ((fx_cur()->mode && fm_fabsf(ogs_fx_meter[0]) + fm_fabsf(ogs_fx_meter[1]) + fm_fabsf(ogs_fx_meter[2])
                                     + fm_fabsf(ogs_fx_meter[3]) > 0.05f) || gr_show[0] != 0.0f || gr_show[1] != 0.0f
                                     || gr_show[2] != 0.0f || gr_show[3] != 0.0f)) {
             gr_at = now;
-            ui.redraw = 1;
+            anim_kick();
         }
     }
     {                                        /* wykres na żywo (FILTER WAVE / PHASE): 10 / s, gdy gra, i raz po */
@@ -1379,9 +1383,12 @@ OGS_UI void app_frame(void)
         static uint8_t was_live;
         int live = ui.page >= 0 && ui.page < E->npages && (E == &ENG[ENG_WT] ? wt_graph_live(ui.page) : E == &ENG[ENG_PD] && pd_graph_live(ui.page))
                    && glob.g[G_VPAGES] && eng_sounding();
-        if ((live && now - live_at >= 100u) || (!live && was_live)) {
+        if ((live && now - live_at >= (anim_fast() ? 32u : 100u)) || (!live && was_live)) {   /* (2.0.2) ~31 / s przy zapasie */
             live_at = now;
-            ui.redraw = 1;
+            if (live)
+                anim_kick();
+            else
+                ui.redraw = 1;                   /* raz po: całe */
         }
         was_live = (uint8_t)live;
     }
@@ -1476,7 +1483,7 @@ OGS_UI void app_frame(void)
     }
     scope_on = (ui.page == V_HOME && glob.g[G_VHOME] && !ui.mode_until)   /* (v0.92) też widmo EQ */
             || (ui.page == V_FX && fx_cur()->type == FX_EQ && !fx_xb(fx_cur())[FX_X_EQ + EQX_AN]);
-    if (scope_on && ui.page == V_HOME && !ui.redraw && now - ui.scope_at >= 40u) {   /* oscyloskop: 25 klatek/s, tylko gdy gra;
+    if (scope_on && ui.page == V_HOME && !ui.redraw && now - ui.scope_at >= (anim_fast() ? 16u : 40u)) {   /* oscyloskop: (2.0.2) przy zapasie CPU co klatkę (~62 / s), inaczej co trzecią (~21 / s), tylko gdy gra;
                                                          * (v1.1.0) tylko HOME: przy EQ bufor dla widma, bez rysowania na FX */
         if (eng_sounding())
             ui.scope_tail = 4;
@@ -1493,9 +1500,17 @@ OGS_UI void app_frame(void)
         ui.redraw = 1;
     }
     if (ui.redraw) {
+        anim_body = ui.redraw == 2u;         /* (2.0.2) odświeżenie animacji: bez pasków i szczeliny */
         ui.redraw = 0;
         ui.redraw_roll = 0;
+        if (ui.page != V_HOME && !anim_body) {             /* (2.0.2, użytkownik 2026-11-24: oscyloskop „przechodzi przez szczelinę”, jak serduszka
+                                              * Bambo) wiersze 30-31 między górnym paskiem (0-29) a stroną (od 32) rysuje tylko HOME
+                                              * (oscyloskop): na innych stronach czyste, w kolorze tła stron (płótno 2 wierszy, gfx.c) */
+            cv_begin(240, 2, C_BLACK);
+            cv_blit(0, 30);
+        }
         draw();
+        anim_body = 0;
     } else if (ui.redraw_roll) {
         ui.redraw_roll = 0;
         if (ui.page == V_SEQ && sq_roll()) {

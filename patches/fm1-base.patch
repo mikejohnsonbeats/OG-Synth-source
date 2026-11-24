@@ -48,7 +48,7 @@ index 79fa057..8a37cf3 100644
              rc = RS_E_FETCH;
              goto out;
 diff --git a/device/gfx.c b/device/gfx.c
-index 4d4f45c..e3d60c0 100644
+index 4d4f45c..a4c8841 100644
 --- a/device/gfx.c
 +++ b/device/gfx.c
 @@ -9,9 +9,12 @@ typedef struct {               /* proportional, see tools/gen_font.py */
@@ -67,7 +67,59 @@ index 4d4f45c..e3d60c0 100644
  } felucca_font_t;
  #include "felucca_font.h"
  
-@@ -149,22 +152,63 @@ static uint32_t glyph(const felucca_font_t *f, uint32_t ch)
+@@ -23,6 +26,9 @@ static uint16_t cv_px[CV_MAX] __attribute__((section(".pool")));
+ static uint32_t cv_w, cv_h;
+ static int32_t cv_oy;            /* y offset for graph drawing */
+ static int32_t cv_y0, cv_y1;     /* X0X: the rows drawing may touch (cv_band) */
++static uint32_t cv_bgc[3];       /* (OGS 2.0.2) colours black fills get instead (theme background; 0 = black), even pixels | odd
++                                  * pixels << 16 (a checkerboard when one of them is black): [0] pages, [1] canvases of 3-54 rows
++                                  * (the top and bottom bars), [2] this canvas's (cv_begin, for cv_rect) */
+ 
+ #define RGB(r, g, b) ((uint16_t)((((r) >> 3) << 11) | (((g) >> 2) << 5) | ((b) >> 3)))
+ #define C_BLACK 0x0000u
+@@ -62,7 +68,7 @@ static inline uint16_t swap16(uint32_t c) { return (uint16_t)(((c >> 8) & 0xFFu)
+ 
+ static void cv_begin(uint32_t w, uint32_t h, uint16_t bg)
+ {
+-    uint32_t i, n;
++    uint32_t i = 0, x, y, p;
+     if (w * h > CV_MAX)
+         h = CV_MAX / w;
+     lcd_sync();                     /* the last blit may still read cv_px */
+@@ -70,9 +76,11 @@ static void cv_begin(uint32_t w, uint32_t h, uint16_t bg)
+     cv_h = h;
+     cv_oy = cv_y0 = 0;
+     cv_y1 = (int32_t)h;
+-    n = w * h;
+-    for (i = 0; i < n; i++)
+-        cv_px[i] = swap16(bg);
++    p = bg ? bg | (uint32_t)bg << 16 : cv_bgc[h - 3u < 52u];   /* bars: 3-54 rows; the 2-row gap under the top bar: pages' */
++    cv_bgc[2] = p;
++    for (y = 0; y < h; y++)         /* (x ^ y) & 1: the checkerboard's phase (canvases start on even rows, x 0) */
++        for (x = 0; x < w; x++)
++            cv_px[i++] = swap16((x ^ y) & 1u ? p >> 16 : p);
+ }
+ 
+ /* X0X: draw the next things as if the canvas were rows y0 .. y0+h-1 alone (one band of a
+@@ -102,7 +110,7 @@ static inline void cv_pset(int32_t x, int32_t y, uint16_t c)
+ static void cv_rect(int32_t x, int32_t y, int32_t w, int32_t h, uint16_t c)
+ {
+     int32_t x1 = x + w, y1 = y + h + cv_oy, i;
+-    uint16_t sc = swap16(c);
++    const uint32_t p = c ? c | (uint32_t)c << 16 : cv_bgc[2];   /* black = this canvas's background (OGS 2.0.2) */
+     y += cv_oy;                             /* clipped once, then filled row by row */
+     if (x < 0)
+         x = 0;
+@@ -114,7 +122,7 @@ static void cv_rect(int32_t x, int32_t y, int32_t w, int32_t h, uint16_t c)
+         y1 = cv_y1;
+     for (; y < y1; y++)
+         for (i = x; i < x1; i++)
+-            cv_px[(uint32_t)y * cv_w + (uint32_t)i] = sc;
++            cv_px[(uint32_t)y * cv_w + (uint32_t)i] = swap16(((uint32_t)i ^ (uint32_t)y) & 1u ? p >> 16 : p);
+ }
+ 
+ static void cv_line(int32_t x0, int32_t y0, int32_t x1, int32_t y1, uint16_t c)
+@@ -149,22 +157,63 @@ static uint32_t glyph(const felucca_font_t *f, uint32_t ch)
      return ch - f->first;
  }
  
@@ -171,10 +223,10 @@ index b82c594..24c92f6 100644
      lcd_window(x, y, x + w - 1u, y + h - 1u);
      lcd_data(px, w * h * 2u);
 diff --git a/device/main_fm1.c b/device/main_fm1.c
-index dd7cde2..10c47b3 100644
+index dd7cde2..aacbc2a 100644
 --- a/device/main_fm1.c
 +++ b/device/main_fm1.c
-@@ -722,9 +722,11 @@ static void fm1_fault(const fm1_crash_t *c)
+@@ -722,10 +722,13 @@ static void fm1_fault(const fm1_crash_t *c)
      fm1_reboot();
  }
  
@@ -184,9 +236,11 @@ index dd7cde2..10c47b3 100644
      fm1_audio_stop();
 +    lcd_dark = 0;                                   /* OGS 1.6.4: a system screen shows also over SCREEN OFF's black */
      lcd_fill(0, 0, 240, 240, C_BLACK);
++    cv_bgc[1] = 0;                                  /* (OGS 2.0.2) the line on black, also with BACKGROUND ON / ALL */
      sys_box(0, 110, 240, SYS_S, why, C_WHITE, 1);
      fm1_delay_ms(20);
-@@ -844,7 +846,13 @@ static void fm1_main(void)
+     usb_detach();
+@@ -844,7 +847,13 @@ static void fm1_main(void)
                                                       * VDDIO 3.2 V, WiFi's regulator automatic (fm1_sys.h) */
          fm1_clock_read(clock_boot);
          clock_fix = (int8_t)fm1_clock_stock();      /* the stock 360 MHz, whichever bootloader started us (fm1_clock.h) */
@@ -201,7 +255,7 @@ index dd7cde2..10c47b3 100644
  #if FM1B_WIFI
          if (flash_ok)
              FL_FAR(fl_uid_ram)(flash_uid);
-@@ -934,11 +942,18 @@ static void fm1_main(void)
+@@ -934,11 +943,18 @@ static void fm1_main(void)
              int32_t a = fm1_an.con || fm1_an.pend ? (int32_t)fm1_an.master : fm1_adc_read(FM1_ADC_MASTER);
              if (a >= 0) {
                  knob += (a * 16 - knob) / 8;
@@ -223,7 +277,7 @@ index dd7cde2..10c47b3 100644
              batt_t = fm1_ms;
              if (b > 0)
                  batt_raw = batt_raw ? batt_raw + (b - batt_raw) / 16 : b;
-@@ -983,6 +998,8 @@ static void fm1_main(void)
+@@ -983,6 +999,8 @@ static void fm1_main(void)
          }
          if (usb.uboot_req)
              enter_uboot("UBOOT (USB)");
@@ -635,7 +689,7 @@ index 2140404..7f369fa 100644
   * ends with OBJ_NOBJ, and APP_STORE_MAP, each object's flash offset: two 4 KiB sectors (A/B) from there, inside the
   * data area (0x97000..0xDFFFF) or Felucca's settings sector pair at 0xFC000. An object's number is written in its
 diff --git a/tools/build.py b/tools/build.py
-index 9a8e9f2..4f1daff 100755
+index 9a8e9f2..34e81d9 100755
 --- a/tools/build.py
 +++ b/tools/build.py
 @@ -305,6 +305,8 @@ def build_loader():
@@ -647,6 +701,26 @@ index 9a8e9f2..4f1daff 100755
      (LDR / "ota.bin").write_bytes(ota)
      bss = [int(ln.split()[0], 16) for ln in syms.splitlines() if ln.rstrip().endswith("_bss_end")]
      print(f"loader: image {len(image)} B at {LOADER_LOAD:#x}" + (f", bss end {bss[0]:#x}" if bss else ""))
+@@ -597,9 +599,17 @@ def build_app():
+         for f, o in o2_units:
+             ir_pass(o.with_suffix(".ll"), o.with_suffix(".pass.ll"), str(f.relative_to(APP)))
+         opt = [f for f in flags if not f.startswith(("-I", "-D", "-W"))]
++        o2c = [f if f != "-Os" else "-O2" for f in opt]
++        # (OGS 2.0.2) a unit the pass marked (OUT.ll.share): its optimised IR, the pass again ("post:UNIT"), then only the
++        # code generator — the same code as in one step, but the pass sees what the optimiser left
++        post = [(f, o) for f, o in o2_units if Path(str(o.with_suffix(".pass.ll")) + ".share").exists()]
+         tc_all(("cc", *opt, "-c", OUT / "unity.pass.ll", "-o", OUT / "unity.o"),
+-               *[("cc", *[f if f != "-Os" else "-O2" for f in opt], "-c", o.with_suffix(".pass.ll"), "-o", o)
+-                 for _, o in o2_units])
++               *[("cc", *o2c, *(["-S", "-emit-llvm"] if (f, o) in post else []), "-c", o.with_suffix(".pass.ll"), "-o",
++                  o.with_suffix(".opt.ll") if (f, o) in post else o) for f, o in o2_units])
++        for f, o in post:
++            ir_pass(o.with_suffix(".opt.ll"), o.with_suffix(".post.ll"), "post:" + str(f.relative_to(APP)))
++        if post:
++            tc_all(*[("cc", *o2c, "-Xclang", "-disable-llvm-optzns", "-c", o.with_suffix(".post.ll"), "-o", o) for _, o in post])
+     elf = OUT / (NAME + ".elf")
+     # unreferenced functions (each in its own section: -ffunction-sections) are dropped: the DSP keeps
+     # mono reference paths for the host tests that the firmware no longer calls. The BT libraries are LTO
 diff --git a/tools/fm1_install.py b/tools/fm1_install.py
 index eb69903..f21dc2a 100755
 --- a/tools/fm1_install.py
