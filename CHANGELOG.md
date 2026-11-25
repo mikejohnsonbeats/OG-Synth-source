@@ -1,5 +1,10 @@
 # Changelog
 
+## v2.0.2 (kompilacja 2) — 2026-11-25
+Ta sama wersja 2.0.2 (decyzja użytkownika): w ALL PRESETS przytrzymany SEL na brzmieniu z banku DX7 / CZ usuwa już tylko to jedno
+brzmienie (okno DELETE?), zamiast całego banku (DELETE BANK?); po ostatnim brzmieniu banku jego miejsce jest wolne. app.c (voice_del,
+listed / v_gone), MANUAL.md. Tag v2.0.2 = ta kompilacja; pierwsza kompilacja 2.0.2: tag v2.0.2-first.
+
 ## v2.0.2 — 2026-11-24
 Źródła MPL OG Synth 2.0.2 „Full backup”: pełna kopia zapasowa FM1 (strona BACKUP: sekcja OGSD z bankami DX7 / CZ, wzorami SEQ z AUTO,
 tablicami WAVE USER i samplami — nowy app/web/backup_extras.js, SysEx 38-3E w app.c, backup.html), usuwanie banków DX7 / CZ na FM1,

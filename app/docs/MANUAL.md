@@ -170,7 +170,8 @@ arpeggiator's settings (chapter 7).
   current effects and hear the next sound through them: the preset itself doesn't change, SAVE lights.
 - **ALL PRESETS** (HOME held + PRESETS): all engines, sections USER / FACTORY / IMPORTED. SELECT = section, ALGO = engine,
   SEL = OK (when released); SEL held without turning on a USER preset = DELETE? (SEL = yes, HOME = no); on a sound of a DX7 or CZ
-  bank under IMPORTED = DELETE BANK? (the whole bank off the FM-1; factory presets and the FM-1's original sounds stay).
+  bank under IMPORTED the same DELETE? takes just that one sound out of its bank (when its last sound goes, the bank's slot is free;
+  factory presets and the FM-1's original sounds stay; a whole DX7 bank: OG SYNTH MANAGER).
 - **OG SYNTH MANAGER** (the Studio page of ogsynth.cc, Chrome, Edge or Opera, over USB): DX7 sounds and banks (.syx) for FM6,
   CZ sounds (.syx) for PHASE, deleting DX7 banks, WAVE tables (.wav, up to 63 frames) into USER 1-3 and the table editor, **samples
   (.wav) for SAMPLE** into the same USER 1-3 (a longer sample takes the next slots too: from USER 1 about 1.1 s at 44.1 kHz, down to

@@ -536,8 +536,8 @@ OGS_UI static void input(void)
                 if (ui.allp_del) {
                     if (ui.page == V_SCN)
                         scn_del();
-                    else if (ui.allp_del == 2)   /* (2.0.2) DELETE BANK? */
-                        bank_del();
+                    else if (ui.allp_del == 2)   /* (2.0.2) brzmienie z banku DX7 / CZ */
+                        voice_del();
                     else
                         user_del();
                 } else {
@@ -1183,7 +1183,7 @@ OGS_UI void app_frame(void)
     }
     if (ui.allp_sel == 1 && now - ui.sel_at >= SEL_EQ_MS     /* (1.8.0, pkt 35) po SEL + gałce (2) nigdy */
         && (ui.page == V_ALLP ? (CUR >= ID_USER && CUR < ID_SYX) || bank_of(CUR) >= 0 : ui.page == V_SCN && glob.scn[ui.scn_cur].ok)) {
-                                             /* (v1.1.2) też scena; (2.0.2) też brzmienie z banku DX7 / CZ: DELETE BANK? */
+                                             /* (v1.1.2) też scena; (2.0.2) też brzmienie z banku DX7 / CZ */
         ui.allp_sel = 0;                     /* (v1.0.2) ALL PRESETS: SEL trzymany 0,8 s na USER = okno DELETE? */
         ui.allp_del = (uint8_t)(ui.page == V_ALLP && bank_of(CUR) >= 0 ? 2 : 1);
         ui.redraw = 1;
