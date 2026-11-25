@@ -17,6 +17,7 @@ usb_audio_out = false
 cpu2 = true                    # drugi rdzeń: głosy nieparzyste DX7 (ogs_dx7.c dx_render_part)
 backup = true                  # kopia zapasowa przez USB (app.h APP_BACKUP_*; OG Synth Manager > BACKUP)
 cpu2_fallback = true           # gdy drugi rdzeń zawiedzie: dalej na jednym (bez restartu), do wyłączenia zasilania
+ram_text_lz = true             # (2.1.0, miejsce) kod w RAM (.ram_text) spakowany w obrazie, rozpakowany przy starcie (fm1-base device/rt_lz.h)
 # the site (tools/make_site.py, tools/publish_site.sh)
 tagline = "OG Synth by Mike Johnson Beats — sound design instrument for the FM-1"
 repo = "https://github.com/mikejohnsonbeats/OG-Synth"

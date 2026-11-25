@@ -26,6 +26,13 @@ void app_render(int32_t *lr, uint32_t n, uint32_t master_q12)
     int sc = scope_on && !mt_void, eq = glob.g[G_SPKEQ], fading, want;
     float pk = 0.0f;
     const uint32_t bt0 = plat_ticks24();     /* (2.0.0) czas bloku: ogs_blk_t (koniec funkcji) */
+#if OGS_BLKPROF
+    bp_begin(bt0);
+#endif
+    ogs_bt0 = bt0;                           /* (2.1.0) termin nowych nut WAVE (ogs_wt.c wt_dl) */
+    ogs_elast = ogs_elast_now;               /* (2.1.0) WAVE / PHASE mogły ściąć unison w poprzednim bloku (ogs_engine.h) */
+    ogs_elast_now = 0;
+    ogs_multi = mt_on;
     if (mt_seen != mt_ver || mt_xs < 0.0f || mx_hold) {   /* (v0.64) MULTI: zmiana trybu / ścieżek po przygaszeniu wyjścia;
                                                            * (v1.4.0) mx_hold: cicho, aż UI zapisze bliźniaki */
         if (((!mt_on && eng_play >= NENG) || mt_xg <= 0.0f) && !mx_hold) {   /* (start: od razu) */
@@ -73,6 +80,9 @@ void app_render(int32_t *lr, uint32_t n, uint32_t master_q12)
         events_in();
     sq_apply(e);
     want = dk_kill || dk_quiet_req || dk_r != dk_w;
+#if OGS_BLKPROF
+    bp_mark(0);
+#endif
     while (done < n) {
         uint32_t c = n - done > APP_BLOCK ? APP_BLOCK : n - done;
         if (mt_on) {                         /* (v0.76) MULTI: wysyłki poprzedniego bloku na drugim rdzeniu (taśma): start
@@ -81,7 +91,15 @@ void app_render(int32_t *lr, uint32_t n, uint32_t master_q12)
             if (mt_mini() < 0)
                 ogs_fx_sends_kick();
         }
-        sq_render(e, bl, br, c);             /* silnik; SEQ i ARP dzielą blok w chwilach nut */
+        {
+            const uint32_t tf = plat_ticks24();
+            sq_render(e, bl, br, c);         /* silnik; SEQ i ARP dzielą blok w chwilach nut */
+            if (mt_on && mt_ft >= 0)
+                mt_tt[mt_ft] = plat_ticks24() - tf;   /* (2.1.0) czas wybranej ścieżki (mt_ncost) */
+        }
+#if OGS_BLKPROF
+        bp_mark(1);
+#endif
         if (fading || want || dk_g < 1.0f)
             for (i = 0; i < c; i++) {
                 float g;
@@ -100,6 +118,9 @@ void app_render(int32_t *lr, uint32_t n, uint32_t master_q12)
                 for (i = 0; i < c; i++)
                     scope[w++ & (SC_LEN - 1u)] = (int16_t)(fm_clampf((bl[i] + br[i]) * 0.5f, -1.0f, 1.0f) * 32767.0f);
             mt_mix(bl, br, c);
+#if OGS_BLKPROF
+            bp_mark(2);
+#endif
             ogs_fx_late = glob.mst.pp & (MS_PP_REV | MS_PP_DL);   /* (2.0) PRZED: mokre REVERB / DELAY dochodzi za MASTER */
             mt_sends(bl, br, c);             /* (v0.76) wspólne REVERB / DELAY (efekty presetów ścieżek) */
             mt_master(bl, br, c);            /* (2.0) MASTER: suma -> wysyłki PO -> [sloty bez perkusji -> + perkusja] -> PERFORM PO ->
@@ -114,6 +135,8 @@ void app_render(int32_t *lr, uint32_t n, uint32_t master_q12)
             if (mt_ft >= 0)
                 ogs_fx_track_meter(fx_mview ? MT_M : (uint32_t)mt_ft);   /* (v0.83) GR meter strony FX: wybrana ścieżka; (2.0) MASTER */
         } else {
+            ogs_fx_cx = fx_cxplay();             /* (2.1.0) kopie: ich gałki ponad 8 i SYNC */
+            ogs_fx_csync = fx_csplay();
             ogs_fx_render(fx_play(), fx_xplay(), bl, br, c);   /* efekty globalne za silnikiem; (v0.74) bez PERFORM */
         }
         if (OUT_NEW)                         /* (1.7.1, użytkownik 2026-11-10: „chcę mieć jak najczystsze brzmienie naszych silników”)
@@ -181,6 +204,9 @@ void app_render(int32_t *lr, uint32_t n, uint32_t master_q12)
         ogs_blk_t = web_bpct * OGS_TPCT;     /* testy: udawany czas bloku (ogs_bpct), gdy zegar stoi */
 #else
     ogs_blk_t = plat_ticks24() - bt0;        /* (2.0.0) czas tego bloku dla silników (FM1: n = APP_BLOCK zawsze) */
+#endif
+#if OGS_BLKPROF
+    bp_end(ogs_blk_t);
 #endif
 }
 #include "ogs_app_03.c"
@@ -350,7 +376,7 @@ OGS_UI static void input(void)
     uint32_t keys, btn = plat_buttons(), k, avail = 0, shown, pr = 0, gk;
     int sel_shown;
     uint32_t chan = mt_ui() ? mt_ch(glob.g[G_MTFOC])   /* (v0.66.1) MULTI: MIDI OUT na kanale wybranej ścieżki (v1.0.1: z GLO) */
-                  : glob.g[G_MIDICH] ? (uint32_t)glob.g[G_MIDICH] - 1u : 0u;
+                  : glob.g[G_MIDICH] ? ((uint32_t)glob.g[G_MIDICH] - 1u) & 15u : 0u;   /* (2.1.0) MPE: kanał 1 */
     int32_t e;
     ko_in(btn, chan);                        /* (1.5.1) CONTROLS OUT: przyciski, MASTER */
     for (k = 0; k < NB; k++)                 /* (v1.3.0) MIDI LEARN: przyciski z kontrolera; kliknięcie = jedna klatka (kolejne: co drugą) */
@@ -1171,18 +1197,30 @@ OGS_UI void app_frame(void)
             ui.redraw = 1;
         }
     }
-    if (pc_req >= 0) {                       /* Program Change: n-ty preset bieżącego silnika (0 = INIT) */
-        int32_t id = eng_first(set.eng), n = pc_req;
-        pc_req = -1;
-        while (n-- > 0)
-            id = preset_step(id, 1, set.eng);
-        if (id != preset_now()) {
-            preset_go(id);
-            ui.redraw = 1;
+    {                                        /* Program Change: n-ty preset bieżącego silnika (0 = INIT); (2.1.0, P92) z Bankiem: silnik,
+                                              * MULTI: ścieżki z kanału (pc_go) */
+        int32_t q, t;
+        if (pc_req >= 0 && (q = pc_take(&pc_req)) >= 0 && !mt_ui())
+            pc_go(-1, q);
+        if (pc_pend >= 0) {                  /* MULTI: ścieżka przełączona / nowy silnik gra — jej preset (z przygaszeniem jak z gałki) */
+            if (!mt_ui() || glob.g[G_MTFOC] != pc_pt) {   /* (w międzyczasie inna ścieżka z panelu albo SOLO: preset przepada) */
+                pc_pend = -1;
+            } else if (*(volatile uint16_t *)&mt_seen == mt_ver && mt_ft == pc_pt && eng_ready()) {
+                preset_go(pc_pend);
+                pc_pend = -1;
+                ui.redraw = 1;
+            }
+        } else if (mt_ui() && pend_preset < 0) {   /* następna ścieżka z kolejki (po jednej; czekający preset najpierw) */
+            for (t = 0; t < MT_N; t++)
+                if (mt_pcq[t] >= 0) {
+                    if ((q = pc_take(&mt_pcq[t])) >= 0)
+                        pc_go(t, q);
+                    break;
+                }
         }
     }
     if (ui.allp_sel == 1 && now - ui.sel_at >= SEL_EQ_MS     /* (1.8.0, pkt 35) po SEL + gałce (2) nigdy */
-        && (ui.page == V_ALLP ? (CUR >= ID_USER && CUR < ID_SYX) || bank_of(CUR) >= 0 : ui.page == V_SCN && glob.scn[ui.scn_cur].ok)) {
+        && (ui.page == V_ALLP ? IS_USER(CUR) || bank_of(CUR) >= 0 : ui.page == V_SCN && glob.scn[ui.scn_cur].ok)) {
                                              /* (v1.1.2) też scena; (2.0.2) też brzmienie z banku DX7 / CZ */
         ui.allp_sel = 0;                     /* (v1.0.2) ALL PRESETS: SEL trzymany 0,8 s na USER = okno DELETE? */
         ui.allp_del = (uint8_t)(ui.page == V_ALLP && bank_of(CUR) >= 0 ? 2 : 1);
@@ -1362,7 +1400,7 @@ OGS_UI void app_frame(void)
         }
     }
     (void)out_quiet();                       /* co klatkę: kiedy ostatnio coś grało */
-    if (ui.page == V_FX && fx_cur()->type == FX_EQ && fx_on(fx_cur()) && !fx_xb(fx_cur())[FX_X_EQ + EQX_AN]) {   /* (v0.92) widmo EQ: 10 / s */
+    if (ui.page == V_FX && fx_cur()->type == FX_EQ && fx_on(fx_cur()) && !fx_xe(fx_cur())[EQX_AN]) {   /* (v0.92) widmo EQ: 10 / s */
         static uint32_t eq_at;
         if (now - eq_at >= (anim_fast() ? 32u : 100u)) {   /* (2.0.2) przy zapasie CPU ~31 / s (było 10 / s) */
             eq_at = now;
@@ -1482,7 +1520,7 @@ OGS_UI void app_frame(void)
         }
     }
     scope_on = (ui.page == V_HOME && glob.g[G_VHOME] && !ui.mode_until)   /* (v0.92) też widmo EQ */
-            || (ui.page == V_FX && fx_cur()->type == FX_EQ && !fx_xb(fx_cur())[FX_X_EQ + EQX_AN]);
+            || (ui.page == V_FX && fx_cur()->type == FX_EQ && !fx_xe(fx_cur())[EQX_AN]);
     if (scope_on && ui.page == V_HOME && !ui.redraw && now - ui.scope_at >= (anim_fast() ? 16u : 40u)) {   /* oscyloskop: (2.0.2) przy zapasie CPU co klatkę (~62 / s), inaczej co trzecią (~21 / s), tylko gdy gra;
                                                          * (v1.1.0) tylko HOME: przy EQ bufor dla widma, bez rysowania na FX */
         if (eng_sounding())

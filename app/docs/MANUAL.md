@@ -2,9 +2,9 @@
 
 OG Synth by Mike Johnson Beats is a custom firmware for the M-VAVE FM-1, built for sound design: 18 sound engines, an
 effects chain, a sequencer with arpeggiator and MULTI mode (4 tracks at once, with a MASTER chain over the whole mix). Every
-engine has full parameter pages, its own INIT sound, factory presets (all but SAMPLE), 128 USER slots and on-screen graphs.
+engine has full parameter pages, its own INIT sound, factory presets (all but SAMPLE), 256 USER slots and on-screen graphs.
 
-> This is the short version, for OG Synth 2.0. The full manual: https://ogsynth.cc/manual
+> This is the short version, for OG Synth 2.1. The full manual: https://ogsynth.cc/manual
 
 ---
 
@@ -121,6 +121,10 @@ VOICE MORE K3).
   the same pages, kits and saves).
 - **MORPH**: each sound moves between two settings, A / B, with MORPH.
 - **DUAL**: 8 parts with 2 layers each, through a resonator.
+- **UPPER** (MORPH and DUAL, K4 on the KIT page): the white keys F3-F4 play the 8 sounds, the next eight white keys (G4-G5) play the
+  same 8 sounds with a twist: **B** (MORPH only: the sound moved toward its B setting), **ACCENT** (louder; in MORPH also brighter),
+  **PITCH** (higher, up to an octave) or **FLAM** (a quiet first hit, the main one 5-30 ms later). **AMOUNT** (KIT MORE, K1) sets how
+  much: B / ACCENT 0-100, PITCH in semitones, FLAM in milliseconds.
 - **CHOKE, PAN and LEVEL** of a sound sit on K2, K3, K4 in every drum engine: on MIX and in the MORE of the sound's page.
 - **POGO** (per sound): from the hit the pitch slides down (left) or up (right) at a steady speed, up to 4 octaves; 0 = off. In the
   MORE of the sound's page (EDIT there): K1 on SOUND in 88, 99 and LN, on PART in DUAL, K4 on TONE in MORPH.
@@ -160,7 +164,13 @@ arpeggiator's settings (chapter 7).
 ## 5. Presets and saving
 
 - Order: INIT, USER presets, factory, FM-1 sounds (in FM6, DX7 banks 1-4), imported DX7 / CZ banks. SAMPLE has only INIT and
-  your own presets.
+  your own presets. On HOME a sound from the DX7 or CZ banks or the FM-1 sounds shows its place among all the loaded sounds of
+  that section and how many there are (2.1.0; deleted sounds don't count).
+- **USER presets: 256 slots** (from 2.1.0; 128 before), shared by all engines. The SAVE window shows how many are used and how
+  much preset memory is free (USER 40 / 256 USED   FREE 71%; also GLO > SYSTEM > INFO); if the memory fills up first,
+  SAVE says MEMORY FULL and nothing is overwritten. Presets from older versions move to the new layout by themselves at the first
+  start (same numbers, names and sound); an older OG Synth (2.0.x) after that no longer sees USER presets, so keep the backup you
+  make before updating if you may go back.
 - **SAVE**: on INIT and on a bank sound always a new USER preset; otherwise an OVERWRITE / NEW window, then the name
   (12 characters: **SELECT = cursor**, **K1 = letter**, OCT- / OCT+ = cursor too, SEL saves, HOME cancels; turning the first letter
   of a suggested USER nn clears the rest of it, other letters keep the name). On FM6 the window also has **SEND AS DX7** (the sound
@@ -178,13 +188,23 @@ arpeggiator's settings (chapter 7).
   11 kHz for about 4.4 s; made mono, trimmed and normalised, root note and loop from the file or found for you), **classic .fxp synth
   presets translated into WAVE** (one or a whole folder, with a list of what was approximated), the **preset editor** (every
   parameter of every engine: play it in the browser or live on the FM-1, save it as a USER preset or as a file), the FM-1's
-  original 128 sounds back into DX7 banks 1-4, and the preset pack (128 sounds).
+  original 128 sounds back into DX7 banks 1-4, and the preset pack (128 sounds). From 2.1.0 the pack and the editor keep effect
+  copies with their own settings (a pack with copies needs OG Synth 2.1.0; one without them loads on any OG Synth from 1.8.0), the
+  editor's .ogsp file holds the whole sound with its effects chain (older .ogsp files still open), and a backup tab gives the same
+  full backup as the *Backup* page.
 
 ## 6. Effects and PERFORM
 
-- **FX**: 8-slot chain (empty by default), each effect at most once: SELECT = slot, ALGO = quick choice, SEL short = ON / OFF (on
-  an empty slot: the list), SEL held + SELECT = move it, SEL held longer = effects list (picking one already in the chain swaps
-  the two), FX on FX = MORE. 28 effects in seven groups: drive, dynamics, filter, mod, pitch, time and space (DISTORTION,
+- **FX**: 8-slot chain (empty by default): SELECT = slot, ALGO = quick choice, SEL short = ON / OFF (on an empty slot: the
+  list), SEL held + SELECT = move it, SEL held longer = effects list, FX on FX = MORE.
+- **Several of the same effect (2.1.0)**: the 14 light effects marked **+** in the list (DISTORTION, SATURATION, BITCRUSHER, EQ,
+  SIDECHAIN, TRANSIENT, FILTER, AUTO WAH, VOWEL, PHASER, TREMOLO, RING MOD, OCTAVER, SUB) can sit in the chain up to 8 times, e.g.
+  a DISTORTION and a FUZZ after it, or an EQ before and after the drive. Each copy is a separate effect with all its own settings
+  (knobs, MORE pages, SYNC). The heavier effects (DELAY, REVERB, CHORUS, SHIMMER...) stay once per chain. On the right of the list:
+  **HERE** = in the slot you edit, **SLOT 2** / **SLOT 1,4** = where it already is; under the cursor **ADD** = a new copy here,
+  **MOVE** = it comes here (empty slot), **SWAP** = it trades places with the effect in this slot. ALGO can pick a light effect
+  that is already in the chain too (a new copy). Moving or swapping effects takes each one's settings with it. MULTI tracks play
+  the copies of their presets too, and MASTER can hold copies as well (chapter 8); each copy counts in the CPU budget. 28 effects in seven groups: drive, dynamics, filter, mod, pitch, time and space (DISTORTION,
   SATURATION, CHORUS, REVERB, DELAY, COMPRESSOR, EQ, PHASER, FLANGER, MULTIBAND / OTT, AUTO WAH, SUB, VOWEL, COMB, STUTTER, GRAIN,
   SHIMMER, OCTAVER, FREQ SHIFT, LO-FI and more). DELAY and REVERB at MIX 100 play only the effect.
 - **Effect settings come back**: an edited effect you swap for another (ALGO, the list, EMPTY) returns with its settings when
@@ -325,7 +345,8 @@ arpeggiator's settings (chapter 7).
   where its send starts (in its chain it says SOLO ONLY). When track effects need memory, a playing DELAY fades out and comes back
   with a shorter line.
 - **MASTER**: up to four effects over the whole mix (M1-M4, any effect but REVERB and DELAY, any order), before the output limiter;
-  they get processor and memory before the tracks' effects. On the MASTER position K1-K4 set each one's **WET**; SEL opens the slots
+  they get processor and memory before the tracks' effects. From 2.1.0 the light effects marked **+** can sit in MASTER more than
+  once (ADD in the list, as in a chain), each copy with its own knobs and MORE pages; WET, SYNC and NO DRUMS belong to the slot. On the MASTER position K1-K4 set each one's **WET**; SEL opens the slots
   (they work like a track's chain, FX = the effect's MORE). After the effect's pages FX shows **MASTER ROUTING**: K1 REVERB, K2 DELAY,
   K3 PERFORM = AFTER (MASTER works on their sound too) or BEFORE MASTER; K4 LIMIT = the output limiter's threshold (= GLO > AUDIO >
   LIMIT). FX once more: **MASTER DRUMS**: K1-K4 set each slot to ALL or **NO DRUMS** (that slot works on the mix without the drum
@@ -352,8 +373,25 @@ shows where the parameter comes from (page, grey), its name (orange) and its cur
 one slot only; on a drum engine they can come from different drum sounds. Kept after power-off and firmware updates; FACTORY
 RESET clears them.
 
-**MIDI**: channel (ALL or 1-16), MIDI OUT, LOCAL, PROG CHANGE, CLOCK IN (AUTO / INTERNAL), CLOCK OUT, GLIDE OUT, T1-T4 CHANNEL,
-OTHER TRACKS, KNOB PICKUP (JUMP / CATCH), **DRUM SELECT** and CONTROLS OUT.
+**MIDI**: channel (ALL, 1-16 or **MPE**), MIDI OUT, LOCAL, PROG CHANGE, CLOCK IN (AUTO / INTERNAL), CLOCK OUT, GLIDE OUT, T1-T4
+CHANNEL, OTHER TRACKS, KNOB PICKUP (JUMP / CATCH), **DRUM SELECT**, **UNASSIGNED** and CONTROLS OUT.
+- **MPE** (2.1.0, MIDI CH set to MPE): for MPE controllers (ROLI Seaboard / Lumi, LinnStrument, Osmose, Push 3) and for DAWs that send
+  MPE (Ableton Live 11+, Bitwig). Every note comes on its own MIDI channel, so each note has its own pitch bend: bend one finger and only
+  that note moves. MPE lower zone: channel 1 works as before for all notes (pitch bend x the preset's BEND RANGE, mod wheel, sustain,
+  pressure), channels 2-16 carry the notes, each with its own pitch bend of +-48 semitones (the MPE standard; set your controller to 48).
+  Works in every synth engine (a chord from CHORD bends as one note; with GLIDE on, the bend glides too; the arpeggiator plays its own
+  notes, without per-note bend). In SOLO; in MULTI it works like ALL. Per-note pressure and slide (CC 74) are not in 2.1.0: pressure
+  works for all notes as before.
+- **PROG CHANGE** (OFF by default): ON = Program Change n loads the n-th preset of the engine (0 = INIT). From 2.1.0 a **Bank Select**
+  (CC 0) in front of it picks the engine too, in the order of the ENGINE window: 0 MINI, 1 SVF, 2 VCO, 3 DCO, 4 ALPHA, 5 LPG, 6 FM6,
+  7 PHASE, 8 WAVE, 9 8BIT, 10 PHYS, 11 FORMANT, 12 SAMPLE, 13 88, 14 99, 15 LN, 16 MORPH, 17 DUAL (a DAW that counts from 1, like
+  Ableton, shows MINI as bank 1). So one bank + program pair from a scene or a marker switches the whole sound. Each MIDI channel
+  keeps its last bank; without a bank it works as before (presets of the engine you're on). In MULTI a Program Change on a track's
+  channel goes to that track, also one that isn't selected (it becomes the selected one); a bank with another engine changes the
+  track's engine like SEL + ALGO, and if that engine can't play there, the screen says why and the track stays as it is.
+- **UNASSIGNED** (2.1.0, MULTI): MIDI from a channel that no track listens to (T1-T4 CHANNEL). **SELECTED TRACK** (default, as before):
+  its notes play the selected track. **IGNORE**: nothing from such a channel reaches OG Synth, handy on a MIDI bus shared with other
+  instruments.
 - **DRUM SELECT** (2.0): which notes pick the sound shown on the drum pages. **KEYS** (default): the FM-1's keys and SEL + key;
   MIDI notes only play, so the pages don't jump while a DAW plays the drums. **KEYS+MIDI**: a MIDI note picks its sound too, as
   before 2.0.
@@ -368,8 +406,10 @@ OTHER TRACKS, KNOB PICKUP (JUMP / CATCH), **DRUM SELECT** and CONTROLS OUT.
 - **The installer doesn't see the FM-1**: unplug and replug the FM-1, reload the page; the page retries by itself when the
   mode changes.
 - **The FM-1 stayed in update mode** ("Felucca Update"): running *Install* again finishes the write.
-- **The sound breaks up**: too many notes with a heavy effects chain. The FM-1 fades out the oldest voice by itself, and in MULTI
-  the track effects give way one by one until it's calm; use fewer effects or a lighter engine.
+- **The sound breaks up**: too many notes with a heavy effects chain. When the processor is full (2.1.0), WAVE and PHASE first thin
+  out their UNISON (it comes back when there's room), then the oldest voice fades out within a few milliseconds; in MULTI, notes
+  held on the other tracks stay as long as WAVE or PHASE can still give way, and track effects give way one by one until it's calm.
+  If it still breaks up, use fewer effects or a lighter engine.
 - **An effect is red**: it doesn't play, the reason is in the corner (NO MEMORY, NO CPU, SOLO ONLY). **Pale orange**: it plays
   in 16 bits because the effect memory is full.
 

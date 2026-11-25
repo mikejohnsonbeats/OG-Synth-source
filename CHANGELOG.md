@@ -1,5 +1,15 @@
 # Changelog
 
+## v2.1.0 — 2026-11-25
+Źródła MPL OG Synth 2.1.0 „Copies”: kopie lekkich efektów w łańcuchu, na ścieżkach MULTI i w MASTER (zapis w presetach USER,
+brzmieniach startowych i scenach), 256 presetów USER (przejście z 2.0.x przy pierwszym starcie),
+przeciążenie bez przerw (unison WAVE / PHASE, zrzut najstarszej nuty, przewidywanie w MULTI), MULTI: zmiana ścieżki nie urywa nut,
+CHORD na niewybranej ścieżce, Bank Select = silnik + Program Change = preset, GLO > MIDI > UNASSIGNED, MIDI CH = MPE (bend na
+nutę), licznik banków na HOME — UI i MIDI w app.c; app.h (numer wersji), ogs_engine.h, ogs_lists.h, fm1.toml (ram_text_lz),
+MANUAL.md, Manager (manager.html: zakładka kopii zapasowej, editor.js: kopie i .ogsp 2, paczka_sysex.js: paczka z kopiami),
+patches/fm1-base.patch (kod RAM spakowany w obrazie: deflate, CRC-32 każdego KB sprawdzane przy starcie, RAM CODE BAD). Te same 43 pliki
+(app/web/paczka.js dalej poza źródłami). README: numer 2.1.0 / FM-1_1313020100, pełna kopia zapasowa, przejście presetów.
+
 ## v2.0.2 (kompilacja 2) — 2026-11-25
 Ta sama wersja 2.0.2 (decyzja użytkownika): w ALL PRESETS przytrzymany SEL na brzmieniu z banku DX7 / CZ usuwa już tylko to jedno
 brzmienie (okno DELETE?), zamiast całego banku (DELETE BANK?); po ostatnim brzmieniu banku jego miejsce jest wolne. app.c (voice_del,
