@@ -290,7 +290,8 @@ arpeggiator's settings (chapter 7).
 - **ARP** (ARP = on / off; held = settings, in MULTI 0.7 s): five pages, ARP, MORE, CHORD, KEY and STEPS. 19 modes (UP, DOWN,
   UP-DOWN, AS PLAYED, RANDOM, CHORD, TURING, UP+8, CONVERGE, DIVERGE, PINKY, THUMB, WALK, DOWN-UP, UP&DOWN, DOWN&UP, CON-DIV,
   PINKY U-D, THUMB U-D); STEPS = REPEATS (each step 1-8 times), OFFSET, RETRIG; LATCH (SEL on MORE); CHORD = a chord on every key
-  (SEL = learn), KEY = scale (ALL / SNAP / LOCK, LIGHTS).
+  (SEL = learn; in MULTI every track keeps its own chord and VOICING, selected or not; SOLO has its own), KEY = scale
+  (ALL / SNAP / LOCK, LIGHTS).
 - MULTI: SEQ plays 4 tracks; in the SEQ pages SEL + OP1-OP4 picks the track you edit; notes of the other tracks appear as ghost
   notes. **SEQ held + OP1-OP4 = mute / unmute T1-T4** (from any screen). SEQ held alone = sequencer settings (scenes: HOME on HOME,
   chapter 8).

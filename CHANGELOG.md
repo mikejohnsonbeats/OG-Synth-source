@@ -1,5 +1,9 @@
 # Changelog
 
+## v2.1.1 — 2026-11-26
+Źródła MPL OG Synth 2.1.1 „Track chords”: w MULTI akord ARP > CHORD osobno na każdej ścieżce (gra też, gdy ścieżka nie jest wybrana;
+SOLO ma swój), ARP z akordem presetu bez wiszących nut po zmianie ścieżki — app.c; app.h (numer wersji); app/docs/MANUAL.md (CHORD).
+
 ## v2.1.0 — 2026-11-25
 Źródła MPL OG Synth 2.1.0 „Copies”: kopie lekkich efektów w łańcuchu, na ścieżkach MULTI i w MASTER (zapis w presetach USER,
 brzmieniach startowych i scenach), 256 presetów USER (przejście z 2.0.x przy pierwszym starcie),
