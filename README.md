@@ -37,7 +37,7 @@ ever down: the firmware package, an offline copy of the install page (runs on yo
   banks, SEQ patterns, WAVE tables and samples.
 - Updating from an older OG Synth keeps your sounds and settings. 2.1 moves your USER presets to a new layout the first time
   it starts; an older OG Synth put back after that doesn't see them, so keep the backup you made before updating.
-- Identity (what the FM-1 answers to installers): `FM-1_1313` and the version, 2.1.1 = `FM-1_1313020101`
+- Identity (what the FM-1 answers to installers): `FM-1_1313` and the version, 2.1.2 = `FM-1_1313020102`
   (`FM-1_11` and the version up to 1.6.2).
 
 ## What is here

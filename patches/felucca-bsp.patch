@@ -233,10 +233,94 @@ index c185578..c1f2dc5 100644
  {
      fl_saved_t s; int rc; uint32_t i;
 diff --git a/chip/usb.c b/chip/usb.c
-index bdf6769..6192e58 100644
+index bdf6769..32efeb3 100644
 --- a/chip/usb.c
 +++ b/chip/usb.c
-@@ -985,15 +985,39 @@ static void midi_in_event(uint32_t pkt)                 /* one USB-MIDI event pa
+@@ -207,6 +207,16 @@ static uint8_t sx_frame[640];
+ static uint32_t sx_pos;
+ static volatile uint32_t sx_frame_len;
+ static volatile uint8_t sx_ready, sx_collect, sx_busy;
++#ifdef FELUCCA_SX_BIG
++/* A firmware's buffer for a frame longer than sx_frame: FELUCCA_SX_BIG(&cap) names a function that lends it (and its size), or
++ * gives NULL while the firmware uses it; FELUCCA_SX_BIG(NULL) gives it back unfinished. Only a Yamaha 32-voice bulk dump
++ * (43 0n 09 ..., 4104 B) moves there from USB; the frame handed to the main loop then lies in it (sx_big; NULL: sx_frame), and the
++ * firmware takes the loan back with it. A MIDI IN on a jack may borrow it too (its own collector; sx_jack while it does). */
++uint8_t *FELUCCA_SX_BIG(uint32_t *cap);
++static uint8_t *sx_big;
++static uint32_t sx_big_cap;
++static volatile uint8_t sx_jack;
++#endif
+ #ifndef SXQ
+ #define SXQ 64u                                   /* a firmware may give it more (a long screen-reader message whole) */
+ #endif
+@@ -910,6 +920,12 @@ static void sysex_byte(uint8_t b)
+     if ((b & 0x80u) && b != 0xF0u && b != 0xF7u) {
+         usb.sx_on = 0;
+ #if FELUCCA_OTA
++#ifdef FELUCCA_SX_BIG
++        if (sx_collect && sx_big) {                     /* (the long buffer back, unfinished) */
++            FELUCCA_SX_BIG(0);
++            sx_big = 0;
++        }
++#endif
+         sx_collect = 0;
+ #endif
+         return;                                        /* another status aborts the unfinished frame */
+@@ -918,6 +934,12 @@ static void sysex_byte(uint8_t b)
+         usb.sx_on = 1;
+         usb.sx_len = 0;
+ #if FELUCCA_OTA
++#ifdef FELUCCA_SX_BIG
++        if (sx_collect && sx_big)                       /* (an unfinished long frame: its buffer back) */
++            FELUCCA_SX_BIG(0);
++        if (!sx_ready)
++            sx_big = 0;
++#endif
+         sx_collect = !sx_ready;
+         sx_pos = 0;
+ #endif
+@@ -928,8 +950,26 @@ static void sysex_byte(uint8_t b)
+     if (sx_collect && b != 0xF0 && b != 0xF7) {
+         if (sx_pos < sizeof sx_frame)
+             sx_frame[sx_pos++] = b;
+-        else
++#ifdef FELUCCA_SX_BIG
++        else if (sx_big && sx_pos < sx_big_cap)
++            sx_big[sx_pos++] = b;
++        else if (!sx_big && !sx_jack && sx_frame[0] == 0x43u && sx_frame[2] == 0x09u   /* Yamaha 32-voice bulk dump */
++                 && (sx_big = FELUCCA_SX_BIG(&sx_big_cap)) != 0) {
++            uint32_t i;
++            for (i = 0; i < sx_pos; i++)
++                sx_big[i] = sx_frame[i];
++            sx_big[sx_pos++] = b;
++        }
++#endif
++        else {
++#ifdef FELUCCA_SX_BIG
++            if (sx_big) {                               /* longer than the long buffer too */
++                FELUCCA_SX_BIG(0);
++                sx_big = 0;
++            }
++#endif
+             sx_collect = 0;                             /* too long: not ours */
++        }
+     }
+ #endif
+     if (usb.sx_len < sizeof usb.sysex)
+@@ -967,6 +1007,12 @@ static void midi_in_event(uint32_t pkt)                 /* one USB-MIDI event pa
+     if (st >= 0x80u && st < 0xF8u) {
+         usb.sx_on = 0;                                 /* channel/system common also ends SysEx */
+ #if FELUCCA_OTA
++#ifdef FELUCCA_SX_BIG
++        if (sx_collect && sx_big) {                     /* (2.1.2, przegląd) długa ramka przerwana: bufor wraca, jak w sysex_byte */
++            FELUCCA_SX_BIG(0);
++            sx_big = 0;
++        }
++#endif
+         sx_collect = 0;
+ #endif
+     }
+@@ -985,15 +1031,39 @@ static void midi_in_event(uint32_t pkt)                 /* one USB-MIDI event pa
   * 8 slots stay for TRS MIDI, which shares the ring and cannot wait (31250 baud: about 3 messages a half).
   * The update loader never drains the ring (it wants SysEx only): no back-pressure there. */
  #define EP1_ROOM (16u + 8u)
@@ -268,17 +352,17 @@ index bdf6769..6192e58 100644
 +            }
 +            ep1_wait = 0;
 +        }
-         midi_in_event((uint32_t)b[i] | (uint32_t)b[i + 1] << 8 | (uint32_t)b[i + 2] << 16 | (uint32_t)b[i + 3] << 24);
++        midi_in_event((uint32_t)b[i] | (uint32_t)b[i + 1] << 8 | (uint32_t)b[i + 2] << 16 | (uint32_t)b[i + 3] << 24);
 +    }
 +    ep1_at = 0;
 +#else
 +    for (; i + 3u < n; i += 4u)
-+        midi_in_event((uint32_t)b[i] | (uint32_t)b[i + 1] << 8 | (uint32_t)b[i + 2] << 16 | (uint32_t)b[i + 3] << 24);
+         midi_in_event((uint32_t)b[i] | (uint32_t)b[i + 1] << 8 | (uint32_t)b[i + 2] << 16 | (uint32_t)b[i + 3] << 24);
 +#endif
      return 1;
  }
  
-@@ -1004,6 +1028,9 @@ static void ep1_rx(void)                                /* leaves the packet (NA
+@@ -1004,6 +1074,9 @@ static void ep1_rx(void)                                /* leaves the packet (NA
      csr = sie_rd(S_RXCSR1) | (sie_rd(S_RXCSR2) << 8);
      if (!(csr & 1u)) {
          usb.rx_pend = 0;
@@ -288,8 +372,42 @@ index bdf6769..6192e58 100644
          return;
      }
      n = sie_rd(S_RXCOUNT1) | (sie_rd(S_RXCOUNT2) << 8);
-@@ -1545,6 +1572,9 @@ static void usb_poll(void)                              /* TIMER5 ISR, 2 kHz */
+@@ -1054,13 +1127,25 @@ static int ota_frame_get(const uint8_t **p, uint32_t *n)
+     if (!sx_ready)
+         return 0;
+     RING_PUBLISH();                                     /* read the frame only after the flag */
++#ifdef FELUCCA_SX_BIG
++    *p = sx_big ? sx_big : sx_frame;                    /* (a long one lies in the firmware's buffer) */
++#else
+     *p = sx_frame;
++#endif
+     *n = sx_frame_len;
+     return 1;
+ }
+ static void ota_frame_done(void)
+ {
+     RING_PUBLISH();                                     /* done with the frame before the ISR may refill it */
++#ifdef FELUCCA_SX_BIG
++    if (sx_big) {                                       /* (OGS 2.1.2, review) a frame in the firmware's buffer: the loan back with
++                                                         * any taker (the updater's ota_take too, not only the app), while sx_ready
++                                                         * still keeps the ISRs from borrowing it again */
++        FELUCCA_SX_BIG(0);
++        sx_big = 0;
++    }
++#endif
+     sx_ready = 0;
+ }
+ #endif
+@@ -1543,8 +1628,17 @@ static void usb_poll(void)                              /* TIMER5 ISR, 2 kHz */
+         usb.sx_on = 0;
+ #if FELUCCA_OTA
          so_r = so_w;
++#ifdef FELUCCA_SX_BIG
++        if (sx_collect && sx_big) {                     /* (2.1.2, przegląd) długa ramka ucięta resetem: bufor wraca */
++            FELUCCA_SX_BIG(0);
++            sx_big = 0;
++        }
++#endif
          sx_collect = 0;
  #endif
 +#if FELUCCA_OTA && !defined(FELUCCA_LOADER)

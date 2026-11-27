@@ -7,7 +7,11 @@
 #include "plat.h"
 
 #define APP_NAME "OG SYNTH"
-#define OGS_VERSION "2.1.1"         /* GLO > SYSTEM > INFO */
+#define OGS_VERSION "2.1.2"         /* GLO > SYSTEM > INFO */
+/* (2.1.2, miejsce −160 B) czułość klawiszy (fm1-base lib/touch.c, touch_config) liczy krzywą tą samą wspólną kopią fm_exp2f z ogs_fx.c
+ * (-O2, app.c ogs_m_*) zamiast drugiej, wklejonej — ta sama funkcja, ta sama arytmetyka */
+float ogs_m_exp2f(float x);
+#define TOUCH_EXP2F ogs_m_exp2f
 #define APP_SPLASH_RGB RGB(255, 154, 31)       /* #FF9A1F, pomarańczowy OG Deck */
 #define APP_SPLASH                       /* ekran startowy: logo OG Synth (app_splash, app.c) */
 #define APP_BLOCK 256u                   /* frames per audio block: 5.8 ms at 44.1 kHz */
@@ -45,6 +49,10 @@ void app_say(const char *a, const char *b);   /* a short message on the screen a
 /* OGS: SysEx z USB (główna pętla): pojedyncze brzmienie DX7, bank DX7 (z OG SYNTH MANAGER w kawałkach albo w całości) */
 #define APP_SYSEX
 int app_sysex(const uint8_t *p, uint32_t n);
+/* (2.1.2, P100) bufor syx_in na długi SysEx (bank DX7 w jednej ramce z USB) i dumpy Yamaha / Casio z gniazda TRS — fm1-base pożycza
+ * go z przerwania (felucca-bsp FELUCCA_SX_BIG, device/midi_uart.c); NULL: zajęty; app_sx_big(NULL): przerwany, wraca */
+#define APP_SX_BIG
+uint8_t *app_sx_big(uint32_t *cap);
 
 /* OGS: kopia zapasowa przez USB (fm1.toml backup = true; OG Synth Manager > BACKUP, tools/fm1_backup.py --magic OGS1):
  * ustawienia, brzmienia na start, presety USER, nadpisane fabryczne, spis banków DX7; (2.0.2) dane z obszaru danych (banki DX7

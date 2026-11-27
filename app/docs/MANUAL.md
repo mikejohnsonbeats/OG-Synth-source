@@ -14,7 +14,7 @@ engine has full parameter pages, its own INIT sound, factory presets (all but SA
 2. Buttons and screen
 3. Engines
 4. Modulation (LFO / ENV gesture, MOD page)
-5. Presets and saving
+5. Presets and saving (LAB, SysEx, OG SYNTH MANAGER)
 6. Effects and PERFORM
 7. Sequencer, arpeggiator, RACK
 8. MULTI: 4 tracks and MASTER
@@ -44,7 +44,7 @@ engine has full parameter pages, its own INIT sound, factory presets (all but SA
 | **SEL** | short = the page's switch (described in the header), confirms in windows; **held + black key** = page shortcuts (OP1-OP6, PITCH, GLOBAL = VOICE, MONO / POLY; on drum engines OP4 = RES ENV / RES LFO) |
 | **ALGO** | the parameters assigned in GLO > ALGO KNOB (up to 8; by default the engine's most important one); in the ENGINE window it jumps between engine groups |
 | **PRESETS** | the engine's presets, each with its own effects; **SEL held + PRESETS** = the next sound with the current effects; **HOME held + PRESETS = ALL PRESETS** (all engines) |
-| **SAVE** | lit when the sound has changed; saves as a new USER preset or overwrites; **on SEQ pages: the pattern** (chapter 7) |
+| **SAVE** | lit when the sound has changed; saves as a new USER preset or overwrites; **on SEQ pages: the pattern** (chapter 7); **SEL held + SAVE = LAB** (variations of the sound, chapter 5) |
 | **FX** | effects chain (right on press); in MULTI it starts with MASTER and the reverb / delay sends, and FX held = PERFORM (chapter 6) |
 | **GLO** | global settings; a second GLO returns to where you came from |
 | **OCT- / OCT+** | octave -3..+3; on a drum engine it is **DRUM TUNE** in semitones (the keys stay where they are), kept apart from the keyboard octave: OCT on a synth never retunes the drums |
@@ -70,6 +70,12 @@ Every engine with GLIDE has the same **VOICE** page: K1 MODE, K4 GLIDE, LEGATO u
 only a key pressed while another is still held glides); FM6 also FOLLOW. VEL > AMP is in the MORE of the AMP ENV page (on WAVE:
 VOICE MORE K3).
 
+**Polyphony** (2.1.2, for the FM-1 as a MIDI module): **8 voices** in FM6, WAVE, PHASE, VCO, SVF, DCO, ALPHA, LPG, 8BIT, PHYS,
+FORMANT and SAMPLE (VOICES lowers it; UNISON takes several voices per note). **MINI**: MONO plays one note, PARA up to 4 (one
+oscillator each, one filter). The drum engines (88, 99, LN, MORPH, DUAL) play each of their sounds on its own. In MULTI, T2-T4
+hold 12 notes together at most (T1 has no limit), and when the CPU is full a new note replaces the oldest held one, so very heavy
+sounds may play fewer.
+
 **VA (analog)**
 - **MINI**: 4 oscillators, mixer with FEEDBACK, 24 dB ladder filter (LADDER 24), DRIVE, chorus, MONO / PARA (in PARA all four
   oscillators play: turn up OSC 4's level too). DRIVE: DISTORT 0-10 fades the drive in smoothly. TUNE page at the end of EDIT
@@ -88,6 +94,7 @@ VOICE MORE K3).
   GLIDE MODE ALWAYS / LEGATO / FOLLOW (VOICE MORE K4). FILTER shortcut: SEL + GLOBAL (VOICE > UNISON > FILTER > CONTROL > VINTAGE).
   **BRIGHT** (ALGO page K4, the level of all modulators) -100..+100: -50..+50 sounds as before, above +50 much brighter.
   **AMP ENV** (first ENV page): one envelope for the whole sound, -100..100, moves all carrier envelopes at once.
+  **GLO > PLAY > FM ENGINE: CLASSIC** (2.1.2) turns FM6 into plain six-operator FM, without these extras (chapter 9).
 - **PHASE**: phase distortion, 8-segment envelopes, CZ sound import (.syx).
 - **WAVE**: modern wavetable: 2 oscillators, each with a WARP (30 modes) and a WARP 2 (21 modes): SYNC WIN, ASYM +, ASYM -, FLIP,
   QUANTIZE and REMAP in both, FM / RING / AM from the SUB or the NOISE in WARP. Sub, noise, unison, 2 filters, 4 envelopes with
@@ -175,6 +182,27 @@ arpeggiator's settings (chapter 7).
   (12 characters: **SELECT = cursor**, **K1 = letter**, OCT- / OCT+ = cursor too, SEL saves, HOME cancels; turning the first letter
   of a suggested USER nn clears the rest of it, other letters keep the name). On FM6 the window also has **SEND AS DX7** (the sound
   goes out over USB as a single DX7 voice).
+- **LAB** (2.1.2): new variations of the sound you're on. **SEL held + SAVE** on the main screen or an engine page opens it: any
+  engine (on a drum engine the whole kit), in MULTI the selected track (on the main screen press SAVE before SEL opens the engine
+  list). The sound you had when you opened it is **A**, and every roll starts from A again. The knobs set up the roll; **SEL = ROLL**,
+  **SEL held = BACK TO A**, **HOME** = back to the page you came from with the sound as it is now: SAVE lights, save it as usual (SAVE
+  does nothing inside LAB). To roll on from a variation, leave and open LAB again: it becomes the new A. A roll while notes play comes
+  in like a preset change, without a click. LAB never touches how the sound plays: MONO / POLY, VOICES, UNISON, GLIDE, BEND,
+  LEGATO, PRIORITY. Another preset or engine (PRESETS, Program Change, MIDI) closes LAB, like leaving it. The LAB knobs keep
+  their settings until power-off. On FM6 with **GLO > PLAY > FM ENGINE: CLASSIC** LAB doesn't roll OG Synth's extras either: they
+  stay as in A. SELECT goes between its two pages (1/2 and 2/2 in the corner):
+  - **LAB page**: K1 **AMOUNT** (how far the parameters move, 0-100; 30 to begin with), K2 **SHARE** (how many of them change, in %;
+    50), K3 **PRESET B** (another preset of the same engine to blend in; it starts as A), K4 **MIX** (how much of B goes into a roll;
+    0; at 100 the free parameters start from B).
+  - **LOCKS** (SELECT): K1 **TYPES** (every list: ALGO, waves, tables, filter types, modes), K2 **LEVELS** (names with LEVEL or VOL),
+    K3 **PITCH** (names with TUNE, FINE, COARSE, RATIO, DETUNE, FREQ, OCT, SEMI, PITCH or TRANSPOSE), K4 **RES**. **LOCK** = they stay
+    as in A (MIX doesn't move them either); **FREE** = they roll. To begin with TYPES and PITCH are locked, LEVELS and RES free.
+- **SysEx from other gear and apps** (2.1.2; Dexed, KQ Dixie, a DX7, a CZ, over USB or into the **TRS MIDI IN**): a single DX7
+  voice plays at once in FM6 **with its name** (HOME, SAVE suggests it; until another FM6 preset replaces that sound or you save it
+  — after a power-off the sound stays, the name doesn't, so save it), a CZ tone plays at once in PHASE (CZ data has no names: INIT).
+  In MULTI they go to the FM6 / PHASE track; with none on a track nothing changes (**NO FM6 TRACK** / **NO PHASE TRACK**). A whole **DX7
+  bank (32 voices)** opens the DX7 BANK window (import) like one from the Manager: SELECT = slot 1-8, SEL saves, HOME cancels. From the jack
+  only Yamaha and Casio dumps are taken (nothing else in SysEx).
 - **Browsing** (PRESETS, ALL PRESETS, ENGINE window, MULTI tracks): a sound comes with its own effects (the chain saved with
   it, the built-in chain of a factory preset that has one, otherwise an empty chain). **Hold SEL while you turn** to keep the
   current effects and hear the next sound through them: the preset itself doesn't change, SAVE lights.
@@ -303,13 +331,21 @@ arpeggiator's settings (chapter 7).
 ## 8. MULTI: 4 tracks and MASTER
 
 - To enter: **hold HOME** (hold it again to go back to SOLO). The new mode appears on screen for a moment.
+- **Your SOLO sound and MULTI** (2.1.2): a MULTI track with the same engine plays the same sound as SOLO (one sound per engine;
+  a second track with that engine has its own). **GLO > PLAY > SOLO SOUND** decides what happens when you switch: **TRACK**
+  (as before) — back in SOLO you play the track you had selected in MULTI; **KEEP** — back in SOLO you get your own SOLO sound;
+  **CARRY** — entering MULTI selects the track that plays your SOLO sound, or puts its engine on the selected track (on an
+  empty or the first fitting T2-T4 if the selected one can't take it), and back in SOLO you play the selected track. In every
+  mode the track's engine list (hold SEL on the main screen) has a **SOLO** row with your SOLO engine, right under EMPTY: SEL puts it on this track
+  (or jumps to the track that already plays it).
 - Tracks: **T1** plays a drum engine (88, 99, LN, MORPH or DUAL) or nothing; T2-T4 play any engine, drums too. An engine plays on
   two tracks at most, each with its own sound, effects and preset (the second one starts from INIT); WAVE and MINI play on one
   track only. WAVE doesn't play next to FM6 or MINI. An engine that can't play next to the others appears in red with the reason,
   and the track keeps its current engine. MIDI: channels 1-4 = T1-T4.
 - **Notes**: drum hits are never cut. T2-T4 share up to 12 held notes, fewer with heavy engines (with nothing else playing: FM6 11,
   two FM6 9, PHASE 7); MINI, a drum engine on T2-T4 and every playing track effect take a fixed share. Past the limit the oldest
-  note is released, on layered tracks first.
+  note is released, on layered tracks first. The notes of a chord that start together all play, on the selected track as on the
+  others (2.1.2; up to 2.1.1, when the processor was busy, the selected track could keep just one note of the chord).
 - **HOME is the main screen, it works like the FX page**: SELECT = track (like a slot), **SEL + ALGO = the track's engine** (only
   engines that can play; ALGO alone = ALGO KNOB as in SOLO, on an empty track the engine), **K1 VOL, K2 PAN, K3 REVERB send,
   K4 DELAY send, SEL = MUTE**. The sends stay when you change the track's preset or engine (GLO > AUDIO > FX SEND: KEEP; PRESET
@@ -357,8 +393,15 @@ arpeggiator's settings (chapter 7).
 
 ## 9. GLO settings
 
-PLAY (tuning, transpose, velocity, FIXED VEL, TUNE KNOB), MIDI (chapter below), AUDIO, DISPLAY, ALGO KNOB, SYSTEM (INFO, FACTORY
+PLAY (tuning, transpose, velocity, FIXED VEL, TUNE KNOB, SOLO SOUND: chapter 8, FM ENGINE), MIDI (chapter below), AUDIO, DISPLAY, ALGO KNOB, SYSTEM (INFO, FACTORY
 RESET, BACKUP, CALIBRATION, HINTS, UPDATE MODE).
+
+**FM ENGINE** (PLAY, 2.1.2): **MODERN** (the default) is FM6 with everything OG Synth adds; **CLASSIC** makes it plain six-operator
+FM, as on a DX7: operators play sine waves only; BRIGHT, OP VOLUME, VINTAGE, UNISON (with WIDTH), FILTER, FILTER ENV, the mod
+matrix and AMP ENV are off; LFO RATE goes up to 99 and LFO MODE has no SYNC. Their pages and knobs go (SEL + GLOBAL: VOICE > CONTROL,
+F#5 does nothing on FM6, gestures without the matrix: LFO with an operator's LEVEL or tuning still sets AMP SENS or LFO > PITCH,
+as on a DX7) and LAB doesn't roll them, but their settings stay in the sound and come back with MODERN. One switch for all of FM6,
+MULTI tracks too. The Manager's preset editor has the same switch for its own emulator (it doesn't change the FM-1's setting).
 
 **AUDIO**: SPEAKER EQ, 2ND CORE, MULTI MASTER (OFF, or LIMIT: one more limiter on the MULTI mix), FX SEND (KEEP / PRESET, chapter 8)
 and **LIMIT** (-12..0 dB, -2 dB by default): the output stays clean, a limiter keeps the loudest moments under this threshold.

@@ -1,5 +1,11 @@
 # Changelog
 
+## v2.1.2 — 2026-11-27
+Źródła MPL OG Synth 2.1.2 „Full chords”: wybrana ścieżka MULTI gra cały akord, LAB (SEL + SAVE: wariacje brzmienia), GLO > PLAY >
+FM ENGINE (MODERN / CLASSIC), GLO > PLAY > SOLO SOUND, podpowiedzi od razu po naciśnięciu, nazwa brzmienia DX7 z SysEx, bank DX7
+w jednej wiadomości SysEx i SysEx z gniazda TRS MIDI IN — app.c; app.h (numer wersji); ogs_lists.h; app/docs/MANUAL.md;
+app/web/editor.js, manager.html (Manager: LAB, FM ENGINE, port FM1); patches/fm1-base.patch, felucca-bsp.patch (długi SysEx, TRS).
+
 ## v2.1.1 — 2026-11-26
 Źródła MPL OG Synth 2.1.1 „Track chords”: w MULTI akord ARP > CHORD osobno na każdej ścieżce (gra też, gdy ścieżka nie jest wybrana;
 SOLO ma swój), ARP z akordem presetu bez wiszących nut po zmianie ścieżki — app.c; app.h (numer wersji); app/docs/MANUAL.md (CHORD).

@@ -96,6 +96,10 @@ void app_render(int32_t *lr, uint32_t n, uint32_t master_q12)
             sq_render(e, bl, br, c);         /* silnik; SEQ i ARP dzielą blok w chwilach nut */
             if (mt_on && mt_ft >= 0)
                 mt_tt[mt_ft] = plat_ticks24() - tf;   /* (2.1.0) czas wybranej ścieżki (mt_ncost) */
+#ifdef PLAT_WEB
+            if (mt_on && mt_ft >= 0 && web_ftt)  /* (2.1.2) testy: udawany (zegar symulatora stoi: 0) */
+                mt_tt[mt_ft] = web_ftt * OGS_TPCT;
+#endif
         }
 #if OGS_BLKPROF
         bp_mark(1);
@@ -358,8 +362,7 @@ OGS_UI void app_say(const char *a, const char *b)
     ui.msg_until = plat_ms() + 1300u;
     ui.redraw = 1;
     if (ann_on()) {
-        t[0] = 0;
-        text_cat(t, ui.msg[0]);
+        text_cpy(t, ui.msg[0]);
         if (ui.msg[1][0]) {
             text_cat(t, " ");
             text_cat(t, ui.msg[1]);
@@ -514,8 +517,7 @@ OGS_UI static void input(void)
             int32_t L = set.eng == ENG_MORPH ? mp_select(note) : set.eng == ENG_DUAL ? du_select(note) : dm_select(note);
             if (L >= 0) {
                 char t[12] = "SOUND ", n[4];
-                int_text(L + 1, n, 0);
-                text_cat(t, n);
+                int_cat(t, L + 1, 0);
                 app_say(t, "SELECTED");
             }
             ui.redraw = 1;
@@ -555,11 +557,13 @@ OGS_UI static void input(void)
         uint32_t bit = 1u << B_SEL;
         if ((btn & bit) && !(ui.btn & bit)) {
             ui.browse = 0;
-            if (ui.page == V_ALLP || ui.page == V_SCN || ui.page == V_LRN || ui.page == V_ENGP) {   /* (v1.0.2) ALL PRESETS: OK przy
+            if (ui.page == V_ALLP || ui.page == V_SCN || ui.page == V_LRN || ui.page == V_ENGP || ui.page == V_LAB) {   /* (v1.0.2) ALL PRESETS: OK przy
                                                             * puszczeniu, trzymany = usuń USER; w oknie DELETE?: tak; (v1.1.2) lista scen tak
                                                             * samo; (v1.3.0) MIDI LEARN; (1.8.0, pkt 35) okno ENGINE: OK przy puszczeniu
                                                             * (SEL trzymany + gałka: efekty zostają, fx_keep) */
-                if (ui.allp_del) {
+                if (ui.allp_del && (ui.page == V_ALLP || ui.page == V_SCN)) {   /* (2.1.2, przegląd) DELETE? tylko w swoim oknie: okno
+                                                            * IMPORT (bank z SysEx) potrafi wejść w trakcie — pierwszy SEL w LAB / MIDI LEARN
+                                                            * kasował preset USER bez pytania */
                     if (ui.page == V_SCN)
                         scn_del();
                     else if (ui.allp_del == 2)   /* (2.0.2) brzmienie z banku DX7 / CZ */
@@ -567,6 +571,7 @@ OGS_UI static void input(void)
                     else
                         user_del();
                 } else {
+                    ui.allp_del = 0;
                     ui.allp_sel = 1;
                     ui.sel_at = plat_ms();
                 }
@@ -583,7 +588,7 @@ OGS_UI static void input(void)
         } else if (!(btn & bit) && (ui.btn & bit) && ui.allp_sel) {
             const int ok = ui.allp_sel == 1; /* (1.8.0, pkt 35) 2: SEL + gałka (efekty zostały): puszczenie nic nie robi */
             ui.allp_sel = 0;                 /* (v1.0.2) krótko (albo trzymany na nie-USER): OK; trzymany na USER: okno DELETE? */
-            if (ok && (ui.page == V_ALLP || ui.page == V_SCN || ui.page == V_LRN || ui.page == V_ENGP))
+            if (ok && (ui.page == V_ALLP || ui.page == V_SCN || ui.page == V_LRN || ui.page == V_ENGP || ui.page == V_LAB))
                 save_ok();
         } else if (!(btn & bit) && (ui.btn & bit) && ui.sel_hold) {
             ui.sel_hold = 0;
@@ -616,7 +621,14 @@ OGS_UI static void input(void)
                 octave_step(k == B_OCTUP ? 1 : -1);
             }
             break;
-        case B_SAVE: save_key(); break;
+        case B_SAVE:                         /* (2.1.2, P102) SEL + SAVE na HOME / stronie silnika: LAB */
+            if (ui.sel_hold && ui.page >= V_HOME && set.eng < NENG && !(mt_ui() && glob.g[G_MT0 + mt_at_cur()] >= NENG)) {
+                ui.sel_used = 1;
+                lab_open();
+            } else {
+                save_key();
+            }
+            break;
         case B_EDIT:
         case B_ENV:
         case B_LFO:
@@ -797,6 +809,12 @@ OGS_UI static void input(void)
                 mtl_move(e);
                 continue;
             }
+            if (ui.page == V_LAB) {          /* (2.1.2) LAB: strony LAB / LOCKS / (FM6) DX7 */
+                lab.pg = (uint8_t)clamp((int32_t)lab.pg + (e > 0 ? 1 : -1), 0, 1);
+                ui.knob = -1;
+                ui.redraw = 1;
+                continue;
+            }
             if (ui.page == V_SCN) {          /* (v0.86) lista scen */
                 ui.scn_cur = (uint8_t)clamp((int32_t)ui.scn_cur + (e > 0 ? 1 : -1), 0, SCN_N - 1);
                 ui.redraw = 1;
@@ -900,8 +918,7 @@ OGS_UI static void input(void)
                 ui.sq_moved = plat_ms();
                 int_text(pg * 16 + 1, t, 0);
                 text_cat(t, "-");
-                int_text(pg * 16 + 16, n, 0);
-                text_cat(t, n);
+                int_cat(t, pg * 16 + 16, 0);
                 app_say("STEPS", t);
                 ui.redraw = 1;
             } else if (ui.page == V_SEQ && sq_roll()) {   /* NOTES (i AUTO): ALGO = GRID (jak snap w FL); (1.7.2) kolejność 1/1, 1/2,
@@ -966,21 +983,14 @@ OGS_UI static void input(void)
         for (k = 0; k < MT_N; k++)
             if (glob.g[G_MT0 + k] < NENG)
                 shown |= 1u << LABEL_KEY[K_OP1 + k];
-    {                                            /* (v0.90) SEL trzymany 0,3 s: podpowiedzi (NOTES: pasek gałek, OP1-4) */
+    {                                            /* (2.1.2) podpowiedzi SEL / ARP od razu (naciśnięcie = nowa klatka, jak każdy przycisk); po
+                                                  * 0,4 s zmienia się już tylko widok czterech VOL na HOME w MULTI (mt_vl). Do 2.1.1: podpowiedzi
+                                                  * po 0,4 s (stąd tu SEL, okna ALL PRESETS / ENGINE, ARP; i nowa klatka przy zapaleniu skrótów) */
         static uint8_t selh_was;
-        const uint8_t h = (uint8_t)(((ui.sel_hold || ui.allp_sel) && plat_ms() - ui.sel_at >= SEL_SHOW_MS) | arp_lay() << 1);   /* (1.8.0)
-                                                                                     * też okna ALL PRESETS / ENGINE (podpowiedź SEL + gałka);
-                                                                                     * ARP trzymany: KEYS LAYER */
+        const uint8_t h = (uint8_t)mt_vl();
         if (h != selh_was) {
             selh_was = h;
             ui.redraw = 1;
-        }
-    }
-    {
-        static uint8_t shown_was;                /* podpowiedź strony: opis klawiszy, gdy świecą */
-        if ((shown != 0u) != shown_was) {
-            shown_was = shown != 0u;
-            ui.redraw |= (ui.page >= 0 || ui.page == V_HOME) && hints();
         }
     }
     {
@@ -1087,11 +1097,10 @@ static void speak(void)
 {
     if (ann_on() && ann_where()) {
         char t[64], nm[24];
-        t[0] = 0;
-        text_cat(t, "OG SYNTH ");
+        text_cpy(t, "OG SYNTH ");
         text_cat(t, E->name);
         text_cat(t, ". ");
-        preset_name(CUR, nm);
+        cur_name(nm);
         text_cat(t, nm);
         ann_say(t, 0, ANN_NOW);
     }
@@ -1226,6 +1235,25 @@ OGS_UI void app_frame(void)
         ui.allp_del = (uint8_t)(ui.page == V_ALLP && bank_of(CUR) >= 0 ? 2 : 1);
         ui.redraw = 1;
     }
+    if (ui.allp_sel == 1 && ui.page == V_LAB && now - ui.sel_at >= SEL_EQ_MS) {   /* (2.1.2) LAB: SEL trzymany = A z powrotem */
+        ui.allp_sel = 2;
+        lab_go(LO_BACK);
+        app_say("LAB", "BACK TO A");
+    }
+    dx_cl = (uint8_t)(GV(G_FMENG) != 0);  /* (2.1.2) FM ENGINE: CLASSIC (silnik i ekran FM6) */
+    if (syx_ready && ui.page != V_IMPORT) {   /* (2.1.2, przegląd) okno IMPORT znikło inaczej niż HOME / SEL (strona szybka, REC, SEQ):
+                                              * bank już nie czeka (jak CANCELLED) — inaczej import / kopia / dumpy odmawiałyby do wyłączenia */
+        syx_ready = 0;
+        cz_in_mask = 0;
+    }
+    if (ui.page == V_LAB && (set.eng != lab.eng || CUR != lab.a || imp_lab)) {   /* (2.1.2) silnik albo preset zmieniony (MIDI, SysEx, PRESETS),
+                                                                         * (przegląd) brzmienie z SysEx: LAB zamknięty (A = brzmienie z wejścia) */
+        ui.page = V_HOME;
+        ui.redraw = 1;
+    }
+    imp_lab = 0;
+    if (lab.op && (dk_quiet || !eng_sounding()))   /* (2.1.2) LAB: zmiana przy ciszy */
+        lab_do();
     if (ui.allp_sel && ui.page == V_LRN && !ui.lr_on && now - ui.sel_at >= SEL_EQ_MS) {   /* (v1.3.0) MIDI LEARN: SEL trzymany = wyczyść */
         ui.allp_sel = 0;
         lr_clear();
