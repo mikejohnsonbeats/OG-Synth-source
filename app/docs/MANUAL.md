@@ -240,11 +240,11 @@ arpeggiator's settings (chapter 7).
 - **Memory**: the effects share one memory. When it runs out, an effect plays in 16 bits: its name, its slot and a DELAY TIME or
   STUTTER DIV past full quality turn **pale orange** (FX MEMORY FULL: ORANGE FX = 16-BIT). **Red** = the effect doesn't play,
   with the reason: NO MEMORY, NO CPU or SOLO ONLY (MULTI, chapter 8).
-- SATURATION TYPE **OG** = the output stage used up to 1.7.0, as an effect: DRIVE 0.0DB + TONE OFF + MIX 127 + LEVEL 0 sounds
+- SATURATION TYPE **OG** = the output stage used up to 1.7.0, as an effect: DRIVE 0.0DB + TONE OFF + MIX 100 + LEVEL 0 sounds
   exactly like it (put it last in the chain; switching TYPE to OG sets an untouched DRIVE / TONE to these values). LO-FI MORE: SATURATE, TONE, LEVEL (a new LO-FI starts as loud as the dry sound).
   EQ: 4 bands, GAIN -24..+24 dB, LOW CUT / HIGH CUT across 20 Hz - 20 kHz (an EQ from older presets switches to these ranges the
   first time you turn a GAIN or CUT knob, without a jump), SEL held + knob = that band's Q. Effect LFO RATE goes up to about
-  100 Hz; FREQ SHIFT has SYNC on MORE K4. CHORUS FEEDBACK no longer runs away by itself (same sound up to 95, above that it rings
+  100 Hz; FREQ SHIFT has SYNC on MORE K4. CHORUS FEEDBACK no longer runs away by itself (same sound up to 75, above that it rings
   but fades).
 - **OCTAVER TYPE** (MORE K1): **PEDAL** (as before: follows one note, like a pedal) or **VOICE**: the engine plays the two lowest
   notes again an octave (OCT -1) and two octaves (OCT -2) lower, with the same filters and LFO, no delay. Only free voices are

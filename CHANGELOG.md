@@ -1,5 +1,11 @@
 # Changelog
 
+## v2.1.3 — 2026-11-27
+Źródła MPL OG Synth 2.1.3 „Long names”: na ekranie wszędzie 0..100 (gałki efektów i CUTOFF MINI pokazywały 0..127), w ALL PRESETS
+FORMNT zamiast FORMANT (nie wchodzi pod nazwę presetu), SAVE > OVERWRITE na presecie fabrycznym z nazwą dłuższą niż 12 znaków nie
+pisze już za pamięć nazwy — poprawki w części własnej, której tu nie ma; tu app.h (numer wersji) i app/docs/MANUAL.md (SATURATION OG
+MIX 100, CHORUS FEEDBACK do 75 — liczby jak teraz na ekranie).
+
 ## v2.1.2 — 2026-11-27
 Źródła MPL OG Synth 2.1.2 „Full chords”: wybrana ścieżka MULTI gra cały akord, LAB (SEL + SAVE: wariacje brzmienia), GLO > PLAY >
 FM ENGINE (MODERN / CLASSIC), GLO > PLAY > SOLO SOUND, podpowiedzi od razu po naciśnięciu, nazwa brzmienia DX7 z SysEx, bank DX7

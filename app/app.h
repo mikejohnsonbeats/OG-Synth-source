@@ -7,7 +7,7 @@
 #include "plat.h"
 
 #define APP_NAME "OG SYNTH"
-#define OGS_VERSION "2.1.2"         /* GLO > SYSTEM > INFO */
+#define OGS_VERSION "2.1.3"         /* GLO > SYSTEM > INFO */
 /* (2.1.2, miejsce −160 B) czułość klawiszy (fm1-base lib/touch.c, touch_config) liczy krzywą tą samą wspólną kopią fm_exp2f z ogs_fx.c
  * (-O2, app.c ogs_m_*) zamiast drugiej, wklejonej — ta sama funkcja, ta sama arytmetyka */
 float ogs_m_exp2f(float x);
